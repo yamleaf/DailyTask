@@ -28,10 +28,19 @@ object Constant {
     const val RANDOM_TIME_KEY = "RANDOM_TIME_KEY" // 随机时间(Boolean)
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY" // 省电模式(Boolean)
+    /** 强制伪息屏：离开 App 超过 60s 主动盖黑屏蒙层 */
+    const val FORCE_PSEUDO_MASK_KEY = "FORCE_PSEUDO_MASK_KEY" // Boolean
+
+    // Intent extra：远程息屏/亮屏（1=息屏，0=亮屏）
+    const val EXTRA_MASK_COMMAND = "EXTRA_MASK_COMMAND"
 
     // 不导出的sp缓存
     const val LAST_RESET_DATE_KEY = "LAST_RESET_DATE_KEY"
     const val RESULT_SOURCE_KEY = "RESULT_SOURCE_KEY"
+    /** 无障碍反馈模式：0=截屏反馈, 1=文本反馈 */
+    const val ACCESSIBILITY_FEEDBACK_MODE_KEY = "ACCESSIBILITY_FEEDBACK_MODE_KEY"
+    /** 电量低于 30% 是否已提醒过（回升到 30% 以上后清零） */
+    const val LOW_BATTERY_NOTIFIED_KEY = "LOW_BATTERY_NOTIFIED_KEY"
 
     // ============================================================
     // ConfigStore 键
@@ -78,6 +87,16 @@ object Constant {
             2 -> FEI_SHU
             3 -> MOBILE_M3
             else -> DING_DING
+        }
+    }
+
+    fun getAppName(packageName: String): String {
+        return when (packageName) {
+            DING_DING -> "钉钉"
+            WEWORK -> "企业微信"
+            FEI_SHU -> "飞书"
+            MOBILE_M3 -> "移动办公M3"
+            else -> packageName
         }
     }
 }

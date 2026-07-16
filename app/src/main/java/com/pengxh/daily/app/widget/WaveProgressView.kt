@@ -80,6 +80,7 @@ class WaveProgressView @JvmOverloads constructor(
 
     // 动画相关
     private var waveAnimator: ValueAnimator? = null
+    private var progressAnimator: ValueAnimator? = null
     private var waveOffset = 0f  // 波浪相位偏移
 
     // 进度相关
@@ -124,7 +125,13 @@ class WaveProgressView @JvmOverloads constructor(
 
         updateWaterLevel()
 
-        restartWaveAnimation()
+        // 尺寸变化后仅重建动画实例；是否播放由外部控制
+        val wasRunning = waveAnimator?.isStarted == true
+        waveAnimator?.cancel()
+        waveAnimator = null
+        if (wasRunning) {
+            startWaveAnimation()
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -214,18 +221,24 @@ class WaveProgressView @JvmOverloads constructor(
         this.targetProgress = targetProgress.coerceIn(0, 100).toFloat()
 
         // 使用属性动画平滑过渡
-        val animator = ValueAnimator.ofFloat(progress, this.targetProgress)
-        animator.duration = 1500L
-        animator.addUpdateListener { animation ->
-            progress = animation.animatedValue as Float
-            updateWaterLevel()
-            invalidate()
+        progressAnimator?.cancel()
+        progressAnimator = ValueAnimator.ofFloat(progress, this.targetProgress).apply {
+            duration = 1500L
+            addUpdateListener { animation ->
+                progress = animation.animatedValue as Float
+                updateWaterLevel()
+                invalidate()
+            }
+            start()
         }
-        animator.start()
     }
 
     fun startWaveAnimation() {
         if (waveLength == 0f) {
+            return
+        }
+
+        if (waveAnimator?.isStarted == true) {
             return
         }
 
@@ -259,10 +272,11 @@ class WaveProgressView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        startWaveAnimation()
+        // 由外部按省电模式决定是否开启动画，避免默认常驻 60fps
     }
 
     override fun onDetachedFromWindow() {
+        progressAnimator?.cancel()
         stopWaveAnimation()
         super.onDetachedFromWindow()
     }

@@ -13,9 +13,11 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import com.pengxh.daily.app.databinding.WindowFloatingBinding
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.MessageDispatcher
+import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,8 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     private var initialTouchX = 0f
     private var initialTouchY = 0f
     private var memoryMonitorJob: Job? = null
+    private var lastMemoryAlertAt = 0L
+    private var floatingVisible = true
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
@@ -87,16 +91,25 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
         launch {
             FloatingWindowController.visibility.collect { visible ->
+                floatingVisible = visible
                 if (visible) {
                     binding.root.alpha = 1.0f
                     val time = SaveKeyValues.loadInt(
                         Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
                     )
                     binding.timeView.text = "${time}s"
+                    applyWaveAnimation()
                 } else {
                     binding.root.alpha = 0.0f
                     binding.timeView.text = "0s"
+                    binding.waveProgressView.stopWaveAnimation()
                 }
+            }
+        }
+        launch {
+            AppRuntimeConfig.powerSaveMode.collect {
+                restartMemoryMonitoring()
+                applyWaveAnimation()
             }
         }
 
@@ -107,15 +120,25 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         // 移动悬浮窗
         onDragMove()
 
-        startMemoryMonitoring()
+        restartMemoryMonitoring()
+        applyWaveAnimation()
     }
 
-    private fun startMemoryMonitoring() {
-        val mode = SaveKeyValues.loadBoolean(Constant.POWER_SAVE_MODE_KEY, false)
-        val interval = if (mode) {
+    private fun applyWaveAnimation() {
+        if (!::binding.isInitialized) return
+        if (floatingVisible && !AppRuntimeConfig.isPowerSaveMode()) {
+            binding.waveProgressView.startWaveAnimation()
+        } else {
+            binding.waveProgressView.stopWaveAnimation()
+        }
+    }
+
+    private fun restartMemoryMonitoring() {
+        memoryMonitorJob?.cancel()
+        val interval = if (AppRuntimeConfig.isPowerSaveMode()) {
             60_000L
         } else {
-            1_000L
+            30_000L
         }
         memoryMonitorJob = launch {
             // 立即更新一次
@@ -141,7 +164,15 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             withContext(Dispatchers.Main) {
                 binding.waveProgressView.setProgress(usagePercent)
                 if (usagePercent >= 90) {
-                    MessageDispatcher.sendMessage("内存使用预警", "当前内存使用已超过90%，请关注设备运行情况")
+                    val now = System.currentTimeMillis()
+                    if (now - lastMemoryAlertAt >= 30 * 60 * 1000L) {
+                        lastMemoryAlertAt = now
+                        MessageDispatcher.sendMessage(
+                            "内存使用预警",
+                            StatusReporter.buildMemoryAlertHtml(),
+                            appendMeta = false
+                        )
+                    }
                 }
             }
         }

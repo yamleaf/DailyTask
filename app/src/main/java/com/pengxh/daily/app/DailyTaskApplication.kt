@@ -4,7 +4,9 @@ import android.app.Application
 import android.os.Environment
 import androidx.room.Room.databaseBuilder
 import com.pengxh.daily.app.sqlite.DailyTaskDataBase
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
+import com.pengxh.daily.app.utils.EmailManager
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.kt.lite.utils.SaveKeyValues
@@ -35,7 +37,9 @@ class DailyTaskApplication : Application() {
         super.onCreate()
         initApplication(this)
         SaveKeyValues.initialize(this)
+        AppRuntimeConfig.refreshFromStore()
         MessageDispatcher.initialize(this)
+        EmailManager.initialize(this)
         LogFileManager.initLogFile(this)
 
         // 初始化配置文件

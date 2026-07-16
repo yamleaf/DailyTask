@@ -91,6 +91,7 @@ class TaskDataManager() {
         SaveKeyValues.saveBoolean(Constant.RANDOM_TIME_KEY, config.isRandomTime)
         SaveKeyValues.saveBoolean(Constant.SKIP_HOLIDAY_KEY, config.isSkipHoliday)
         SaveKeyValues.saveBoolean(Constant.POWER_SAVE_MODE_KEY, config.isSavePower)
+        AppRuntimeConfig.refreshFromStore()
 
         //
         val email = config.emailConfig
