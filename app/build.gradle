@@ -88,9 +88,9 @@ android {
         viewBinding true
     }
 
-    applicationVariants.configureEach {
-        outputs.configureEach {
-            outputFileName = "DT_${getBuildDate()}_${android.defaultConfig.versionName}.apk"
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach {
+            outputFileName = "dailyTask_v${android.defaultConfig.versionName}_${variant.buildType.name}.apk"
         }
     }
 }
