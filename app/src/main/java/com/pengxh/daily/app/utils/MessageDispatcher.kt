@@ -13,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 统一消息分发器
@@ -25,6 +26,10 @@ object MessageDispatcher {
     private val kTag = "MessageDispatcher"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 相同 title+正文 在窗口内不重复发送 */
+    private const val DEDUP_WINDOW_MS = 90_000L
+    private val recentSendAt = ConcurrentHashMap<String, Long>()
+
     private lateinit var batteryManager: BatteryManager
 
     fun initialize(context: Context) {
@@ -35,35 +40,54 @@ object MessageDispatcher {
      * 发送文本消息，根据用户配置自动选择邮件或企业微信渠道
      *
      * @param channelOverride 渠道覆盖：null=走用户配置，0=强制邮箱，1=强制企微
+     * @param force 为 true 时跳过去重（如用户主动状态查询）
+     * @param appendMeta 为 false 时不再追加执行模式/日期/电量等（正文已自带时用）
      */
     fun sendMessage(
         title: String,
         content: String,
         channelOverride: Int? = null,
+        force: Boolean = false,
+        appendMeta: Boolean = true,
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null
     ) {
+        if (!force && shouldSkipDuplicate(title, content)) {
+            Log.d(kTag, "跳过短时间内重复消息: $title")
+            return
+        }
+
         val channelType = channelOverride
             ?: SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
         val messageTitle = SaveKeyValues.loadString(Constant.MESSAGE_TITLE_KEY, "打卡结果通知")
 
-        // 统一拼接元数据，三个路径都用同一个完整内容
-        val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val fullContent = buildString {
-            appendLine(title.ifBlank { messageTitle })
-            appendLine(content.ifBlank { "未监听到打卡成功的通知，请手动登录检查" })
-            appendLine("当前日期：${LocalDate.now()}")
-            appendLine("当前电量：${if (battery >= 0) "$battery%" else "未知"}")
-            append("版本号：${BuildConfig.VERSION_NAME}")
+        val fullContent = if (appendMeta) {
+            val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            buildString {
+                appendLine("====================")
+                appendLine("  ${title.ifBlank { messageTitle }}")
+                appendLine("====================")
+                appendLine()
+                appendLine(content.ifBlank { "未监听到打卡成功的通知，请手动登录检查" })
+                appendLine()
+                appendLine("· 待机方式：伪息屏常亮")
+                appendLine("· 当前日期：${LocalDate.now()}")
+                appendLine("· 当前电量：${if (battery >= 0) "$battery%" else "未知"}")
+                append("· 版本号：${BuildConfig.VERSION_NAME}")
+            }
+        } else {
+            content.ifBlank { "未监听到打卡成功的通知，请手动登录检查" }
         }
 
         when (channelType) {
             0 -> {
+                val isHtml = fullContent.trimStart().startsWith("<!DOCTYPE html>", ignoreCase = true)
                 EmailManager.sendEmail(
                     title.ifBlank { messageTitle },
                     fullContent,
-                    onSuccess,
-                    onFailure
+                    isHtml = isHtml,
+                    onSuccess = onSuccess,
+                    onFailure = onFailure
                 )
             }
 
@@ -86,29 +110,48 @@ object MessageDispatcher {
         content: String,
         filePath: String,
         channelOverride: Int? = null,
+        force: Boolean = false,
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null
     ) {
+        if (!force && shouldSkipDuplicate(title, content)) {
+            Log.d(kTag, "跳过短时间内重复附件消息: $title")
+            return
+        }
+
         val channelType = channelOverride
             ?: SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
         val messageTitle = SaveKeyValues.loadString(Constant.MESSAGE_TITLE_KEY, "打卡结果通知")
 
         when (channelType) {
             0 -> {
-                val battery =
-                    batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-                val fullContent = buildString {
-                    appendLine(content)
-                    appendLine("当前日期：${LocalDate.now()}")
-                    appendLine("当前电量：${if (battery >= 0) "$battery%" else "未知"}")
-                    append("版本号：${BuildConfig.VERSION_NAME}")
+                val isHtml = content.trimStart().startsWith("<!DOCTYPE html>", ignoreCase = true)
+                val fullContent = if (isHtml) {
+                    // HTML 正文直接使用，不套 plain-text 壳
+                    content
+                } else {
+                    val battery =
+                        batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                    buildString {
+                        appendLine("====================")
+                        appendLine("  ${title.ifBlank { messageTitle }}")
+                        appendLine("====================")
+                        appendLine()
+                        appendLine(content)
+                        appendLine()
+                        appendLine("· 待机方式：伪息屏常亮")
+                        appendLine("· 当前日期：${LocalDate.now()}")
+                        appendLine("· 当前电量：${if (battery >= 0) "$battery%" else "未知"}")
+                        append("· 版本号：${BuildConfig.VERSION_NAME}")
+                    }
                 }
                 EmailManager.sendAttachmentEmail(
                     title.ifBlank { messageTitle },
                     fullContent,
                     filePath,
-                    onSuccess,
-                    onFailure
+                    isHtml = isHtml,
+                    onSuccess = onSuccess,
+                    onFailure = onFailure
                 )
             }
 
@@ -117,6 +160,29 @@ object MessageDispatcher {
             else -> {
                 Log.w(kTag, "消息渠道不支持: $channelType")
                 onFailure?.invoke("消息渠道未配置")
+            }
+        }
+    }
+
+    private fun shouldSkipDuplicate(title: String, content: String): Boolean {
+        val key = "${title.trim()}\n${content.trim()}"
+        val now = System.currentTimeMillis()
+        cleanupExpired(now)
+        val last = recentSendAt[key]
+        if (last != null && now - last < DEDUP_WINDOW_MS) {
+            return true
+        }
+        recentSendAt[key] = now
+        return false
+    }
+
+    private fun cleanupExpired(now: Long) {
+        if (recentSendAt.size < 32) return
+        val iterator = recentSendAt.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (now - entry.value >= DEDUP_WINDOW_MS) {
+                iterator.remove()
             }
         }
     }
