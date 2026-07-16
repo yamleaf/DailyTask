@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.utils
 
+import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +24,11 @@ import javax.mail.internet.MimeMultipart
 object EmailManager {
     private val kTag = "EmailManager"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var appContext: Context? = null
+
+    fun initialize(context: Context) {
+        appContext = context.applicationContext
+    }
 
     private data class EmailConfig(val outbox: String, val authCode: String, val inbox: String)
 
@@ -54,10 +61,12 @@ object EmailManager {
 
     /**
      * 发送普通邮件
+     * @param isHtml 为 true 时以 HTML 格式发送，手机端渲染更美观
      */
     fun sendEmail(
         title: String,
         content: String,
+        isHtml: Boolean = false,
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null
     ) {
@@ -72,7 +81,11 @@ object EmailManager {
             setRecipient(Message.RecipientType.TO, InternetAddress(config.inbox))
             subject = title
             sentDate = Date()
-            setText(content)
+            if (isHtml) {
+                setContent(content, "text/html; charset=utf-8")
+            } else {
+                setText(content)
+            }
         }
 
         sendAsync(message, onSuccess, onFailure)
@@ -80,11 +93,13 @@ object EmailManager {
 
     /**
      * 发送带附件的邮件
+     * @param isHtml 为 true 时正文以 HTML 格式发送
      */
     fun sendAttachmentEmail(
         title: String,
         content: String,
         filePath: String,
+        isHtml: Boolean = false,
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null
     ) {
@@ -96,7 +111,11 @@ object EmailManager {
 
         // 正文部分
         val textPart = MimeBodyPart().apply {
-            setText(content)
+            if (isHtml) {
+                setContent(content, "text/html; charset=utf-8")
+            } else {
+                setText(content)
+            }
         }
 
         // 附件部分
@@ -132,8 +151,13 @@ object EmailManager {
         onFailure: ((String) -> Unit)? = null
     ) {
         scope.launch {
+            // 灭屏/Doze 下 SMTP 可能被挂起，发信期间持有 CPU WakeLock
+            val wakeLock = appContext?.getSystemService(PowerManager::class.java)
+                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DailyTask:SendEmail")
             try {
+                wakeLock?.acquire(60_000L)
                 Transport.send(message)
+                LogFileManager.writeLog("邮件发送成功: ${message.subject}")
                 withContext(Dispatchers.Main) {
                     onSuccess?.invoke()
                 }
@@ -147,9 +171,15 @@ object EmailManager {
 
                     else -> "邮件发送失败: ${e.javaClass.simpleName} - ${e.message}"
                 }
+                Log.e(kTag, errorMessage, e)
+                LogFileManager.writeLog(errorMessage)
 
                 withContext(Dispatchers.Main) {
                     onFailure?.invoke(errorMessage)
+                }
+            } finally {
+                if (wakeLock?.isHeld == true) {
+                    wakeLock.release()
                 }
             }
         }

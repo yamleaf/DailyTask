@@ -14,8 +14,10 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
+import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
@@ -69,7 +71,6 @@ class ForegroundRunningService : Service() {
     }
 
     private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
-    private var lastRemindTime = 0L
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
@@ -130,6 +131,7 @@ class ForegroundRunningService : Service() {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_TIME_TICK) // 每分钟广播
             addAction(Intent.ACTION_BATTERY_CHANGED) // 电池状态改变广播
+            addAction(Intent.ACTION_SCREEN_OFF) // 系统灭屏时尽量转入伪息屏
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(systemBroadcastReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -159,6 +161,10 @@ class ForegroundRunningService : Service() {
                     }
 
                     Intent.ACTION_BATTERY_CHANGED -> checkLowBattery()
+
+                    Intent.ACTION_SCREEN_OFF -> {
+                        IdlePseudoMaskController.onSystemScreenOff(this@ForegroundRunningService)
+                    }
                 }
             }
         }
@@ -207,17 +213,25 @@ class ForegroundRunningService : Service() {
 
     private fun checkLowBattery() {
         val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        if (battery < 20) {
-            val currentTime = System.currentTimeMillis()
-            if (currentTime - lastRemindTime < 5 * 60 * 1000) {
-                return
-            }
+        if (battery in 0 until 30) {
+            val alreadyNotified =
+                SaveKeyValues.loadBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, false)
+            if (alreadyNotified) return
 
-            MessageDispatcher.sendMessage("低电量提醒", "手机电量低于20%，请及时充电")
-            lastRemindTime = currentTime
-        } else {
-            // 电量恢复到20%以上，重置提醒时间
-            lastRemindTime = 0L
+            SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, true)
+            LogFileManager.writeLog("低电量提醒：当前 $battery%，发送通知邮件")
+            MessageDispatcher.sendMessage(
+                "低电量提醒",
+                StatusReporter.buildLowBatteryContentHtml(battery),
+                force = true,
+                appendMeta = false
+            )
+        } else if (battery >= 30) {
+            // 电量回升到 30% 及以上，允许下次再提醒
+            if (SaveKeyValues.loadBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, false)) {
+                SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, false)
+                LogFileManager.writeLog("电量已回升至 $battery%，重置低电量提醒标记")
+            }
         }
     }
 
