@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -24,22 +25,27 @@ import com.pengxh.daily.app.R
 import com.pengxh.daily.app.adapter.DailyTaskAdapter
 import com.pengxh.daily.app.databinding.ActivityMainBinding
 import com.pengxh.daily.app.extensions.convertToTimeEntity
+import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.GestureController
+import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MaskViewController
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.MonitorEvent
 import com.pengxh.daily.app.utils.ProjectionSession
+import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskDataManager
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.utils.TipsEvent
@@ -57,6 +63,7 @@ import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -80,9 +87,28 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private val insetsController by lazy {
         WindowCompat.getInsetsController(window, binding.rootView)
     }
-    private val maskViewController by lazy { MaskViewController(this, binding, insetsController) }
+    private val maskViewController: MaskViewController by lazy {
+        MaskViewController(this, binding, insetsController) { visible ->
+            if (visible) {
+                mainHandler.removeCallbacks(timeUpdateRunnable)
+                stopIdleMaskTimer()
+            } else {
+                mainHandler.removeCallbacks(timeUpdateRunnable)
+                mainHandler.post(timeUpdateRunnable)
+                resetIdleMaskTimer()
+            }
+        }
+    }
     private val gestureController by lazy { GestureController(this, maskViewController) }
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+
+    /** 无操作 1 分钟后自动进入伪息屏 */
+    private val idleMaskRunnable = Runnable {
+        if (!maskViewController.isMaskVisible() && !MaskOverlayHelper.isShowing()) {
+            LogFileManager.writeLog("无操作 1 分钟，自动进入伪息屏")
+            maskViewController.showMaskView()
+        }
+    }
 
     private var taskBeans = mutableListOf<DailyTaskBean>()
     private val dailyTaskAdapter by lazy {
@@ -102,8 +128,11 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     /**
      * 每秒刷新 toolbar 时间和日期标签
      * */
-    private val timeUpdateRunnable = object : Runnable {
+    private val timeUpdateRunnable: Runnable = object : Runnable {
         override fun run() {
+            if (maskViewController.isMaskVisible()) {
+                return
+            }
             val currentTime = dateTimeFormat.format(Date())
             val parts = currentTime.split(" ")
             val now = LocalDate.now()
@@ -126,7 +155,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 title = "${parts[2]}（$flag）"
                 subtitle = "${parts[0]} ${parts[1]}"
             }
-            mainHandler.postDelayed(this, 1000)
+            val interval = if (AppRuntimeConfig.isPowerSaveMode()) 30_000L else 1_000L
+            mainHandler.postDelayed(this, interval)
         }
     }
 
@@ -189,6 +219,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun initOnCreate(savedInstanceState: Bundle?) {
+        // 禁止系统自动息屏，保持常亮 + 伪息屏策略
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.contentView.background = WatermarkDrawable(this, DailyTask.getWatermarkText())
 
         // 加载任务列表
@@ -276,7 +308,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                         binding.tipsView.text = "今日为周末，跳过任务"
                         binding.tipsView.setTextColor(R.color.ios_green.convertColor(this@MainActivity))
                         MessageDispatcher.sendMessage(
-                            "任务跳过通知", "当前为节假日，任务已自动跳过，请注意下次打卡时间"
+                            "任务跳过通知",
+                            StatusReporter.buildSkipContentHtml(),
+                            appendMeta = false
                         )
                     }
 
@@ -285,19 +319,22 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                         binding.tipsView.setTextColor(R.color.theme_color.convertColor(this@MainActivity))
                         dailyTaskAdapter.updateCurrentTaskState(event.index - 1, event.actualTime)
 
-                        val content = buildString {
-                            appendLine("准备执行第 ${event.index} 个任务")
-                            appendLine("计划时间：${event.plannedTime}")
-                            append("实际时间：${event.actualTime}")
-                        }
-                        MessageDispatcher.sendMessage("任务执行通知", content)
+                        val content = StatusReporter.buildTaskExecutingContentHtml(
+                            event.index, event.total, event.plannedTime, event.actualTime
+                        )
+                        MessageDispatcher.sendMessage(
+                            "任务执行通知", content, appendMeta = false
+                        )
                     }
 
                     is TipsEvent.Completed -> {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
                         binding.tipsView.text = "今日任务已全部执行完毕，等待下次任务"
                         binding.tipsView.setTextColor(R.color.ios_green.convertColor(this@MainActivity))
-                        MessageDispatcher.sendMessage("任务状态通知", "今日任务已全部执行完毕")
+                        val content = StatusReporter.buildTaskCompletedContentHtml()
+                        MessageDispatcher.sendMessage(
+                            "任务状态通知", content, appendMeta = false
+                        )
                     }
                 }
             }
@@ -305,6 +342,16 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
         // 兜底检查是否有错过的每日重置
         checkMissedReset()
+
+        // 省电模式热更新：调整主界面时钟刷新频率
+        lifecycleScope.launch {
+            AppRuntimeConfig.powerSaveMode.collect {
+                if (!maskViewController.isMaskVisible()) {
+                    mainHandler.removeCallbacks(timeUpdateRunnable)
+                    mainHandler.post(timeUpdateRunnable)
+                }
+            }
+        }
     }
 
     override fun initEvent() {
@@ -328,13 +375,29 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     override fun onResume() {
         super.onResume()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        IdlePseudoMaskController.onAppForegrounded(this)
+        applyMaskCommandFromIntent(intent)
+        if (MaskOverlayHelper.isShowing() && !maskViewController.isMaskVisible()) {
+            maskViewController.showMaskView()
+        }
+        if (!maskViewController.isMaskVisible() && !MaskOverlayHelper.isShowing()) {
+            resetIdleMaskTimer()
+        }
         if (!Settings.canDrawOverlays(this)) {
             "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
         }
     }
 
+    override fun onPause() {
+        stopIdleMaskTimer()
+        IdlePseudoMaskController.onAppBackgrounded(this)
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         LogFileManager.writeLog("onNewIntent: ${packageName} 回到前台")
 
         if (ProjectionSession.isStateActive()) {
@@ -347,12 +410,42 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
         }
 
-        if (!maskViewController.isMaskVisible()) {
-            maskViewController.showMaskView()
+        if (!applyMaskCommandFromIntent(intent)) {
+            // 从目标 App 返回等场景：默认恢复伪息屏
+            if (!maskViewController.isMaskVisible()) {
+                maskViewController.showMaskView()
+            }
+            MaskOverlayHelper.show(this)
         }
     }
 
+    /**
+     * @return true 表示 Intent 携带了息屏/亮屏指令并已处理
+     */
+    private fun applyMaskCommandFromIntent(intent: Intent?): Boolean {
+        val action = intent?.getIntExtra(Constant.EXTRA_MASK_COMMAND, -1) ?: -1
+        if (action < 0) return false
+        intent?.removeExtra(Constant.EXTRA_MASK_COMMAND)
+        when (action) {
+            1 -> {
+                MaskOverlayHelper.show(this)
+                if (!maskViewController.isMaskVisible()) {
+                    maskViewController.showMaskView()
+                }
+            }
+
+            0 -> {
+                MaskOverlayHelper.hide(this)
+                if (maskViewController.isMaskVisible()) {
+                    maskViewController.hideMaskView()
+                }
+            }
+        }
+        return true
+    }
+
     override fun onDestroy() {
+        stopIdleMaskTimer()
         super.onDestroy()
         mainHandler.removeCallbacksAndMessages(null)
         maskViewController.destroy()
@@ -381,15 +474,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             is MonitorEvent.StopTaskCommand -> doStopTask()
 
             is MonitorEvent.ShowMaskCommand -> {
+                MaskOverlayHelper.show(this)
                 if (!maskViewController.isMaskVisible()) {
                     maskViewController.showMaskView()
                 }
             }
 
             is MonitorEvent.HideMaskCommand -> {
+                MaskOverlayHelper.hide(this)
                 if (maskViewController.isMaskVisible()) {
                     maskViewController.hideMaskView()
                 }
+                resetIdleMaskTimer()
             }
 
             is MonitorEvent.AppOpenedForScreenshot -> {
@@ -405,25 +501,36 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 lifecycleScope.launch {
                     // 倒计时 10 秒，更新悬浮窗
                     val countdownTarget = SystemClock.elapsedRealtime() + 10_000L
-                    while (true) {
+                    while (isActive) {
                         val remaining = countdownTarget - SystemClock.elapsedRealtime()
                         if (remaining <= 0) break
                         FloatingWindowController.updateTime((remaining / 1000).toInt())
                         delay(minOf(1000L, remaining).coerceAtLeast(1))
                     }
 
-                    // 触发截屏并等待截屏结果
-                    val imagePath = CaptureImageService.requestCaptureScreen().await()
+                    // 触发截屏并等待截屏结果（根据结果来源选择截屏方式）
+                    val source = SaveKeyValues.loadInt(
+                        Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
+                    )
+                    val imagePath = if (source == 2) {
+                        AutoProjectionAccessibilityService.requestScreenshot()?.await()
+                    } else {
+                        CaptureImageService.requestCaptureScreen().await()
+                    }
 
                     // 回到主界面
                     backToMainActivity()
-
-                    // 发送通知（跳回后执行，Activity 已在前台）
                     if (imagePath.isNullOrEmpty()) {
-                        MessageDispatcher.sendMessage("截屏状态通知", "截图完成，但是无法获取截图")
+                        MessageDispatcher.sendMessage(
+                            "截屏状态通知",
+                            StatusReporter.buildScreenshotResultHtml(false, "截图完成，但无法获取截图"),
+                            appendMeta = false
+                        )
                     } else {
                         MessageDispatcher.sendAttachmentMessage(
-                            "截屏状态通知", "截图完成", imagePath
+                            "截屏状态通知",
+                            StatusReporter.buildScreenshotResultHtml(true, "截图已发送，请查看附件"),
+                            imagePath
                         )
                     }
                 }
@@ -609,10 +716,26 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        if (ev?.actionMasked == MotionEvent.ACTION_DOWN) {
+            resetIdleMaskTimer()
+        }
         ev?.let {
             gestureController.onTouchEvent(it)
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    private fun resetIdleMaskTimer() {
+        if (maskViewController.isMaskVisible() || MaskOverlayHelper.isShowing()) {
+            stopIdleMaskTimer()
+            return
+        }
+        mainHandler.removeCallbacks(idleMaskRunnable)
+        mainHandler.postDelayed(idleMaskRunnable, 60_000L)
+    }
+
+    private fun stopIdleMaskTimer() {
+        mainHandler.removeCallbacks(idleMaskRunnable)
     }
 
     // ================================================================
@@ -622,7 +745,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private fun doStopTask() {
         if (!TaskScheduler.isRunning()) return
         TaskScheduler.stopTask()
-        MessageDispatcher.sendMessage("停止任务通知", "任务停止成功，请及时打开下次任务")
+        MessageDispatcher.sendMessage(
+            "停止任务通知", StatusReporter.buildStopTaskHtml(), appendMeta = false
+        )
     }
 
     private fun backToMainActivity() {

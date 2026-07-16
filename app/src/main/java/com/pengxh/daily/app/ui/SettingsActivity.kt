@@ -13,14 +13,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivitySettingsBinding
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.extensions.openApplication
+import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.NotificationMonitorService
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
@@ -61,6 +64,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         )
     }
     private val channels = arrayListOf("QQ邮箱", "企业微信")
+    private val resultSources = arrayListOf("通知", "截屏", "无障碍")
+    private val feedbackModes = arrayListOf("截屏反馈", "文本反馈")
     private val permissionContract by lazy { ActivityResultContracts.StartActivityForResult() }
     private val notificationContract by lazy { ActivityResultContracts.StartActivityForResult() }
     private val projectionContract by lazy { ActivityResultContracts.StartActivityForResult() }
@@ -114,24 +119,16 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 if (connected) {
                     binding.noticeSwitch.isChecked = true
                     binding.noticeTipsView.visibility = View.GONE
-                    val sourceType =
-                        SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
-                    val targetApp =
-                        SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, Constant.DEFAULT_INDEX)
-                    if (sourceType == 0 && targetApp == 0) {
-                        binding.noticeRadioButton.isChecked = true
-                        binding.captureRadioButton.isChecked = false
-                    }
                 } else {
                     binding.noticeTipsView.text = "服务未开启，无法监听打卡结果和接收远程指令"
                     binding.noticeTipsView.setTextColor(Color.RED)
                     binding.noticeSwitch.isChecked = false
-                    binding.noticeRadioButton.isChecked = false
                     binding.noticeTipsView.visibility = View.VISIBLE
                 }
             }
         }
 
+        // 监听截屏服务状态（MediaProjection 授权结果回传）
         lifecycleScope.launch {
             CaptureImageService.projectionEvents.collect { event ->
                 when (event) {
@@ -142,24 +139,22 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                             Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
                         )
                         if (sourceType == 1) {
-                            binding.captureRadioButton.isChecked = true
-                            binding.noticeRadioButton.isChecked = false
+                            updateResultSourceView()
                         }
                     }
 
                     ProjectionEvent.Failed -> {
                         binding.captureSwitch.isChecked = false
-                        binding.captureRadioButton.isChecked = false
                         binding.captureTipsView.text = "截屏服务未开启，无法获取打卡结果"
                         binding.captureTipsView.setTextColor(Color.RED)
                         binding.captureTipsView.visibility = View.VISIBLE
                         val targetApp = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
                         if (notificationEnable() && targetApp == 0) {
                             SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
-                            binding.noticeRadioButton.isChecked = true
+                            updateResultSourceView()
                             "截屏服务已断开，已切换到通知模式".show(context)
                         } else {
-                            binding.noticeRadioButton.isChecked = false
+                            updateResultSourceView()
                         }
                     }
                 }
@@ -181,7 +176,6 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     override fun onActionItemClick(position: Int) {
                         val oldPosition = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
 
-                        // 如果 position 没有变化，直接返回
                         if (oldPosition == position) {
                             binding.iconView.setBackgroundResource(icons[position])
                             return
@@ -189,37 +183,35 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
                         when (position) {
                             0 -> {
-                                // 钉钉：默认通知监听，通知未开则降级截屏，两者都未开则阻断
+                                // 钉钉：默认通知监听，通知未开则降级截屏，两者都未开则降级无障碍
                                 if (binding.noticeSwitch.isChecked) {
-                                    binding.noticeRadioButton.isChecked = true
                                     SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
-                                    binding.captureRadioButton.isChecked = false
                                 } else if (binding.captureSwitch.isChecked) {
-                                    binding.captureRadioButton.isChecked = true
                                     SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
-                                    binding.noticeRadioButton.isChecked = false
+                                } else if (binding.accessibilitySwitch.isChecked) {
+                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
                                 } else {
-                                    "请先打开通知监听或截屏服务".show(context)
+                                    "请先打开通知监听、截屏服务或无障碍服务".show(context)
                                     return
                                 }
                             }
 
                             1, 2, 3 -> {
-                                // 企业微信、飞书、移动办公M3：只能截屏
+                                // 企业微信、飞书、移动办公M3：只能截屏或无障碍
                                 if (binding.captureSwitch.isChecked) {
-                                    binding.captureRadioButton.isChecked = true
                                     SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
-                                    binding.noticeRadioButton.isChecked = false
+                                } else if (binding.accessibilitySwitch.isChecked) {
+                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
                                 } else {
-                                    "请先打开截屏服务".show(context)
+                                    "请先打开截屏服务或无障碍服务".show(context)
                                     return
                                 }
                             }
                         }
 
-                        // 只有通过所有校验后才写入配置
                         binding.iconView.setBackgroundResource(icons[position])
                         SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, position)
+                        updateResultSourceView()
                     }
                 }).build().show()
         }
@@ -228,33 +220,70 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             navigatePageTo<MessageChannelActivity>()
         }
 
-        binding.noticeRadioButton.setOnClickListener {
-            val index = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
-            if (index != 0) {
-                "通知监听仅支持钉钉打卡".show(this)
-                binding.noticeRadioButton.isChecked = false
-                return@setOnClickListener
-            }
+        // 结果来源：点击弹出选择
+        binding.resultSourceLayout.setOnClickListener {
+            BottomActionSheet.Builder()
+                .setContext(this)
+                .setActionItemTitle(resultSources)
+                .setItemTextColor(R.color.theme_color.convertColor(this))
+                .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
+                    override fun onActionItemClick(position: Int) {
+                        when (position) {
+                            0 -> {
+                                val targetApp = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
+                                if (targetApp != 0) {
+                                    "通知监听仅支持钉钉打卡".show(context)
+                                    return
+                                }
+                                if (!binding.noticeSwitch.isChecked) {
+                                    "请先打开通知监听".show(context)
+                                    return
+                                }
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
+                                updateResultSourceView()
+                                binding.accessibilityFeedbackLayout.visibility = View.GONE
+                                binding.accessibilityFeedbackDivider.visibility = View.GONE
+                            }
 
-            if (binding.noticeSwitch.isChecked) {
-                binding.noticeRadioButton.isChecked = true
-                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
-                binding.captureRadioButton.isChecked = false
-            } else {
-                "请先打开通知监听".show(this)
-                binding.noticeRadioButton.isChecked = false
-            }
+                            1 -> {
+                                if (!binding.captureSwitch.isChecked) {
+                                    "请先打开截屏服务".show(context)
+                                    return
+                                }
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
+                                updateResultSourceView()
+                                binding.accessibilityFeedbackLayout.visibility = View.GONE
+                                binding.accessibilityFeedbackDivider.visibility = View.GONE
+                            }
+
+                            2 -> {
+                                if (!binding.accessibilitySwitch.isChecked) {
+                                    "请先打开无障碍服务".show(context)
+                                    return
+                                }
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
+                                updateResultSourceView()
+                                binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
+                                binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
+                                updateAccessibilityFeedbackView()
+                            }
+                        }
+                    }
+                }).build().show()
         }
 
-        binding.captureRadioButton.setOnClickListener {
-            if (binding.captureSwitch.isChecked) {
-                binding.captureRadioButton.isChecked = true
-                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
-                binding.noticeRadioButton.isChecked = false
-            } else {
-                "请先打开截屏服务".show(this)
-                binding.captureRadioButton.isChecked = false
-            }
+        // 反馈方式：点击弹出选择
+        binding.accessibilityFeedbackLayout.setOnClickListener {
+            BottomActionSheet.Builder()
+                .setContext(this)
+                .setActionItemTitle(feedbackModes)
+                .setItemTextColor(R.color.theme_color.convertColor(this))
+                .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
+                    override fun onActionItemClick(position: Int) {
+                        SaveKeyValues.saveInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, position)
+                        updateAccessibilityFeedbackView()
+                    }
+                }).build().show()
         }
 
         binding.taskConfigLayout.setOnClickListener {
@@ -286,14 +315,58 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             notificationSettingLauncher.launch(intent)
         }
 
+        // 截屏服务开关：点击时拉起 MediaProjection 授权
         binding.captureSwitch.setOnClickListener {
             if (ProjectionSession.isStateActive()) {
-                "核心服务，无法关闭".show(this)
-                binding.captureSwitch.isChecked = true
-                return@setOnClickListener
+                // 当前已开启 → 关闭
+                stopService(Intent(this, CaptureImageService::class.java))
+                ProjectionSession.clear()
+                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
+                binding.captureSwitch.isChecked = false
+                binding.captureTipsView.text = "截屏服务未开启，无法获取打卡结果"
+                binding.captureTipsView.setTextColor(Color.RED)
+                binding.captureTipsView.visibility = View.VISIBLE
+                updateResultSourceView()
+                "截屏服务已关闭".show(this)
+            } else {
+                // 当前未开启 → 拉起 MediaProjection 授权
+                binding.captureSwitch.isChecked = false
+                projectionLauncher.launch(mpr.createScreenCaptureIntent())
             }
-            binding.captureSwitch.isChecked = false
-            projectionLauncher.launch(mpr.createScreenCaptureIntent())
+        }
+
+        // 无障碍服务开关：检查系统无障碍是否已开启
+        binding.accessibilitySwitch.setOnClickListener {
+            val currentSource = SaveKeyValues.loadInt(
+                Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
+            )
+            if (currentSource == 2) {
+                // 当前已开启 → 关闭
+                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
+                binding.accessibilitySwitch.isChecked = false
+                binding.accessibilityTipsView.text = "无障碍服务未开启，无障碍模式无法获取打卡结果"
+                binding.accessibilityTipsView.setTextColor(Color.RED)
+                binding.accessibilityTipsView.visibility = View.VISIBLE
+                binding.accessibilityFeedbackLayout.visibility = View.GONE
+                binding.accessibilityFeedbackDivider.visibility = View.GONE
+                updateResultSourceView()
+                "无障碍结果模式已关闭".show(this)
+            } else {
+                // 当前未开启 → 检查无障碍服务是否在系统设置中已启用
+                if (!AutoProjectionAccessibilityService.isEnabled(this)) {
+                    binding.accessibilitySwitch.isChecked = false
+                    showAccessibilityRequiredDialog()
+                    return@setOnClickListener
+                }
+                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
+                binding.accessibilitySwitch.isChecked = true
+                binding.accessibilityTipsView.visibility = View.GONE
+                binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
+                binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
+                updateAccessibilityFeedbackView()
+                updateResultSourceView()
+                "无障碍结果模式已开启".show(this)
+            }
         }
 
         binding.commandLayout.setOnClickListener {
@@ -305,23 +378,37 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         }
 
         binding.captureTestLayout.setOnClickListener {
-            if (!binding.captureSwitch.isChecked) {
-                "请先打开截屏服务".show(this)
-                return@setOnClickListener
-            }
-
-            // 再次确认 session 实际状态
-            if (!ProjectionSession.isStateActive()) {
-                binding.captureSwitch.isChecked = false
-                "截屏授权已失效，请重新授权".show(this)
-                return@setOnClickListener
+            val source = SaveKeyValues.loadInt(
+                Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
+            )
+            if (source == 2) {
+                // 无障碍模式：用 takeScreenshot
+                if (!AutoProjectionAccessibilityService.isEnabled(this)) {
+                    "无障碍服务未开启，无法截屏".show(this)
+                    return@setOnClickListener
+                }
+            } else {
+                // 截屏模式：用 MediaProjection
+                if (!binding.captureSwitch.isChecked) {
+                    "请先打开截屏服务".show(this)
+                    return@setOnClickListener
+                }
+                if (!ProjectionSession.isStateActive()) {
+                    binding.captureSwitch.isChecked = false
+                    "截屏授权已失效，请重新授权".show(this)
+                    return@setOnClickListener
+                }
             }
 
             // 触发截屏并等待截屏结果
             lifecycleScope.launch {
-                val imagePath = CaptureImageService.requestCaptureScreen().await()
+                val imagePath = if (source == 2) {
+                    AutoProjectionAccessibilityService.requestScreenshot()?.await()
+                } else {
+                    CaptureImageService.requestCaptureScreen().await()
+                }
                 if (imagePath.isNullOrEmpty()) {
-                    "截图失败，无法获取图像".show(context)
+                    "截图失败，请检查服务状态".show(context)
                     return@launch
                 }
 
@@ -357,7 +444,38 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             if (syncingSwitchState) {
                 return@setOnCheckedChangeListener
             }
-            SaveKeyValues.saveBoolean(Constant.POWER_SAVE_MODE_KEY, isChecked)
+            AppRuntimeConfig.setPowerSaveMode(isChecked)
+        }
+
+        binding.forcePseudoMaskSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (syncingSwitchState) {
+                return@setOnCheckedChangeListener
+            }
+            if (isChecked) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("开启强制伪息屏？")
+                    .setMessage(
+                        "开启后：\n\n" +
+                                "1. 离开本软件超过 60 秒，将主动进入伪息屏模式\n" +
+                                "2. 可能打断你正在使用的其它 App（微信、浏览器等）\n" +
+                                "3. 离开期间会尽量阻止系统自动灭屏（透明保亮）\n" +
+                                "4. 打卡等待窗口内不会盖黑屏\n\n" +
+                                "适合无人值守挂机；若白天还要操作手机，建议关闭。"
+                    )
+                    .setNegativeButton("取消") { _, _ ->
+                        syncingSwitchState = true
+                        binding.forcePseudoMaskSwitch.isChecked = false
+                        syncingSwitchState = false
+                    }
+                    .setPositiveButton("确认开启") { _, _ ->
+                        AppRuntimeConfig.setForcePseudoMask(true)
+                        "强制伪息屏已开启".show(this)
+                    }
+                    .setCancelable(false)
+                    .show()
+            } else {
+                AppRuntimeConfig.setForcePseudoMask(false)
+            }
         }
 
         binding.introduceLayout.setOnClickListener {
@@ -379,6 +497,9 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         }
     }
 
+    /**
+     * MediaProjection 授权回调
+     */
     private val projectionLauncher = registerForActivityResult(projectionContract) {
         if (it.resultCode != RESULT_OK) {
             "用户拒绝授权".show(this)
@@ -402,6 +523,46 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         }
     }
 
+    /**
+     * 根据 RESULT_SOURCE_KEY 更新结果来源显示文字
+     */
+    private fun updateResultSourceView() {
+        val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
+        val text = when (source) {
+            0 -> "通知"
+            1 -> "截屏"
+            2 -> "无障碍"
+            else -> "通知"
+        }
+        binding.resultSourceView.text = text
+        binding.resultSourceView.setTextColor(R.color.theme_color.convertColor(this))
+    }
+
+    /**
+     * 根据 ACCESSIBILITY_FEEDBACK_MODE_KEY 更新反馈方式显示文字
+     */
+    private fun updateAccessibilityFeedbackView() {
+        val mode = SaveKeyValues.loadInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0)
+        binding.accessibilityFeedbackView.text = if (mode == 1) "文本反馈" else "截屏反馈"
+        binding.accessibilityFeedbackView.setTextColor(R.color.theme_color.convertColor(this))
+    }
+
+    private fun showAccessibilityRequiredDialog() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("需要开启无障碍服务")
+            .setMessage(
+                "无障碍功能需要先在系统设置中开启无障碍服务。\n\n" +
+                        "请前往：设置 → 无障碍 → ${resources.getString(R.string.app_name)} 并开启。\n\n" +
+                        "开启后返回本页面，再打开无障碍开关即可。"
+            )
+            .setNegativeButton("取消") { _, _ -> }
+            .setPositiveButton("前往设置") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setCancelable(false)
+            .show()
+    }
+
     override fun onResume() {
         super.onResume()
         if (Settings.canDrawOverlays(this)) {
@@ -422,7 +583,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.channelView.setTextColor(R.color.red.convertColor(this))
         }
 
-        // 先同步通知服务的 UI 状态（switch + tipsView）
+        // 同步通知服务 UI
         if (notificationEnable()) {
             binding.noticeTipsView.text = "服务状态查询中，请稍后..."
             binding.noticeTipsView.setTextColor(R.color.theme_color.convertColor(this))
@@ -440,7 +601,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.noticeTipsView.visibility = View.VISIBLE
         }
 
-        // 先同步截屏服务的 UI 状态（switch + tipsView）
+        // 同步截屏服务 UI（根据 ProjectionSession 实际状态）
         if (ProjectionSession.isStateActive()) {
             binding.captureSwitch.isChecked = true
             binding.captureTipsView.visibility = View.GONE
@@ -451,30 +612,33 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.captureTipsView.visibility = View.VISIBLE
         }
 
-        // 最后再根据 sourceType 设置 radio button（此时 switch 状态已同步）
-        val sourceType = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
-        val targetApp = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
-        if (sourceType == 0) {
-            if (notificationEnable() && targetApp == 0) {
-                binding.noticeRadioButton.isChecked = true
-                binding.captureRadioButton.isChecked = false
-            } else {
-                binding.noticeRadioButton.isChecked = false
-                binding.captureRadioButton.isChecked = false
-            }
-        } else if (sourceType == 1) {
-            // 如果是截屏服务，那还要考虑该服务是否正常开启
-            if (ProjectionSession.isStateActive()) {
-                binding.captureRadioButton.isChecked = true
-                binding.noticeRadioButton.isChecked = false
-            } else {
-                binding.captureRadioButton.isChecked = false
-                binding.noticeRadioButton.isChecked = false
-            }
+        // 同步无障碍服务 UI（根据系统无障碍实际状态 + RESULT_SOURCE_KEY）
+        val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
+        val a11yEnabled = AutoProjectionAccessibilityService.isEnabled(this)
+
+        if (source == 2 && a11yEnabled) {
+            binding.accessibilitySwitch.isChecked = true
+            binding.accessibilityTipsView.visibility = View.GONE
+            binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
+            binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
+            updateAccessibilityFeedbackView()
         } else {
-            binding.captureRadioButton.isChecked = false
-            binding.noticeRadioButton.isChecked = false
+            if (source != 2) {
+                binding.accessibilitySwitch.isChecked = false
+            } else {
+                // source==2 但无障碍未开启 → 开关关闭并提示
+                binding.accessibilitySwitch.isChecked = false
+                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
+            }
+            binding.accessibilityTipsView.text = "无障碍服务未开启，无障碍模式无法获取打卡结果"
+            binding.accessibilityTipsView.setTextColor(Color.RED)
+            binding.accessibilityTipsView.visibility = View.VISIBLE
+            binding.accessibilityFeedbackLayout.visibility = View.GONE
+            binding.accessibilityFeedbackDivider.visibility = View.GONE
         }
+
+        // 更新结果来源显示文字
+        updateResultSourceView()
 
         syncingSwitchState = true
         try {
@@ -482,8 +646,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
             binding.backToHomeSwitch.isChecked =
                 SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
-            binding.powerSaveSwitch.isChecked =
-                SaveKeyValues.loadBoolean(Constant.POWER_SAVE_MODE_KEY, false)
+            binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
+            binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
         } finally {
             syncingSwitchState = false
         }
@@ -503,11 +667,10 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                         PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                         PackageManager.DONT_KILL_APP
                     )
-                    delay(500) // 短暂延迟
+                    delay(500)
                     if (!isActive) return@launch
                 }
 
-                // 重新启用
                 context.packageManager.setComponentEnabledSetting(
                     componentName,
                     PackageManager.COMPONENT_ENABLED_STATE_ENABLED,

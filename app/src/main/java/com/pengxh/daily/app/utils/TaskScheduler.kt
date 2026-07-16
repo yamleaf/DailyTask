@@ -5,6 +5,7 @@ import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
 import com.pengxh.daily.app.extensions.openApplication
 import com.pengxh.daily.app.extensions.resolveExecutionTime
+import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
@@ -58,6 +59,10 @@ object TaskScheduler {
      * */
     private var clockInDeferred: CompletableDeferred<Unit>? = null
 
+    /** 供状态查询使用的当前进度文案 */
+    @Volatile
+    private var runningDetail: String = "空闲"
+
     /**
      * 由 ForegroundRunningService 调用，注入协程作用域
      */
@@ -68,6 +73,21 @@ object TaskScheduler {
 
     fun isRunning(): Boolean {
         return _isRunning.value
+    }
+
+    /** 是否处于打开目标 App / 等待打卡成功的窗口期（此期间不宜盖黑屏） */
+    fun isInActivePunch(): Boolean {
+        if (!_isRunning.value) return false
+        return runningDetail.contains("等待打卡")
+    }
+
+    fun describeRunningState(): String {
+        return if (_isRunning.value) {
+            "运行中｜$runningDetail"
+        } else {
+            // 每日循环≠当前在跑：循环只负责重置点自动 startTask
+            "调度未启动（需手动或远程启动，每日循环任务重置后开始生效）"
+        }
     }
 
     /**
@@ -87,10 +107,12 @@ object TaskScheduler {
         }
 
         _isRunning.value = true
+        runningDetail = "初始化排程"
 
         val tempJob = currentScope.launch {
             while (isActive) {
                 if (shouldSkipToday()) {
+                    runningDetail = "今日休息已跳过"
                     _tipsEvent.emit(TipsEvent.Skip)
                     ForegroundRunningService.emitNotificationText("今日休息，任务已跳过")
                 } else {
@@ -110,6 +132,7 @@ object TaskScheduler {
         }
         tempJob.invokeOnCompletion {
             _isRunning.value = false
+            runningDetail = "空闲"
         }
         job = tempJob
     }
@@ -140,6 +163,8 @@ object TaskScheduler {
 
             // ====== 阶段 1：倒计时等待 ======
             val delayMs = task.actualTimeMillis - now
+            runningDetail =
+                "等待第 ${task.displayIndex}/${schedule.size} 个任务 ${task.actualTime}"
             _tipsEvent.emit(
                 TipsEvent.Executing(
                     task.displayIndex,
@@ -167,7 +192,30 @@ object TaskScheduler {
                 Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
             )
 
+            runningDetail =
+                "执行第 ${task.displayIndex}/${schedule.size} 个任务（等待打卡）"
+
+            // 伪息屏蒙层显示时，先临时移除，让目标 App 能正常打开和打卡
+            val maskWasShowing = MaskOverlayHelper.isShowing()
+            if (maskWasShowing) {
+                LogFileManager.writeLog("定时任务：伪息屏蒙层显示中，临时移除")
+                withContext(Dispatchers.Main) {
+                    MaskOverlayHelper.hide(DailyTaskApplication.get())
+                }
+            }
+
             DailyTaskApplication.get().openApplication()
+
+            // 开启无障碍文本检测（仅在无障碍模式下）
+            val resultSource = SaveKeyValues.loadInt(
+                Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
+            )
+            val feedbackMode = SaveKeyValues.loadInt(
+                Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0
+            )
+            if (resultSource == 2) {
+                AutoProjectionAccessibilityService.setTextDetectionEnabled(true)
+            }
 
             // Kotlin语法糖——竞态保护：select 只取先完成的分支，另一个自动取消
             var hasCaptured = false
@@ -179,12 +227,16 @@ object TaskScheduler {
 
                     // 最后 5 秒兜底截屏（只触发一次）
                     if (tick <= 5 && !hasCaptured) {
-                        val resultSource = SaveKeyValues.loadInt(
-                            Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
-                        )
                         if (resultSource == 1) {
+                            // 截屏模式：MediaProjection
                             hasCaptured = true
                             captureDeferred = CaptureImageService.requestCaptureScreen()
+                        } else if (resultSource == 2 && feedbackMode == 0) {
+                            // 无障碍-截屏反馈模式：AccessibilityService.takeScreenshot
+                            hasCaptured = true
+                            val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
+                            captureDeferred = a11yDeferred
+                                ?: CompletableDeferred<String?>().apply { complete("") }
                         }
                     }
                 }
@@ -200,26 +252,48 @@ object TaskScheduler {
 
             timeoutJob.cancel()
             clockInDeferred = null
+            // 关闭无障碍文本检测
+            AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
 
             // 超时路径——打卡失败，回到主页 + 兜底通知 + 继续下一个任务
             if (!clockInSuccess) {
                 _returnToApp.emit(Unit)
 
-                // 发送兜底截图给用户
+                // 发送兜底截图给用户（截屏模式 或 无障碍-截屏反馈模式）
                 if (hasCaptured) {
                     // Deferred 内部已有 3s 超时兜底，await() 不会无限挂起
                     val imagePath = captureDeferred?.await() ?: ""
                     if (imagePath.isNotEmpty()) {
                         MessageDispatcher.sendAttachmentMessage(
-                            "打卡超时通知", "打卡超时，截图见附件", imagePath
+                            "打卡超时通知",
+                            StatusReporter.buildTimeoutAlertHtml("打卡超时", "截图见附件，请手动检查是否打卡成功"),
+                            imagePath
                         )
                         LogFileManager.writeLog("发送打卡超时截屏: $imagePath")
                     } else {
                         MessageDispatcher.sendMessage("打卡超时通知", "超时截屏失败，imagePath 为空")
                     }
+                } else if (resultSource == 2 && feedbackMode == 1) {
+                    // 无障碍-文本反馈模式：未检测到成功文本，发送文字提醒
+                    MessageDispatcher.sendMessage(
+                        "打卡超时通知",
+                        StatusReporter.buildTimeoutAlertHtml("打卡超时", "未从目标应用界面检测到打卡成功文本，请手动检查"),
+                        appendMeta = false
+                    )
                 } else {
-                    // 通知模式：无截图，纯文本提醒
-                    MessageDispatcher.sendMessage("打卡超时通知", "打卡超时，请手动检查是否打卡成功")
+                    MessageDispatcher.sendMessage(
+                        "打卡超时通知",
+                        StatusReporter.buildTimeoutAlertHtml("打卡超时", "截图失败，请手动检查是否打卡成功"),
+                        appendMeta = false
+                    )
+                }
+            }
+
+            // 恢复伪息屏蒙层
+            if (maskWasShowing) {
+                LogFileManager.writeLog("定时任务结束，恢复伪息屏蒙层")
+                withContext(Dispatchers.Main) {
+                    MaskOverlayHelper.show(DailyTaskApplication.get())
                 }
             }
 
@@ -234,6 +308,7 @@ object TaskScheduler {
             skippedCount > 0 -> "今日任务已全部执行完毕（执行 $executedCount 个，跳过 $skippedCount 个）"
             else -> "今日任务已全部执行完毕"
         }
+        runningDetail = message
         LogFileManager.writeLog(message)
         ForegroundRunningService.emitNotificationText(message)
     }
@@ -249,6 +324,7 @@ object TaskScheduler {
 
         LogFileManager.writeLog("等待 ${waitSeconds}s 后进入下一个任务周期")
 
+        runningDetail = "今日已完成，等待下次重置"
         // 只发一次静态通知，不每秒刷新
         _tipsEvent.emit(TipsEvent.Completed)
         ForegroundRunningService.emitNotificationText("今日任务已执行完毕，等待下次任务")
@@ -280,6 +356,7 @@ object TaskScheduler {
         job?.cancel()
         job = null
         _isRunning.value = false
+        runningDetail = "空闲"
         ForegroundRunningService.emitNotificationText("为保证程序正常运行，请勿移除此通知")
     }
 
@@ -296,11 +373,13 @@ object TaskScheduler {
         job?.cancel()
         job = null
         _isRunning.value = false
+        runningDetail = "空闲"
     }
 
     /**
      * 自校准倒计时 tick，支持 UI 回调。
      * 使用 elapsedRealtime 确保休眠唤醒后剩余时间准确。
+     * 剩余时间较长时降低刷新频率，以降低通知栏与 CPU 唤醒开销。
      */
     private suspend fun CoroutineScope.updateCountdownWithNotification(
         totalMs: Long, onTick: (remainingMs: Long) -> Unit
@@ -310,8 +389,21 @@ object TaskScheduler {
             val remaining = target - SystemClock.elapsedRealtime()
             if (remaining <= 0) break
             onTick(remaining)
-            val step = minOf(1000L, remaining).coerceAtLeast(1)
+            val step = minOf(resolveCountdownStepMs(remaining), remaining).coerceAtLeast(1)
             delay(step)
+        }
+    }
+
+    /**
+     * 倒计时刷新步长：越接近目标越频繁；省电模式下更稀疏。
+     */
+    private fun resolveCountdownStepMs(remainingMs: Long): Long {
+        val powerSave = AppRuntimeConfig.isPowerSaveMode()
+        return when {
+            remainingMs > 3_600_000L -> if (powerSave) 900_000L else 300_000L // >1h
+            remainingMs > 300_000L -> if (powerSave) 120_000L else 60_000L   // >5min
+            remainingMs > 60_000L -> if (powerSave) 30_000L else 15_000L     // >1min
+            else -> 1_000L
         }
     }
 
@@ -347,6 +439,21 @@ object TaskScheduler {
      * 从数据库加载所有任务，计算出当日实际执行时间，按时间排序
      * */
     private suspend fun buildTodaySchedule(): List<ScheduledTask> {
+        return loadTodayTaskPlans().map { plan ->
+            ScheduledTask(
+                task = plan.task,
+                displayIndex = plan.index,
+                plannedTime = plan.plannedTime,
+                actualTime = plan.actualTime,
+                actualTimeMillis = plan.actualTimeMillis
+            )
+        }
+    }
+
+    /**
+     * 供状态查询 / 任务通知使用的当日任务快照
+     */
+    suspend fun loadTodayTaskPlans(): List<TaskPlanItem> {
         val allTasks = withContext(Dispatchers.IO) {
             DatabaseWrapper.loadAllTask()
         }
@@ -367,8 +474,21 @@ object TaskScheduler {
             Triple(task, actualTime, actualMillis)
         }.sortedBy { it.third }
             .mapIndexed { index, (task, actualTime, actualMillis) ->
-                ScheduledTask(task, index + 1, task.time, actualTime, actualMillis)
+                TaskPlanItem(
+                    task = task,
+                    index = index + 1,
+                    plannedTime = task.time,
+                    actualTime = actualTime,
+                    actualTimeMillis = actualMillis
+                )
             }
+    }
+
+    fun secondsUntilNextReset(): Int {
+        val resetHour = SaveKeyValues.loadInt(
+            Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
+        )
+        return calculateSecondsUntilReset(resetHour)
     }
 
     /**
@@ -387,6 +507,18 @@ object TaskScheduler {
         }
 
         return ((target.timeInMillis - now.timeInMillis) / 1000).toInt()
+    }
+
+    data class TaskPlanItem(
+        val task: DailyTaskBean,
+        val index: Int,
+        val plannedTime: String,
+        val actualTime: String,
+        val actualTimeMillis: Long
+    ) {
+        fun statusLabel(nowMillis: Long = System.currentTimeMillis()): String {
+            return if (actualTimeMillis > nowMillis) "待执行" else "已过点"
+        }
     }
 
     private data class ScheduledTask(

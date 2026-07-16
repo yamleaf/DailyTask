@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">DailyTask</string>
     <string name="notification_monitor_service_name">DailyTask通知监听服务</string>
+    <string name="accessibility_service_desc">提供无障碍辅助功能：支持截屏获取打卡结果，以及读取目标应用界面文本自动判断打卡是否成功。</string>
 </resources>

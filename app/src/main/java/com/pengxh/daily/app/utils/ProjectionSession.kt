@@ -4,6 +4,14 @@ import android.media.projection.MediaProjection
 import android.util.Log
 import java.util.concurrent.atomic.AtomicReference
 
+/**
+ * 截屏功能状态管理（MediaProjection 方案）
+ *
+ * 状态流转：
+ *   IDLE → [用户授权] → ACTIVE → [系统回收] → NEED_AUTH → [重新授权] → ACTIVE
+ *                                    ↓ [用户关闭]
+ *                                  IDLE
+ */
 object ProjectionSession {
     private const val kTag = "ProjectionSession"
 
@@ -14,10 +22,8 @@ object ProjectionSession {
     @Volatile
     private var state = State.IDLE
 
-    // 单字段读取，不需要同步
     fun isStateActive(): Boolean = state == State.ACTIVE
 
-    // 同上
     fun getState(): State = state
 
     fun setProjection(projection: MediaProjection) {
@@ -33,7 +39,6 @@ object ProjectionSession {
         }
     }
 
-    // 同上
     fun getProjection(): MediaProjection? = projectionRef.get()
 
     fun markStoppedNeedAuth() {

@@ -93,6 +93,7 @@
                     android:background="#CCC" />
 
                 <RelativeLayout
+                    android:id="@+id/resultSourceLayout"
                     android:layout_width="match_parent"
                     android:layout_height="@dimen/itemLayoutHeight"
                     android:background="@drawable/bg_solid_layout_white_16"
@@ -105,27 +106,13 @@
                         android:text="结果来源"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                    <LinearLayout
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/resultSourceView"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_alignParentEnd="true"
                         android:layout_centerVertical="true"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.radiobutton.MaterialRadioButton
-                            android:id="@+id/noticeRadioButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="通知监听"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
-
-                        <com.google.android.material.radiobutton.MaterialRadioButton
-                            android:id="@+id/captureRadioButton"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="截屏服务"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
-                    </LinearLayout>
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
                 </RelativeLayout>
 
                 <View
@@ -133,6 +120,38 @@
                     android:layout_height="1px"
                     android:layout_marginHorizontal="@dimen/dp_16"
                     android:background="#CCC" />
+
+                <RelativeLayout
+                    android:id="@+id/accessibilityFeedbackLayout"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/itemLayoutHeight"
+                    android:background="@drawable/bg_solid_layout_white_16"
+                    android:paddingHorizontal="@dimen/dp_16"
+                    android:visibility="gone">
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_centerVertical="true"
+                        android:text="反馈方式"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/accessibilityFeedbackView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+                </RelativeLayout>
+
+                <View
+                    android:id="@+id/accessibilityFeedbackDivider"
+                    android:layout_width="match_parent"
+                    android:layout_height="1px"
+                    android:layout_marginHorizontal="@dimen/dp_16"
+                    android:background="#CCC"
+                    android:visibility="gone" />
 
                 <RelativeLayout
                     android:id="@+id/taskConfigLayout"
@@ -335,7 +354,49 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="手势辅助"
+                            android:text="无障碍服务"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/accessibilityTipsView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/dp_4"
+                            android:text="服务未开启，无障碍模式无法获取打卡结果"
+                            android:textColor="@color/red"
+                            android:textSize="@dimen/sp_10" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/accessibilitySwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true" />
+                </RelativeLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1px"
+                    android:layout_marginHorizontal="@dimen/dp_16"
+                    android:background="#CCC" />
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/itemLayoutHeight"
+                    android:background="@drawable/bg_solid_layout_white_16"
+                    android:paddingHorizontal="@dimen/dp_16">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_centerVertical="true"
+                        android:orientation="vertical">
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="手势检测"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -386,12 +447,56 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
                             android:singleLine="true"
-                            android:text="降低倒计时通知和息屏蒙层动画刷新频率"
+                            android:text="降低倒计时通知、内存监控和息屏蒙层动画刷新频率"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/powerSaveSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true" />
+                </RelativeLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1px"
+                    android:layout_marginHorizontal="@dimen/dp_16"
+                    android:background="#CCC" />
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="@dimen/itemLayoutHeight"
+                    android:background="@drawable/bg_solid_layout_white_16"
+                    android:paddingHorizontal="@dimen/dp_16"
+                    android:paddingVertical="@dimen/dp_8">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_centerVertical="true"
+                        android:layout_marginEnd="@dimen/dp_72"
+                        android:orientation="vertical">
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="强制伪息屏"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/dp_4"
+                            android:maxLines="3"
+                            android:text="开启后，离开本软件超过 60 秒将主动进入伪息屏模式（可能打断其它 App的正常使用）"
+                            android:textSize="@dimen/sp_10" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/forcePseudoMaskSwitch"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_alignParentEnd="true"

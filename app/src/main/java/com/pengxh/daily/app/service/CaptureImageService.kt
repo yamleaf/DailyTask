@@ -24,6 +24,7 @@ import androidx.core.graphics.get
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
@@ -58,11 +59,9 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
             _projectionEvents.tryEmit(event)
         }
 
-        // 等待截屏结果的协程作用域
         @Volatile
         private var captureScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-        // 截屏结果流，仅供 requestCaptureScreen() 内部使用
         private val _captureResults = MutableSharedFlow<String>(extraBufferCapacity = 1)
         private val captureResults = _captureResults.asSharedFlow()
 
@@ -74,12 +73,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
 
         /**
          * 触发截屏，返回 CompletableDeferred 供调用方 await 结果
-         *
-         * 内部逻辑：
-         *   1. 发射截屏请求到 captureScreenRequest
-         *   2. 启动协程订阅 captureResults 等待截屏结果
-         *   3. 超时 3 秒兜底（覆盖 captureScreen 内部黑屏重试的 ~2.3s）
-         *   4. complete Deferred → 调用方 await() 即时返回
          */
         fun requestCaptureScreen(): CompletableDeferred<String?> {
             _captureScreenRequest.tryEmit(Unit)
@@ -134,7 +127,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
         notificationManager.createNotificationChannel(channel)
         val notification = notificationBuilder.build()
 
-        // 初始化图片文件目录
         createImageFileDir()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -156,7 +148,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
         val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED)
             ?: return START_STICKY
 
-        // resultCode 为 RESULT_CANCELED 说明是服务重启（非用户授权触发），直接返回
         if (resultCode == Activity.RESULT_CANCELED) return START_STICKY
 
         val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -194,7 +185,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
             ProjectionSession.setProjection(projection)
             Log.d(kTag, "MediaProjection created successfully")
 
-            // 初始化截屏资源（只执行一次）
             initializeCaptureResources(projection)
 
             emitProjectionEvent(ProjectionEvent.Ready)
@@ -258,10 +248,8 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
             return
         }
 
-        // 如果资源未初始化，先初始化
         if (!isCapturingInitialized || imageReader == null || virtualDisplay == null) {
             Log.w(kTag, "Capture resources not initialized, reinitializing...")
-            // 先释放可能残留的脏资源，避免 VirtualDisplay 泄漏或状态不一致
             releaseCaptureResources()
             initializeCaptureResources(projection)
             if (!isCapturingInitialized) {
@@ -280,7 +268,13 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 val startTime = System.currentTimeMillis()
                 Log.d(kTag, "================== 开始截屏 ==================")
 
-                // 不排空旧帧：后台环境下 VirtualDisplay 帧率被系统限速，排空后等新帧依赖时机运气，直接用 buffer 中已有的帧更可靠
+                // 伪息屏蒙层在显示时，临时移除
+                val maskShowing = MaskOverlayHelper.isShowing()
+                if (maskShowing) {
+                    MaskOverlayHelper.hideForScreenshot(this@CaptureImageService)
+                    delay(400)
+                }
+
                 val image = withTimeoutOrNull(1000L) {
                     Log.d(kTag, "进入等待......")
                     waitForImageAvailable(reader)
@@ -292,6 +286,9 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                     MessageDispatcher.sendMessage(
                         "截屏失败", "acquireNextImage返回null, 总耗时: ${elapsed}ms"
                     )
+                    if (maskShowing) {
+                        MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
+                    }
                     return@launch
                 }
                 Log.d(kTag, "图像获取成功, 耗时: ${elapsed}ms")
@@ -312,25 +309,16 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                     Bitmap.createBitmap(bitmap, 0, 0, width, height)
                 } else bitmap
 
-                // 只取中间那部分截图
-                val y = (cropped.height * 0.2f).toInt()
-                val halfHeight = y + cropped.height / 2
+                // 保存全屏截图（不再裁剪中间区域）
+                val finalBitmap = cropped
 
-                // 边界检查
-                val validY = y.coerceAtLeast(0).coerceAtMost(cropped.height - 1)
-                val validHeight = halfHeight.coerceAtLeast(1).coerceAtMost(cropped.height - validY)
-                val topHalf = if (validY >= 0 && validHeight > 0
-                    && validY + validHeight <= cropped.height
-                ) {
-                    Bitmap.createBitmap(cropped, 0, validY, cropped.width, validHeight)
-                } else {
-                    cropped
-                }
-
-                if (isBitmapMostlyBlack(topHalf)) {
+                if (isBitmapMostlyBlack(finalBitmap)) {
                     if (captureRetryCount < 2) {
                         captureRetryCount++
                         Log.w(kTag, "检测到黑色画面，第${captureRetryCount}次重试")
+                        if (maskShowing) {
+                            MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
+                        }
                         delay(1000)
                         captureScreen()
                         return@launch
@@ -343,9 +331,13 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 }
 
                 val imagePath = "${createImageFileDir()}/${dateTimeFormat.format(Date())}.png"
-                topHalf.saveImage(imagePath)
+                finalBitmap.saveImage(imagePath)
                 LogFileManager.writeLog("截屏成功: $imagePath")
                 emitCaptureResult(imagePath)
+
+                if (maskShowing) {
+                    MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
+                }
             } catch (_: RemoteException) {
                 Log.w(kTag, "RemoteException during capture")
                 ProjectionSession.markStoppedNeedAuth()
@@ -371,7 +363,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
 
             val listener = ImageReader.OnImageAvailableListener { reader ->
                 if (resumed) return@OnImageAvailableListener
-                // acquireLatestImage 在部分国内 OEM 后台场景可能返回 null，用 acquireNextImage 兜底
                 val image = reader.acquireLatestImage() ?: reader.acquireNextImage()
                 if (image != null) {
                     reader.setOnImageAvailableListener(null, null)
@@ -382,7 +373,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                         image.close()
                     }
                 }
-                // image 为 null 时保留 listener，等待下一次回调；超时由 withTimeoutOrNull 兜底
             }
 
             continuation.invokeOnCancellation {
@@ -393,7 +383,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
 
             imageReader.setOnImageAvailableListener(listener, null)
 
-            // 立即尝试获取 buffer 中已有的帧（不依赖 listener 异步回调），后台慢帧率场景下 buffer 里大概率已有一帧，直接取可避免超时
             if (!resumed) {
                 val existing = imageReader.acquireLatestImage()
                 if (existing != null) {
