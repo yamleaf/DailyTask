@@ -18,7 +18,8 @@ import java.util.Random
 class MaskViewController(
     private val activity: AppCompatActivity,
     private val binding: ActivityMainBinding,
-    private val insetsController: WindowInsetsControllerCompat
+    private val insetsController: WindowInsetsControllerCompat,
+    private val onMaskVisibilityChanged: ((Boolean) -> Unit)? = null
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var currentAnimation: Animation? = null
@@ -52,6 +53,8 @@ class MaskViewController(
 
         // 启动时钟动画
         startClockAnimation()
+        MaskOverlayHelper.show(activity)
+        onMaskVisibilityChanged?.invoke(true)
     }
 
     fun hideMaskView() {
@@ -80,13 +83,18 @@ class MaskViewController(
 
         binding.maskView.visibility = View.GONE
         binding.rootView.visibility = View.VISIBLE
+        MaskOverlayHelper.hide(activity)
+        onMaskVisibilityChanged?.invoke(false)
     }
 
     fun isMaskVisible(): Boolean = binding.maskView.isVisible
 
     private fun startClockAnimation() {
+        stopClockAnimation()
+        val interval = if (AppRuntimeConfig.isPowerSaveMode()) 120_000L else 30_000L
         clockAnimationRunnable = object : Runnable {
             override fun run() {
+                if (!binding.maskView.isVisible) return
                 if (binding.maskView.width == 0 || binding.maskView.height == 0) return
 
                 binding.clockView.measure(
@@ -110,10 +118,11 @@ class MaskViewController(
                         .start()
                 }
 
-                mainHandler.postDelayed(this, 30000)
+                val next = if (AppRuntimeConfig.isPowerSaveMode()) 120_000L else 30_000L
+                mainHandler.postDelayed(this, next)
             }
         }
-        mainHandler.postDelayed(clockAnimationRunnable!!, 30000)
+        mainHandler.postDelayed(clockAnimationRunnable!!, interval)
     }
 
     private fun stopClockAnimation() {
