@@ -1,13 +1,13 @@
-name: Build Alpha
+name: Build Alpha（个人优化版本）
 
 on:
   push:
-    branches: [dev]
+    branches: [alpha]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build APK (dev / alpha 自动版本)
+    name: Build APK (alpha 自动版本)
     runs-on: ubuntu-latest
 
     # alpha 构建：注入环境变量，build.gradle 据此生成
@@ -53,11 +53,11 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: dailyTask_dev_alpha_debug
+          name: dailyTask_alpha_debug
           path: app/build/outputs/apk/debug/*.apk
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: dailyTask_dev_alpha_release
+          name: dailyTask_alpha_release
           path: app/build/outputs/apk/release/*.apk

@@ -49,6 +49,8 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "ScreenshotA11y"
+        /** 文本识别节流间隔：无障碍事件极密集，限制每 3 秒最多扫描一次 */
+        private const val TEXT_SCAN_INTERVAL_MS = 3000L
 
         @Volatile
         private var instance: AutoProjectionAccessibilityService? = null
@@ -90,6 +92,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 // 因此只有时间接近此刻的打卡成功记录才算本次结果（见 onAccessibilityEvent）。
                 armTimeMillis = System.currentTimeMillis()
                 sawPunchButton = false
+                lastTextScanMillis = 0L
                 Log.d(TAG, "文本检测状态: active=$enabled, armTime=$armTimeMillis")
                 LogFileManager.writeLog("无障碍文本检测: active=$enabled")
             }
@@ -128,6 +131,10 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     /** 记录上次前台包名，用于检测前台任务切换 */
     @Volatile
     private var lastForegroundPackage: String? = null
+
+    /** 上次文本扫描时间戳（节流用），避免无障碍事件高频触发反复扫描同一界面 */
+    @Volatile
+    private var lastTextScanMillis = 0L
 
     /** 打卡成功关键词（仅真正的成功提示，不含“上班打卡/下班打卡”等按钮文字） */
     private val successKeywords = listOf(
@@ -306,6 +313,14 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 // 非目标应用，忽略
                 return
             }
+
+            // 文本识别节流：无障碍事件（尤其 TYPE_WINDOW_CONTENT_CHANGED）在飞书中极密集，
+            // 原逻辑每秒触发数十次重复扫描。用户要求每 3 秒识别一次即可，故在此限流。
+            val now = System.currentTimeMillis()
+            if (now - lastTextScanMillis < TEXT_SCAN_INTERVAL_MS) {
+                return
+            }
+            lastTextScanMillis = now
 
             val text = collectNodeText(root).replace("\n", " ").replace("\\s+".toRegex(), " ").trim()
             if (text.isBlank()) return
@@ -503,7 +518,11 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 val gm = groupMatch.groupValues[2].toInt()
                 val gd = groupMatch.groupValues[3].toInt()
                 val now = Calendar.getInstance()
-                now.get(Calendar.MONTH) + 1 == gm && now.get(Calendar.DAY_OF_MONTH) == gd
+                val isToday = now.get(Calendar.MONTH) + 1 == gm && now.get(Calendar.DAY_OF_MONTH) == gd
+                // 命中今天返回 true；不匹配今天的“M月D日”可能是推荐消息、历史卡片等无关内容的日期
+                // （如“2025年11月13日”），不能据此否定本次打卡——历史上因此误判 groupIsToday=false 导致漏检。
+                // 故不匹配今天时返回 null，交由“新鲜度”判定（本次监听窗口附近的时间戳即视为本次打卡）。
+                if (isToday) true else null
             }
             else -> null
         }
