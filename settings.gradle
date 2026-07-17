@@ -9,10 +9,12 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
-        maven { url = uri("https://jitpack.io") }
+        // 官方仓库优先：GitHub Actions 在国外，google()/mavenCentral() 更稳定
         google()
         mavenCentral()
+        // 国内镜像作为 fallback，便于本地开发加速
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
