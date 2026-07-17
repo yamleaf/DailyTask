@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /**
  * @description: 状态栏监听服务
@@ -357,6 +358,14 @@ class NotificationMonitorService : NotificationListenerService() {
                                 val feedbackMode = SaveKeyValues.loadInt(
                                     Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0
                                 )
+                                // 文本检测命中标记（用于结果兜底判断）
+                                var detectedSuccess = false
+                                // 监听无障碍成功事件：命中后打标，避免重复发通知
+                                val detectionJob = launch {
+                                    NotificationMonitorService.events.collect { event ->
+                                        if (event is MonitorEvent.ClockInSuccess) detectedSuccess = true
+                                    }
+                                }
                                 // 无障碍文本反馈模式：开启文本检测
                                 if (resultSource == 2 && feedbackMode == 1) {
                                     AutoProjectionAccessibilityService.setTextDetectionEnabled(true)
@@ -388,9 +397,30 @@ class NotificationMonitorService : NotificationListenerService() {
 
                                         delay(minOf(1000L, remaining).coerceAtLeast(1))
                                     }
-                                    // 倒计时结束：关闭文本检测，返回本 App，不在目标 App 傻等着
+                                    // 倒计时结束：关闭文本检测，先取截图（目标 App 还在前台时），
+                                    // 然后再返回主页。避免回到桌面/本 App 后再截图截到桌面。
                                     AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
-                                    LogFileManager.writeLog("远程打卡倒计时结束，返回主页")
+                                    LogFileManager.writeLog("远程打卡倒计时结束，目标 App 仍在台，准备截图")
+
+                                    // 停止成功事件监听（结果判定已读取）
+                                    detectionJob.cancel()
+
+                                    // 获取截图：优先用倒计时最后 5 秒已发起的预截图；
+                                    // 若失败且未检测到成功，则按权限优先级兜底再截一次。
+                                    var imagePath = ""
+                                    if (hasCaptured && captureDeferred != null) {
+                                        imagePath = runCatching {
+                                            withTimeout(5000) { captureDeferred!!.await() ?: "" }
+                                        }.getOrNull() ?: ""
+                                    }
+                                    if (imagePath.isEmpty() && !detectedSuccess) {
+                                        imagePath = runCatching {
+                                            withTimeout(5000) { TaskScheduler.tryFallbackScreenshot() }
+                                        }.getOrNull() ?: ""
+                                    }
+
+                                    // 现在返回主页 / 本 App
+                                    LogFileManager.writeLog("远程打卡截图已获取，返回主页")
                                     withContext(Dispatchers.Main) {
                                         try {
                                             startActivity(Intent(Intent.ACTION_MAIN).apply {
@@ -404,21 +434,30 @@ class NotificationMonitorService : NotificationListenerService() {
                                         bringMainActivityForMask(showMask = maskWasShowing)
                                     }
 
-                                    // 发送远程打卡结果
-                                    if (hasCaptured && captureDeferred != null) {
-                                        val imagePath = captureDeferred!!.await()
-                                        if (imagePath != null && imagePath.isNotEmpty()) {
+                                    // 统一发送远程打卡结果：无论何种模式都必须有反馈，避免“什么都没有”。
+                                    if (detectedSuccess) {
+                                        // 文本检测命中成功：无障碍服务已直接发过“打卡结果通知”，不重复
+                                        LogFileManager.writeLog("远程打卡结果：已检测到成功，无需重复发送")
+                                    } else {
+                                        if (imagePath.isNotEmpty()) {
                                             MessageDispatcher.sendAttachmentMessage(
                                                 "远程打卡结果",
-                                                StatusReporter.buildScreenshotResultHtml(true, "远程打卡截图已发送"),
-                                                imagePath
+                                                StatusReporter.buildTimeoutAlertHtml(
+                                                    "远程打卡结果",
+                                                    "远程打卡已执行，截图见附件，请手动确认是否成功"
+                                                ),
+                                                imagePath,
+                                                force = true
                                             )
+                                            LogFileManager.writeLog("远程打卡结果：已发兜底截图 $imagePath")
                                         } else {
                                             MessageDispatcher.sendMessage(
                                                 "远程打卡结果",
-                                                StatusReporter.buildScreenshotResultHtml(false, "截图失败，请手动检查"),
+                                                "远程打卡已执行，但当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查是否成功",
+                                                force = true,
                                                 appendMeta = false
                                             )
+                                            LogFileManager.writeLog("远程打卡结果：无可用截屏权限，已发文字提醒")
                                         }
                                     }
                                 } finally {
