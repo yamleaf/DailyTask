@@ -19,21 +19,32 @@ android {
         minSdk 26
         targetSdk 36
 
-        // 版本号策略（dev 分支）：
+        // 版本号策略（alpha 分支）：
+        // - 基线版本号自动同步 master 分支的 app/build.gradle（alpha 即基于该主线版本）
         // - 默认（未设置或为 alpha）：alpha 自动版本
-        //   versionName = alpha-<编译时间 yyyyMMddHHmm>-<git短哈希>
-        //   versionCode = 自增构建号（CI 传 BUILD_NUMBER=github.run_number；本地默认 1）
-        // - 仅当显式设置 BUILD_FLAVOR=release 时回退到固定版本号（正式发版用）
+        //     versionName = <master基线版本>-alpha-<git短哈希>
+        //     versionCode = 自增构建号（CI 传 BUILD_NUMBER=github.run_number；本地默认 1）
+        // - 仅当显式设置 BUILD_FLAVOR=release 时回退到 master 固定版本号（正式发版用）
+        def baselineVersion = {
+            try {
+                def proc = 'git show master:app/build.gradle'.execute()
+                proc.waitFor()
+                if (proc.exitValue() == 0) {
+                    def m = proc.text =~ /versionName\s+'(\d+(?:\.\d+)*)'/
+                    if (m.find()) return m.group(1)
+                }
+            } catch (Exception ignored) {}
+            return '2.4.2.0'
+        }()
         def isAlphaBuild = System.getenv('BUILD_FLAVOR') != 'release'
         if (isAlphaBuild) {
             def gitShort = (System.getenv('GIT_COMMIT_SHORT') ?: 'local').take(7)
-            def buildTime = new SimpleDateFormat('yyyyMMddHHmm', Locale.CHINA).format(new Date())
             def buildNumber = (System.getenv('BUILD_NUMBER') ?: '0').toInteger()
-            versionName "alpha-${buildTime}-${gitShort}"
+            versionName "${baselineVersion}-alpha-${gitShort}"
             versionCode buildNumber > 0 ? buildNumber : 1
         } else {
-            versionCode 2442
-            versionName '2.4.4.2'
+            versionCode 2420
+            versionName baselineVersion
         }
 
         ndkVersion '21.4.7075529'
