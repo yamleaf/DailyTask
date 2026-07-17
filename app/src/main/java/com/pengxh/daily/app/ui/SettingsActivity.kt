@@ -335,38 +335,14 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             }
         }
 
-        // 无障碍服务开关：检查系统无障碍是否已开启
+        // 无障碍开关：仅作为系统无障碍状态的镜像与入口。
+        // 点击跳转系统设置，由用户在系统中真正开启/关闭无障碍服务；
+        // 返回后 onResume() 会按系统实际状态自动刷新开关与提示。
         binding.accessibilitySwitch.setOnClickListener {
-            val currentSource = SaveKeyValues.loadInt(
-                Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
-            )
-            if (currentSource == 2) {
-                // 当前已开启 → 关闭
-                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
-                binding.accessibilitySwitch.isChecked = false
-                binding.accessibilityTipsView.text = "无障碍服务未开启，无障碍模式无法获取打卡结果"
-                binding.accessibilityTipsView.setTextColor(Color.RED)
-                binding.accessibilityTipsView.visibility = View.VISIBLE
-                binding.accessibilityFeedbackLayout.visibility = View.GONE
-                binding.accessibilityFeedbackDivider.visibility = View.GONE
-                updateResultSourceView()
-                "无障碍结果模式已关闭".show(this)
-            } else {
-                // 当前未开启 → 检查无障碍服务是否在系统设置中已启用
-                if (!AutoProjectionAccessibilityService.isEnabled(this)) {
-                    binding.accessibilitySwitch.isChecked = false
-                    showAccessibilityRequiredDialog()
-                    return@setOnClickListener
-                }
-                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
-                binding.accessibilitySwitch.isChecked = true
-                binding.accessibilityTipsView.visibility = View.GONE
-                binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
-                binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
-                updateAccessibilityFeedbackView()
-                updateResultSourceView()
-                "无障碍结果模式已开启".show(this)
-            }
+            val systemEnabled = AutoProjectionAccessibilityService.isEnabled(this)
+            // 撤销 Switch 自带的状态翻转，避免返回前视觉抖动
+            binding.accessibilitySwitch.isChecked = systemEnabled
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
         binding.commandLayout.setOnClickListener {
@@ -612,27 +588,25 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.captureTipsView.visibility = View.VISIBLE
         }
 
-        // 同步无障碍服务 UI（根据系统无障碍实际状态 + RESULT_SOURCE_KEY）
+        // 同步无障碍服务 UI：开关显示状态以系统无障碍实际开关为准
         val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
         val a11yEnabled = AutoProjectionAccessibilityService.isEnabled(this)
+        binding.accessibilitySwitch.isChecked = a11yEnabled
 
-        if (source == 2 && a11yEnabled) {
-            binding.accessibilitySwitch.isChecked = true
+        if (a11yEnabled && source == 2) {
             binding.accessibilityTipsView.visibility = View.GONE
             binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
             binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
             updateAccessibilityFeedbackView()
         } else {
-            if (source != 2) {
-                binding.accessibilitySwitch.isChecked = false
-            } else {
-                // source==2 但无障碍未开启 → 开关关闭并提示
-                binding.accessibilitySwitch.isChecked = false
+            if (source == 2 && !a11yEnabled) {
+                // 系统无障碍已关闭，但结果来源仍是无障碍 → 回退到通知模式，避免去用不可用的服务
                 SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
+                updateResultSourceView()
             }
             binding.accessibilityTipsView.text = "无障碍服务未开启，无障碍模式无法获取打卡结果"
             binding.accessibilityTipsView.setTextColor(Color.RED)
-            binding.accessibilityTipsView.visibility = View.VISIBLE
+            binding.accessibilityTipsView.visibility = if (a11yEnabled) View.GONE else View.VISIBLE
             binding.accessibilityFeedbackLayout.visibility = View.GONE
             binding.accessibilityFeedbackDivider.visibility = View.GONE
         }
