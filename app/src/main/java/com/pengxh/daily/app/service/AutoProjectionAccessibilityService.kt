@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -85,7 +86,11 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             instance?.apply {
                 textDetectionActive = enabled
                 textDetected = false
-                Log.d(TAG, "文本检测状态: active=$enabled")
+                // 记录“开始监听”的时刻：极速打卡会在打开 App 后短时间内自动完成，
+                // 因此只有时间接近此刻的打卡成功记录才算本次结果（见 onAccessibilityEvent）。
+                armTimeMillis = System.currentTimeMillis()
+                sawPunchButton = false
+                Log.d(TAG, "文本检测状态: active=$enabled, armTime=$armTimeMillis")
                 LogFileManager.writeLog("无障碍文本检测: active=$enabled")
             }
         }
@@ -110,20 +115,30 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     @Volatile
     private var textDetected = false
 
+    /** 开始监听打卡结果的时刻（setTextDetectionEnabled(true) 时记录）。
+     *  极速打卡在打开 App 后短时间内自动完成，故只有时间接近此刻的成功记录才算本次结果。 */
+    @Volatile
+    private var armTimeMillis = 0L
+
+    /** 本次监听会话中是否曾在界面上看到“上班打卡/下班打卡/外出打卡”按钮
+     *  （用于“已打卡”状态变化的辅助判定，证明本次确实有打卡动作发生）。 */
+    @Volatile
+    private var sawPunchButton = false
+
     /** 记录上次前台包名，用于检测前台任务切换 */
     @Volatile
     private var lastForegroundPackage: String? = null
 
-    /** 打卡成功关键词（包含任意一个即判定成功） */
+    /** 打卡成功关键词（仅真正的成功提示，不含“上班打卡/下班打卡”等按钮文字） */
     private val successKeywords = listOf(
         "打卡成功",
         "已打卡",
-        "上班打卡",
-        "下班打卡",
-        "外出打卡",
         "打卡完成",
         "考勤成功"
     )
+
+    /** 打卡按钮文字（本次会话见到过即说明确有打卡动作发生） */
+    private val punchButtonMarkers = listOf("上班打卡", "下班打卡", "外出打卡")
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -297,12 +312,46 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
 
             LogFileManager.writeLog("无障碍读取文本：package=$packageName, text=${text.take(120)}")
 
-            val matchedKeyword = successKeywords.find { text.contains(it) }
-            if (matchedKeyword != null) {
+            // 记录本次会话是否见到打卡按钮（用于“已打卡”状态变化判定）
+            if (punchButtonMarkers.any { text.contains(it) }) {
+                sawPunchButton = true
+            }
+
+            // 企业微信自动打卡消息：如“17:40 下班自动打卡·正常”。
+            // 必须同时含“自动打卡”和“正常”，避免把“自动打卡·异常”误判为成功。
+            val isWeWorkAuto = text.contains("自动打卡") && text.contains("正常")
+
+            // 解析本次命中的成功关键词及位置：优先企业微信组合，其次通用成功关键词
+            val (matchedKeyword, keywordPos) = if (isWeWorkAuto) {
+                "自动打卡" to text.indexOf("自动打卡")
+            } else {
+                val keywordIndex = successKeywords.indexOfFirst { text.contains(it) }
+                if (keywordIndex < 0) return
+                successKeywords[keywordIndex] to text.indexOf(successKeywords[keywordIndex])
+            }
+
+            // 可靠性核心：只接受“时间接近本次监听起点、且属于今天”的成功记录。
+            // 历史记录（如昨天的 18:11 下班极速打卡成功）要么时间对不上“现在”，
+            // 要么被飞书归入“昨天”分组，都会被直接排除，不再依赖脆弱的固定延迟基线。
+            val (candidateMillis, groupIsToday) = parseSuccessTimeAndGroup(text, keywordPos)
+            val accepted = if (candidateMillis != null) {
+                val fresh = candidateMillis in (armTimeMillis - 3 * 60_000)..(armTimeMillis + 5 * 60_000)
+                // groupIsToday == true 或无法确定分组（无日期分组标记）时，结合新鲜度判定
+                fresh && groupIsToday != false
+            } else {
+                // 无时间戳的成功词（如“已打卡”按钮状态，或企业微信“自动打卡·正常”）：
+                // 必须本次会话确实见过打卡按钮，证明是本次打卡动作导致的状态变化，
+                // 避免把今天早已打卡的状态误报为本次成功
+                (matchedKeyword == "已打卡" || isWeWorkAuto) && sawPunchButton
+            }
+
+            if (accepted) {
                 textDetected = true
-                LogFileManager.writeLog("无障碍检测到打卡成功：keyword=$matchedKeyword")
+                LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=$candidateMillis，groupIsToday=$groupIsToday）")
                 val snippet = extractSnippet(text, matchedKeyword)
                 handleTextDetected(snippet, matchedKeyword, packageName)
+            } else {
+                LogFileManager.writeLog("无障碍忽略成功词（历史/非本次）：keyword=$matchedKeyword，candidateMillis=$candidateMillis，groupIsToday=$groupIsToday")
             }
         } finally {
             root.recycle()
@@ -396,6 +445,69 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         val prefix = if (start > 0) "…" else ""
         val suffix = if (end < text.length) "…" else ""
         return "$prefix${text.substring(start, end).trim()}$suffix"
+    }
+
+    /**
+     * 成功记录附近的时间戳正则（HH:mm），如“18:11 下班极速打卡成功”
+     */
+    private val timePattern = Regex("(\\d{1,2}):(\\d{2})")
+
+    /**
+     * 飞书消息列表的日期分组标记：今天 / 昨天 / 前天 / M月D日
+     */
+    private val dateGroupPattern = Regex("(今天|昨天|前天)|(\\d{1,2})月(\\d{1,2})[日号]?")
+
+    /**
+     * 解析成功关键词附近的时间戳与所属日期分组。
+     *
+     * @return Pair(候选时间戳毫秒(今天基准), 是否属于“今天”分组)
+     *         groupIsToday: true=今天 / false=昨天·前天·过去日期 / null=无日期分组标记
+     *
+     * 关键：历史记录要么时间远离“现在”（被新鲜度判定拒绝），
+     * 要么被飞书显式归入“昨天/过去日期”分组（被 groupIsToday=false 拒绝），
+     * 由此从根上区分“本次成功”与“历史成功”，无需依赖页面加载时机。
+     */
+    private fun parseSuccessTimeAndGroup(text: String, keywordPos: Int): Pair<Long?, Boolean?> {
+        // 1) 时间：取关键词前后 40 字符内最近的一个 HH:mm
+        val start = (keywordPos - 40).coerceAtLeast(0)
+        val end = (keywordPos + 40).coerceAtMost(text.length)
+        val window = text.substring(start, end)
+        val timeMatch = timePattern.find(window)
+        val candidateMillis = if (timeMatch != null) {
+            val (h, m) = timeMatch.destructured
+            try {
+                val cal = Calendar.getInstance()
+                cal.set(Calendar.HOUR_OF_DAY, h.toInt())
+                cal.set(Calendar.MINUTE, m.toInt())
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                cal.timeInMillis
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+
+        // 2) 日期分组：取关键词之前最近的日期分组标记
+        val before = text.substring(0, keywordPos)
+        val groupMatch = dateGroupPattern.findAll(before).lastOrNull()
+        val groupIsToday = when {
+            groupMatch == null -> null
+            groupMatch.groupValues[1].isNotEmpty() -> when (groupMatch.groupValues[1]) {
+                "今天" -> true
+                else -> false // 昨天 / 前天
+            }
+            groupMatch.groupValues[2].isNotEmpty() -> {
+                // 显式 M月D日：与今天比较
+                val gm = groupMatch.groupValues[2].toInt()
+                val gd = groupMatch.groupValues[3].toInt()
+                val now = Calendar.getInstance()
+                now.get(Calendar.MONTH) + 1 == gm && now.get(Calendar.DAY_OF_MONTH) == gd
+            }
+            else -> null
+        }
+        return candidateMillis to groupIsToday
     }
 
     override fun onInterrupt() {
