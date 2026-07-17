@@ -303,8 +303,8 @@ object TaskScheduler {
                 if (imagePath.isNotEmpty()) {
                     // force=true：超时兜底通知是关键告警，跳过去重，保证一定送达（防「什么都没收到」）
                     MessageDispatcher.sendAttachmentMessage(
-                        "打卡超时通知",
-                        StatusReporter.buildTimeoutAlertHtml("打卡超时", "截图见附件，请手动检查是否打卡成功"),
+                        "任务执行结果通知",
+                        StatusReporter.buildTimeoutAlertHtml("任务执行结果", "截图见附件，请手动检查是否打卡成功"),
                         imagePath,
                         force = true
                     )
@@ -313,8 +313,8 @@ object TaskScheduler {
                     val failTip =
                         "超时未检测到打卡成功，且当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查"
                     // force=true：关键告警跳过去重，保证一定送达
-                    MessageDispatcher.sendMessage("打卡超时通知", failTip, force = true)
-                    LogFileManager.writeLog("打卡超时且无可截屏权限: $failTip")
+                    MessageDispatcher.sendMessage("任务执行结果通知", failTip, force = true)
+                    LogFileManager.writeLog("任务执行结果：无可截屏权限: $failTip")
                 }
             }
 
