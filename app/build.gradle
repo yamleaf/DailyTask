@@ -18,8 +18,23 @@ android {
         applicationId 'com.pengxh.daily.app'
         minSdk 26
         targetSdk 36
-        versionCode 2442
-        versionName '2.4.4.2'
+
+        // 版本号策略：
+        // - 默认（master / 正式构建）：使用固定版本号
+        // - 设置环境变量 BUILD_FLAVOR=alpha（develop 分支 CI）：自动生成 alpha 版本，
+        //   versionName 含 git 短哈希 + 编译时间，versionCode 取自增构建号（单调递增）
+        def isAlphaBuild = System.getenv('BUILD_FLAVOR') == 'alpha'
+        if (isAlphaBuild) {
+            def gitShort = (System.getenv('GIT_COMMIT_SHORT') ?: 'local').take(7)
+            def buildTime = new SimpleDateFormat('yyyyMMddHHmm', Locale.CHINA).format(new Date())
+            def buildNumber = (System.getenv('BUILD_NUMBER') ?: '0').toInteger()
+            versionName "2.5.0-alpha-${gitShort}-${buildTime}"
+            versionCode buildNumber > 0 ? buildNumber : 1
+        } else {
+            versionCode 2442
+            versionName '2.4.4.2'
+        }
+
         ndkVersion '21.4.7075529'
 
         ndk {
