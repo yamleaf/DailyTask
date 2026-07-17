@@ -560,7 +560,7 @@ object StatusReporter {
             // 完成提示
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">✅</div>")
-            append("<div style=\"font-size:16px;font-weight:600;color:#52c41a;margin-bottom:4px;\">今日任务已全部执行完毕</div>")
+            append("<div style=\"font-size:16px;font-weight:600;color:#52c41a;margin-bottom:4px;\">本轮任务已全部执行完毕</div>")
             append("<div style=\"font-size:12px;color:#888;\">距下次重置 ${TaskScheduler.secondsUntilNextReset().formatTime()}</div>")
             append("</div>")
 

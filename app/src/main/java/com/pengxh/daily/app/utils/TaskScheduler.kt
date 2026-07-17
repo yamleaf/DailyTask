@@ -1,5 +1,6 @@
 package com.pengxh.daily.app.utils
 
+import android.os.Build
 import android.os.SystemClock
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
@@ -25,6 +26,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Calendar
@@ -38,6 +42,10 @@ object TaskScheduler {
      * */
     private val _isRunning = MutableStateFlow(false)
     val isRunning = _isRunning.asStateFlow()
+
+    /** 重置等待中断信号：修改重置时间时唤醒 waitUntilNextReset 重新计算目标 */
+    @Volatile
+    private var pendingResetSignal: CompletableDeferred<Unit>? = null
 
     /**
      * UI 文本事件（tipsView / adapter 高亮），不参与按钮逻辑
@@ -111,22 +119,25 @@ object TaskScheduler {
 
         val tempJob = currentScope.launch {
             while (isActive) {
-                if (shouldSkipToday()) {
+                // 每日重置点之后，调度下一天的任务；
+                // 旧逻辑在重置点重跑“今天”已过期任务并空等 24h，导致次日任务永不执行
+                val scheduleDate = resolveScheduleDate()
+                if (shouldSkipDay(scheduleDate)) {
                     runningDetail = "今日休息已跳过"
                     _tipsEvent.emit(TipsEvent.Skip)
                     ForegroundRunningService.emitNotificationText("今日休息，任务已跳过")
                 } else {
-                    val schedule = buildTodaySchedule()
+                    val schedule = buildSchedule(scheduleDate)
                     if (schedule.isEmpty()) {
                         LogFileManager.writeLog("任务列表为空，停止调度")
                         return@launch
                     }
 
-                    LogFileManager.writeLog("开始执行每日任务，共 ${schedule.size} 个")
+                    LogFileManager.writeLog("开始执行本轮任务（${scheduleDate}），共 ${schedule.size} 个")
                     executeSchedule(schedule)
                 }
 
-                // 今天结束，睡到明天
+                // 今天结束，睡到下一个重置点
                 if (isActive) waitUntilNextReset()
             }
         }
@@ -150,6 +161,20 @@ object TaskScheduler {
 
         for (task in schedule) {
             val now = System.currentTimeMillis()
+
+            // 逐任务执行日节假日判定：任务实际执行日若为休息日/节假日则跳过。
+            // 周期入口的 shouldSkipDay 只判「周期起始日」，而前重置点任务经 +1 天偏移后
+            // 实际执行日可能落在次日，必须用真实执行日再判一次，避免节假日当天仍被打卡。
+            val execDate = Instant.ofEpochMilli(task.actualTimeMillis)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+            if (shouldSkipDay(execDate)) {
+                skippedCount++
+                LogFileManager.writeLog(
+                    "第 ${task.displayIndex} 个任务执行日($execDate)为休息日/节假日，跳过"
+                )
+                continue
+            }
 
             // 任务时间已过，跳过
             if (task.actualTimeMillis <= now) {
@@ -202,6 +227,8 @@ object TaskScheduler {
                 withContext(Dispatchers.Main) {
                     MaskOverlayHelper.hide(DailyTaskApplication.get())
                 }
+                // 蒙层移除后屏幕可能休眠，打卡窗口内需保活背光，避免打卡失败（问题2 修复防回归）
+                IdlePseudoMaskController.keepAwakeForPunch(DailyTaskApplication.get())
             }
 
             DailyTaskApplication.get().openApplication()
@@ -231,8 +258,9 @@ object TaskScheduler {
                             // 截屏模式：MediaProjection
                             hasCaptured = true
                             captureDeferred = CaptureImageService.requestCaptureScreen()
-                        } else if (resultSource == 2 && feedbackMode == 0) {
-                            // 无障碍-截屏反馈模式：AccessibilityService.takeScreenshot
+                        } else if (resultSource == 2) {
+                            // 无障碍模式（文本/截屏反馈）：AccessibilityService.takeScreenshot 兜底截屏。
+                            // 文本反馈模式下识别不到成功结果时，也截一张发过去，作为“看不到文本”时的兜底。
                             hasCaptured = true
                             val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
                             captureDeferred = a11yDeferred
@@ -259,33 +287,34 @@ object TaskScheduler {
             if (!clockInSuccess) {
                 _returnToApp.emit(Unit)
 
-                // 发送兜底截图给用户（截屏模式 或 无障碍-截屏反馈模式）
+                // 兜底截图：按「实际权限」优先级选择截屏方式（与 resultSource 配置无关）：
+                // 1) 已有预截图（打卡过程中的 MediaProjection 实截）→ 直接使用
+                // 2) 系统无障碍权限已开启（且 Android 14+）→ AccessibilityService.takeScreenshot
+                // 3) 截屏服务权限已授权（MediaProjection 处于 ACTIVE）→ CaptureImageService 兜底
+                // 4) 都没有可用权限 → 截屏失败，降级为文字提醒
+                var imagePath = ""
                 if (hasCaptured) {
-                    // Deferred 内部已有 3s 超时兜底，await() 不会无限挂起
-                    val imagePath = captureDeferred?.await() ?: ""
-                    if (imagePath.isNotEmpty()) {
-                        MessageDispatcher.sendAttachmentMessage(
-                            "打卡超时通知",
-                            StatusReporter.buildTimeoutAlertHtml("打卡超时", "截图见附件，请手动检查是否打卡成功"),
-                            imagePath
-                        )
-                        LogFileManager.writeLog("发送打卡超时截屏: $imagePath")
-                    } else {
-                        MessageDispatcher.sendMessage("打卡超时通知", "超时截屏失败，imagePath 为空")
-                    }
-                } else if (resultSource == 2 && feedbackMode == 1) {
-                    // 无障碍-文本反馈模式：未检测到成功文本，发送文字提醒
-                    MessageDispatcher.sendMessage(
+                    imagePath = captureDeferred?.await() ?: ""
+                }
+                if (imagePath.isEmpty()) {
+                    imagePath = runCatching { tryFallbackScreenshot() }.getOrNull() ?: ""
+                }
+
+                if (imagePath.isNotEmpty()) {
+                    // force=true：超时兜底通知是关键告警，跳过去重，保证一定送达（防「什么都没收到」）
+                    MessageDispatcher.sendAttachmentMessage(
                         "打卡超时通知",
-                        StatusReporter.buildTimeoutAlertHtml("打卡超时", "未从目标应用界面检测到打卡成功文本，请手动检查"),
-                        appendMeta = false
+                        StatusReporter.buildTimeoutAlertHtml("打卡超时", "截图见附件，请手动检查是否打卡成功"),
+                        imagePath,
+                        force = true
                     )
+                    LogFileManager.writeLog("发送打卡超时截屏: $imagePath")
                 } else {
-                    MessageDispatcher.sendMessage(
-                        "打卡超时通知",
-                        StatusReporter.buildTimeoutAlertHtml("打卡超时", "截图失败，请手动检查是否打卡成功"),
-                        appendMeta = false
-                    )
+                    val failTip =
+                        "超时未检测到打卡成功，且当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查"
+                    // force=true：关键告警跳过去重，保证一定送达
+                    MessageDispatcher.sendMessage("打卡超时通知", failTip, force = true)
+                    LogFileManager.writeLog("打卡超时且无可截屏权限: $failTip")
                 }
             }
 
@@ -295,6 +324,8 @@ object TaskScheduler {
                 withContext(Dispatchers.Main) {
                     MaskOverlayHelper.show(DailyTaskApplication.get())
                 }
+                // 蒙层已恢复（无 FLAG_KEEP_SCREEN_ON），释放打卡保活，让屏幕自然熄灭回到省电伪息屏
+                IdlePseudoMaskController.releaseKeepAwakeForPunch(DailyTaskApplication.get())
             }
 
             // ====== 阶段 3：回到主界面，处理结果 ======
@@ -304,9 +335,9 @@ object TaskScheduler {
         // ====== 全部完成 ======
         val message = when {
             executedCount + skippedCount == 0 -> "无任务可供执行"
-            executedCount == 0 -> "今日所有任务均已过期，跳过（$skippedCount 个），无需执行"
-            skippedCount > 0 -> "今日任务已全部执行完毕（执行 $executedCount 个，跳过 $skippedCount 个）"
-            else -> "今日任务已全部执行完毕"
+            executedCount == 0 -> "本轮所有任务均已过期，跳过（$skippedCount 个），无需执行"
+            skippedCount > 0 -> "本轮任务已全部执行完毕（执行 $executedCount 个，跳过 $skippedCount 个）"
+            else -> "本轮任务已全部执行完毕"
         }
         runningDetail = message
         LogFileManager.writeLog(message)
@@ -314,25 +345,80 @@ object TaskScheduler {
     }
 
     /**
-     * 等待到下一个每日重置时间
+     * 等待到下一个每日重置时间（整点）。功耗最低 + 运行时可响应重置时间修改。
+     *
+     * 重置时间只能设为整点（分钟恒为 0），因此可一次性精确挂起到下一个整点重置点，
+     * 无需每分钟轮询（轮询会白白唤醒 CPU，反而更耗电）。稳态下用单次 withTimeout
+     * 挂起，零额外 CPU 唤醒；当 [notifyResetTimeChanged] 被调用（用户在设置页修改
+     * 重置小时）时，通过 CompletableDeferred 信号立即唤醒并重新计算目标，下一轮
+     * 等待即时生效，不中断正在执行的打卡任务。
      */
     private suspend fun waitUntilNextReset() {
-        val resetHour = SaveKeyValues.loadInt(
-            Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
-        )
-        val waitSeconds = calculateSecondsUntilReset(resetHour)
-
-        LogFileManager.writeLog("等待 ${waitSeconds}s 后进入下一个任务周期")
-
-        runningDetail = "今日已完成，等待下次重置"
-        // 只发一次静态通知，不每秒刷新
+        // 一次性提示：本轮任务已完成，进入等待期
+        LogFileManager.writeLog("进入每日重置等待期")
+        runningDetail = "本轮已完成，等待下次重置"
         _tipsEvent.emit(TipsEvent.Completed)
-        ForegroundRunningService.emitNotificationText("今日任务已执行完毕，等待下次任务")
+        ForegroundRunningService.emitNotificationText("本轮任务已执行完毕，等待下次重置")
 
-        if (waitSeconds > 0) {
-            // 单次挂起，零 CPU 开销
-            delay(waitSeconds * 1000L)
+        while (true) {
+            val resetHour = SaveKeyValues.loadInt(
+                Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
+            )
+            val waitSeconds = calculateSecondsUntilReset(resetHour)
+
+            // 功耗最低：单次精确挂起到下一个整点重置点，无 CPU 唤醒；
+            // 重置时间被修改时由信号立即唤醒重算（不改正在执行的任务）
+            val signal = CompletableDeferred<Unit>()
+            pendingResetSignal = signal
+            try {
+                withTimeout(waitSeconds * 1000L) { signal.await() }
+            } catch (_: TimeoutCancellationException) {
+                // 自然到达重置点，交给外层循环重排下一轮任务
+                LogFileManager.writeLog("到达重置时间点，重排下一轮任务")
+                return
+            } finally {
+                pendingResetSignal = null
+            }
+            // 被信号唤醒：重置时间已修改，重新计算等待
+            LogFileManager.writeLog("重置时间被修改，重新计算每日重置等待")
         }
+    }
+
+    /**
+     * 重置时间被修改时调用，立即唤醒 [waitUntilNextReset] 重新计算等待目标。
+     * 不中断正在执行的打卡任务，仅影响"等待下次重置"阶段。
+     */
+    fun notifyResetTimeChanged() {
+        pendingResetSignal?.complete(Unit)
+    }
+
+    /**
+     * 超时兜底截屏：按「实际权限」优先级选择截屏方式，与 resultSource 配置无关。
+     * 优先级 1：系统无障碍权限已开启且 Android 14+ → AccessibilityService.takeScreenshot
+     * 优先级 2：截屏服务权限已授权（MediaProjection 处于 ACTIVE）→ CaptureImageService 兜底
+     * 都没有可用权限 → 返回空串（截屏失败）
+     */
+    suspend fun tryFallbackScreenshot(): String {
+        val ctx = DailyTaskApplication.get()
+        // 优先级1：无障碍截屏（无需截屏服务授权，只要系统无障碍已开启）
+        if (AutoProjectionAccessibilityService.isEnabled(ctx)
+            && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+        ) {
+            LogFileManager.writeLog("超时兜底：检测到无障碍权限，走 AccessibilityService.takeScreenshot")
+            val deferred = AutoProjectionAccessibilityService.requestScreenshot()
+            if (deferred != null) {
+                return runCatching { withTimeout(8000) { deferred.await() } }.getOrNull() ?: ""
+            }
+        }
+        // 优先级2：截屏服务（MediaProjection）兜底
+        if (ProjectionSession.isStateActive()) {
+            LogFileManager.writeLog("超时兜底：无无障碍权限，走截屏服务（MediaProjection）兜底")
+            val deferred = CaptureImageService.requestCaptureScreen()
+            return runCatching { withTimeout(8000) { deferred.await() } }.getOrNull() ?: ""
+        }
+        // 都没有可用权限 → 截屏失败
+        LogFileManager.writeLog("超时兜底：无障碍与截屏服务均不可用，截屏失败")
+        return ""
     }
 
     /**
@@ -407,28 +493,27 @@ object TaskScheduler {
         }
     }
 
-    private fun shouldSkipToday(): Boolean {
+    private fun shouldSkipDay(date: LocalDate): Boolean {
         val skipEnabled = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
         if (!skipEnabled) return false
 
-        val today = LocalDate.now()
         val customWorkdays = CustomWorkdayManager.loadWorkdays()
 
         // 法定节假日
-        if (ChinaHolidayManager.isHoliday(today)) {
-            LogFileManager.writeLog("今日为法定节假日，跳过任务")
+        if (ChinaHolidayManager.isHoliday(date)) {
+            LogFileManager.writeLog("${date} 为法定节假日，跳过任务")
             return true
         }
 
         // 调休补班日（例外：周末但要上班）
-        if (ChinaHolidayManager.isWorkday(today)) {
-            LogFileManager.writeLog("今日为调休补班日，正常执行任务")
+        if (ChinaHolidayManager.isWorkday(date)) {
+            LogFileManager.writeLog("${date} 为调休补班日，正常执行任务")
             return false
         }
 
         // 不在自定义工作日内，即为休息日
-        if (today.dayOfWeek !in customWorkdays) {
-            LogFileManager.writeLog("今日不在自定义工作日内，跳过任务")
+        if (date.dayOfWeek !in customWorkdays) {
+            LogFileManager.writeLog("${date} 不在自定义工作日内，跳过任务")
             return true
         }
 
@@ -436,10 +521,23 @@ object TaskScheduler {
     }
 
     /**
+     * 解析当前应调度哪一天的任务：始终返回「今天」。
+     *
+     * 周期归属不再通过"返回今天/昨天"硬切，而是统一交给 [loadTodayTaskPlans] 按
+     * "当前是否已过今日重置点 + 任务时刻是否早于重置点" 决定任务落在「本轮周期(今天)」
+     * 还是「下一轮周期(明天 +1 天)」。例如重置点 13:00、任务 09:00：
+     *   - 当前已过 13:00 → 09:00 属于下一轮周期 → 排到明天 09:00 执行
+     *   - 当前未过 13:00 → 09:00 属于当前周期，已过去则跳过，否则今天执行
+     */
+    private fun resolveScheduleDate(): LocalDate {
+        return LocalDate.now()
+    }
+
+    /**
      * 从数据库加载所有任务，计算出当日实际执行时间，按时间排序
      * */
-    private suspend fun buildTodaySchedule(): List<ScheduledTask> {
-        return loadTodayTaskPlans().map { plan ->
+    private suspend fun buildSchedule(date: LocalDate): List<ScheduledTask> {
+        return loadTodayTaskPlans(date).map { plan ->
             ScheduledTask(
                 task = plan.task,
                 displayIndex = plan.index,
@@ -451,26 +549,51 @@ object TaskScheduler {
     }
 
     /**
-     * 供状态查询 / 任务通知使用的当日任务快照
+     * 供状态查询 / 任务通知使用的当日任务快照。
+     *
+     * 跨天归属：重置时间只能设为整点。若当前已过「今日」重置点，则任务时刻早于重置点的
+     * 任务属于「下一轮调度周期」，实际执行时间戳偏移 +1 天（排到明天同一时刻）；
+     * 任务时刻晚于/等于重置点的仍属本轮周期，今天执行。未过重置点时全部按今天处理
+     * （早于此刻的已过期跳过，晚于此刻的今天执行）。
      */
-    suspend fun loadTodayTaskPlans(): List<TaskPlanItem> {
+    suspend fun loadTodayTaskPlans(date: LocalDate = LocalDate.now()): List<TaskPlanItem> {
         val allTasks = withContext(Dispatchers.IO) {
             DatabaseWrapper.loadAllTask()
         }
         if (allTasks.isEmpty()) return emptyList()
 
-        val baseMillis = LocalDate.now()
+        val resetHour = SaveKeyValues.loadInt(
+            Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
+        )
+        val nowMillis = System.currentTimeMillis()
+
+        // 当前是否已过「今日」重置点（重置点恒为整点:00）
+        val resetPointToday = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, resetHour)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val isPastReset = nowMillis >= resetPointToday
+
+        val baseMillis = date
             .atStartOfDay(ZoneId.systemDefault())
             .toInstant()
             .toEpochMilli()
 
+        val oneDayMillis = 24L * 3_600_000L
+
         return allTasks.map { task ->
             val actualTime = task.resolveExecutionTime()
             val timeParts = actualTime.split(":").map { it.toInt() }
-            val actualMillis = baseMillis +
+            var actualMillis = baseMillis +
                     timeParts[0] * 3_600_000L +
                     timeParts[1] * 60_000L +
                     timeParts[2] * 1_000L
+            // 关键修正：过重置点后，任务时刻 < 重置点 → 属于下一轮周期 → 偏移 +1 天
+            if (isPastReset && timeParts[0] < resetHour) {
+                actualMillis += oneDayMillis
+            }
             Triple(task, actualTime, actualMillis)
         }.sortedBy { it.third }
             .mapIndexed { index, (task, actualTime, actualMillis) ->

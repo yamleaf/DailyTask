@@ -21,6 +21,7 @@ import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.CustomWorkdayManager
 import com.pengxh.daily.app.utils.FloatingWindowController
+import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.base.KotlinBaseActivity
 import com.pengxh.kt.lite.extensions.convertColor
 import com.pengxh.kt.lite.extensions.isNumber
@@ -325,6 +326,8 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, hour)
         // 通知 Service 更新倒计时显示
         ForegroundRunningService.emitResetTaskTime()
+        // 通知调度器：重置时间已修改，立即按新时间重算每日等待（下一分钟级生效，不重启任务）
+        TaskScheduler.notifyResetTimeChanged()
     }
 
     private fun setTimeByPosition(position: Int) {
