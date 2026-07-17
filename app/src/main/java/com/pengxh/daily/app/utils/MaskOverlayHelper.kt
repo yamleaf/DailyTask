@@ -6,6 +6,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
@@ -32,6 +33,26 @@ object MaskOverlayHelper {
     private var hiddenForScreenshot = false
 
     fun isShowing(): Boolean = rootView != null
+
+    /** 蒙层显示期间持有的「微亮不锁屏」WakeLock（SCREEN_DIM），比全亮省电 */
+    @Volatile
+    private var keepAwakeWakeLock: PowerManager.WakeLock? = null
+
+    private fun acquireKeepAwake(context: Context) {
+        if (keepAwakeWakeLock?.isHeld == true) return
+        val pm = context.getSystemService(PowerManager::class.java) ?: return
+        keepAwakeWakeLock = pm.newWakeLock(
+            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            "DailyTask:MaskPseudo"
+        ).apply { acquire() }
+        LogFileManager.writeLog("伪息屏：已持有 SCREEN_DIM_WAKE_LOCK（微亮不锁屏）")
+    }
+
+    private fun releaseKeepAwake(context: Context) {
+        keepAwakeWakeLock?.let { if (it.isHeld) it.release() }
+        keepAwakeWakeLock = null
+        LogFileManager.writeLog("伪息屏：释放 SCREEN_DIM_WAKE_LOCK")
+    }
 
     fun show(context: Context) {
         val appCtx = context.applicationContext
@@ -65,9 +86,13 @@ object MaskOverlayHelper {
                 )
             )
 
+            // 注：蒙层本身不加 FLAG_KEEP_SCREEN_ON（避免全亮整夜耗电）。
+            // 但为满足「保持解锁（微亮）」需求，蒙层显示期间额外持有 SCREEN_DIM_WAKE_LOCK：
+            // 屏幕维持低亮度、不触发系统锁屏，既比全亮省电，又保证打卡/无障碍截图不被锁屏打断。
+            // 该 WakeLock 仅在蒙层被完整 hide() 时释放（见 releaseKeepAwake）；
+            // 截图前临时移除蒙层时仍保持持有，避免截图中途锁屏导致截图失败。
             val flags = (WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                    or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -85,8 +110,9 @@ object MaskOverlayHelper {
             try {
                 windowManager.addView(frame, params)
                 rootView = frame
+                acquireKeepAwake(appCtx)
                 FloatingWindowController.hide()
-                LogFileManager.writeLog("伪息屏蒙层已显示")
+                LogFileManager.writeLog("伪息屏蒙层已显示（微亮不锁屏）")
             } catch (e: Exception) {
                 LogFileManager.writeLog("伪息屏蒙层显示失败: ${e.message}")
             }
@@ -101,6 +127,7 @@ object MaskOverlayHelper {
                 appCtx.getSystemService(WindowManager::class.java)?.removeView(view)
             }
             rootView = null
+            releaseKeepAwake(appCtx)
             FloatingWindowController.show()
             LogFileManager.writeLog("伪息屏蒙层已隐藏")
             IdlePseudoMaskController.onBlackMaskHidden(appCtx)

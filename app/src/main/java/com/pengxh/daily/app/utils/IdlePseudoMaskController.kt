@@ -82,10 +82,29 @@ object IdlePseudoMaskController {
             LogFileManager.writeLog("打卡中收到 SCREEN_OFF，已保亮但不盖黑屏")
             return
         }
-        wakeScreen(context)
+        // 进入黑屏蒙层，但【不要】主动唤醒背光：
+        // 蒙层已无 FLAG_KEEP_SCREEN_ON，系统会按自身超时自然熄灭背光，进入真正省电的伪息屏。
+        // 若在此处 wakeScreen()，会导致「黑屏但背光常亮、滑动无反应」的假死状态（问题1）。
         removeKeepAwake(context)
         MaskOverlayHelper.show(context)
-        LogFileManager.writeLog("收到 SCREEN_OFF，已亮屏并进入伪息屏")
+        LogFileManager.writeLog("收到 SCREEN_OFF，已进入伪息屏（不强制亮屏）")
+    }
+
+    /**
+     * 打卡期间保活屏幕：确保透明保亮层存在，避免蒙层被临时移除后屏幕休眠导致打卡失败。
+     * 仅当之前确实处于伪息屏（maskWasShowing）时由 TaskScheduler 调用。
+     */
+    fun keepAwakeForPunch(context: Context) {
+        ensureKeepAwake(context)
+        LogFileManager.writeLog("打卡期间：开启透明保亮，防止屏幕休眠")
+    }
+
+    /**
+     * 打卡结束释放保活：移除透明保亮层，让黑屏蒙层恢复后屏幕可自然熄灭，回到省电伪息屏。
+     */
+    fun releaseKeepAwakeForPunch(context: Context) {
+        removeKeepAwake(context)
+        LogFileManager.writeLog("打卡结束：释放透明保亮")
     }
 
     fun onForcePseudoMaskDisabled() {
