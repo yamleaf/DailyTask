@@ -23,7 +23,7 @@ android {
         // - 基线版本号自动同步 master 分支的 app/build.gradle（alpha 即基于该主线版本）
         // - 默认（未设置或为 alpha）：alpha 自动版本
         //     versionName = <master基线版本>-alpha-<git短哈希>
-        //     versionCode = 自增构建号（CI 传 BUILD_NUMBER=github.run_number；本地默认 1）
+        //     versionCode = 日期时间整数 yyMMdd*1000+HHmm（如 2607181153，每次编译分钟级唯一）
         // - 仅当显式设置 BUILD_FLAVOR=release 时回退到 master 固定版本号（正式发版用）
         def baselineVersion = {
             try {
@@ -39,9 +39,14 @@ android {
         def isAlphaBuild = System.getenv('BUILD_FLAVOR') != 'release'
         if (isAlphaBuild) {
             def gitShort = (System.getenv('GIT_COMMIT_SHORT') ?: 'local').take(7)
-            def buildNumber = (System.getenv('BUILD_NUMBER') ?: '0').toInteger()
+            // versionCode 采用日期时间整数 yyMMdd*1000+HHmm（如 2607181153），
+            // 既保持日期可读格式，又保证每次编译（分钟级）唯一，避免同天覆盖安装冲突。
+            def now = new Date()
+            def ymd = new SimpleDateFormat('yyMMdd', Locale.CHINA).format(now).toInteger()
+            def hm = new SimpleDateFormat('HHmm', Locale.CHINA).format(now).toInteger()
+            def buildDateCode = ymd * 1000 + hm
             versionName "${baselineVersion}-alpha-${gitShort}"
-            versionCode buildNumber > 0 ? buildNumber : 1
+            versionCode buildDateCode
         } else {
             versionCode 2420
             versionName baselineVersion
