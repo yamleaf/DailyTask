@@ -168,6 +168,21 @@ object MaskOverlayHelper {
         }
     }
 
+    /**
+     * 统一封装「截图/操作前临时移除蒙层 → 执行 block → 操作后恢复蒙层」，
+     * 收敛各处散落的 hideForScreenshot/restoreAfterScreenshot 调用（P1-3）。
+     * 仅当蒙层确实在显示时才移除并恢复，无副作用。
+     */
+    suspend fun <T> withMaskSuspended(context: Context, block: suspend () -> T): T {
+        val maskShowing = isShowing()
+        if (maskShowing) hideForScreenshot(context)
+        return try {
+            block()
+        } finally {
+            if (maskShowing) restoreAfterScreenshot(context)
+        }
+    }
+
     private fun setOnTouchEventForDismiss(view: View) {
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {

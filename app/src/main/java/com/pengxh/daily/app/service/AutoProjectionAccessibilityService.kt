@@ -353,8 +353,14 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             }
             lastTextScanMillis = now
 
-            val text = collectNodeText(root).replace("\n", " ").replace("\\s+".toRegex(), " ").trim()
-            if (text.isBlank()) return
+            // 定向查找成功关键词/打卡按钮，避免对飞书等复杂页面做全树文本拼接
+            val directedText = collectDirectedText(root)
+                .replace("\n", " ").replace("\\s+".toRegex(), " ").trim()
+            if (directedText.isBlank()) {
+                // 定向查找未命中任何关键词（含打卡按钮），跳过整树遍历
+                return
+            }
+            val text = directedText
 
             LogFileManager.writeLog("无障碍读取文本：package=$packageName, text=${text.take(120)}")
 
@@ -425,19 +431,26 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * 递归收集 AccessibilityNodeInfo 中的文本内容
+     * 定向文本收集：仅对成功关键词/打卡按钮标记做 findAccessibilityNodeInfosByText 查找，
+     * 并收集命中节点及其祖先文本作为上下文（供时间/“今天|昨天”分组解析）。
+     * 避免对复杂页面做全树递归拼接，显著降低开销（P2-7）。
      */
-    private fun collectNodeText(node: AccessibilityNodeInfo?): String {
-        if (node == null) return ""
+    private fun collectDirectedText(root: AccessibilityNodeInfo): String {
+        val keywords = successKeywords + punchButtonMarkers + listOf("自动打卡")
         val sb = StringBuilder()
-        if (!node.text.isNullOrEmpty()) {
-            sb.append(node.text).append(" ")
-        }
-        if (!node.contentDescription.isNullOrEmpty()) {
-            sb.append(node.contentDescription).append(" ")
-        }
-        for (i in 0 until node.childCount) {
-            sb.append(collectNodeText(node.getChild(i)))
+        for (kw in keywords) {
+            val nodes = runCatching { root.findAccessibilityNodeInfosByText(kw) }.getOrNull() ?: continue
+            for (n in nodes) {
+                n.text?.let { sb.append(it).append(" ") }
+                n.contentDescription?.let { sb.append(it).append(" ") }
+                // 向上收集祖先文本，保留时间/分组上下文
+                var p = n.parent
+                repeat(3) {
+                    p?.text?.let { sb.append(it).append(" ") }
+                    p?.contentDescription?.let { sb.append(it).append(" ") }
+                    p = p?.parent
+                }
+            }
         }
         return sb.toString()
     }
