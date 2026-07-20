@@ -8,6 +8,7 @@ import com.google.gson.JsonObject
 import com.pengxh.daily.app.databinding.ActivityMessageChannelBinding
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.kt.lite.base.KotlinBaseActivity
 import com.pengxh.kt.lite.extensions.isEmail
@@ -43,9 +44,9 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
 
         val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
         if (!obj.isEmpty) {
-            val outbox = obj.get("outbox").asString
-            val authCode = obj.get("authCode").asString
-            val inbox = obj.get("inbox").asString
+            val outbox = if (obj.has("outbox")) obj.get("outbox").asString else ""
+            val inbox = if (obj.has("inbox")) obj.get("inbox").asString else ""
+            val authCode = EmailSecureConfig.loadAuthCode()
             binding.emailSendAddressView.setText(if (outbox.contains("@qq.com")) outbox.dropLast(7) else outbox)
             binding.emailSendCodeView.setText(authCode)
             binding.emailInboxView.setText(inbox)
@@ -114,10 +115,10 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
 
             val cacheObj = JsonObject().apply {
                 addProperty("outbox", outbox)
-                addProperty("authCode", binding.emailSendCodeView.text.toString())
                 addProperty("inbox", binding.emailInboxView.text.toString())
             }
             ConfigStore.get().save(Constant.EMAIL_CONFIG_KEY, cacheObj)
+            EmailSecureConfig.saveAuthCode(binding.emailSendCodeView.text.toString())
 
             sendTestEmail()
         }

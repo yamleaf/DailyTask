@@ -20,6 +20,7 @@ import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.CustomWorkdayManager
+import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.base.KotlinBaseActivity
@@ -186,6 +187,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             exportData.msgChannel =
                 SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
             exportData.targetApp = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
+            exportData.targetAppPackage = Constant.getTargetApp()
 
             // String
             exportData.remoteCommand = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
@@ -207,13 +209,16 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             exportData.isSavePower =
                 SaveKeyValues.loadBoolean(Constant.POWER_SAVE_MODE_KEY, false)
 
-            // EmailConfig
+            // EmailConfig（授权码脱敏，不随配置明文导出）
             val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
             if (!obj.isEmpty) {
-                val outbox = obj.get("outbox").asString
-                val authCode = obj.get("authCode").asString
-                val inbox = obj.get("inbox").asString
-                exportData.emailConfig = Triple(outbox, authCode, inbox)
+                val outbox = if (obj.has("outbox")) obj.get("outbox").asString else ""
+                val inbox = if (obj.has("inbox")) obj.get("inbox").asString else ""
+                val authCode = EmailSecureConfig.loadAuthCode()
+                if (outbox.isNotBlank() && inbox.isNotBlank()) {
+                    exportData.emailConfig =
+                        Triple(outbox, EmailSecureConfig.maskAuthCode(authCode), inbox)
+                }
             }
 
             // TaskBeans

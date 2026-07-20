@@ -60,7 +60,20 @@ class TaskDataManager() {
             config.timeRange.coerceAtLeast(Constant.DEFAULT_TIME_RANGE)
         )
         SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, config.msgChannel.coerceIn(0, 1))
-        SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, config.targetApp.coerceIn(0, 3))
+
+        // 目标应用：优先还原自定义包名；否则按内置索引
+        val customPkg = config.targetAppPackage
+        val isBuiltIn = Constant.getBuiltInTargets().any { it.first == customPkg }
+        if (!customPkg.isNullOrBlank() && !isBuiltIn) {
+            val custom = Constant.getCustomTargetApps().toMutableList()
+            if (!custom.contains(customPkg)) custom.add(customPkg)
+            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, custom.joinToString(","))
+            SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, Constant.CUSTOM_TARGET_INDEX)
+            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, customPkg)
+        } else {
+            SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, config.targetApp.coerceIn(0, 3))
+            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
+        }
 
         //
         SaveKeyValues.saveString(
@@ -100,15 +113,17 @@ class TaskDataManager() {
         val inbox = email?.third
         if (email != null &&
             !outbox.isNullOrBlank() &&
-            !authCode.isNullOrBlank() &&
             !inbox.isNullOrBlank()
         ) {
             val cacheObj = JsonObject().apply {
                 addProperty("outbox", outbox)
-                addProperty("authCode", authCode)
                 addProperty("inbox", inbox)
             }
             ConfigStore.get().save(Constant.EMAIL_CONFIG_KEY, cacheObj)
+            // 仅当导入的授权码为真实值（非脱敏掩码）时写入加密存储，避免覆盖真实授权码
+            if (!authCode.isNullOrBlank() && !EmailSecureConfig.isMasked(authCode)) {
+                EmailSecureConfig.saveAuthCode(authCode)
+            }
         }
     }
 

@@ -151,6 +151,8 @@ dependencies {
     //数据库框架
     implementation 'androidx.room:room-runtime:2.8.2'
     annotationProcessor 'androidx.room:room-compiler:2.8.2'
+    // 敏感信息加密存储（基于 Android Keystore 的 EncryptedSharedPreferences）
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
     //邮件
     implementation 'com.sun.mail:android-mail:1.6.8'
     implementation 'com.sun.mail:android-activation:1.6.8'

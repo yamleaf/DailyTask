@@ -34,15 +34,18 @@ object EmailManager {
 
     private fun loadEmailConfig(onFailure: ((String) -> Unit)?): EmailConfig? {
         val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
-        if (obj.isEmpty) {
+        val outbox = if (!obj.isEmpty && obj.has("outbox")) obj.get("outbox").asString else ""
+        val inbox = if (!obj.isEmpty && obj.has("inbox")) obj.get("inbox").asString else ""
+        val authCode = EmailSecureConfig.loadAuthCode()
+        if (outbox.isBlank() || authCode.isBlank() || inbox.isBlank()) {
             onFailure?.invoke("邮箱未配置，无法发送邮件")
             return null
         }
-        Log.d(kTag, "邮箱配置: $obj")
+        Log.d(kTag, "邮箱配置: outbox=$outbox, inbox=$inbox（授权码已加密存储）")
         return EmailConfig(
-            outbox = obj.get("outbox").asString,
-            authCode = obj.get("authCode").asString,
-            inbox = obj.get("inbox").asString
+            outbox = outbox,
+            authCode = authCode,
+            inbox = inbox
         )
     }
 
