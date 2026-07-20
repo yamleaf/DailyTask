@@ -391,8 +391,15 @@ class NotificationMonitorService : NotificationListenerService() {
                                                 // 截屏模式：MediaProjection
                                                 hasCaptured = true
                                                 captureDeferred = CaptureImageService.requestCaptureScreen()
-                                            } else if (resultSource == 2 && feedbackMode == 0) {
-                                                // 无障碍-截屏反馈模式：AccessibilityService.takeScreenshot
+                                            } else if (resultSource == 2 && (
+                                                feedbackMode == 0
+                                                    || (feedbackMode == 1 && AutoProjectionAccessibilityService.canTakeScreenshot(this@NotificationMonitorService))
+                                                )
+                                            ) {
+                                                // 无障碍模式兜底截屏：
+                                                // · 截屏反馈(feedbackMode=0) 直接 AccessibilityService.takeScreenshot
+                                                // · 文本反馈(feedbackMode=1) 有截屏能力(Android14+)时同样兜底截屏；
+                                                //   无截屏能力(版本过低)则不预截屏，交由后续 tryFallbackScreenshot 失败 → 文字提示
                                                 hasCaptured = true
                                                 val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
                                                 captureDeferred = a11yDeferred

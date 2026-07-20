@@ -94,4 +94,19 @@ object LogFileManager {
             throw IllegalStateException("Log file not initialized. Call initLogFile first.")
         }
     }
+
+    /**
+     * 读取当前日志文件内容（最多 [maxLines] 行），用于一键诊断导出。
+     */
+    fun readLogContent(maxLines: Int = 500): String {
+        if (!::currentLogFile.isInitialized) return ""
+        return try {
+            val lines = Files.readAllLines(currentLogFile)
+            val start = (lines.size - maxLines).coerceAtLeast(0)
+            lines.subList(start, lines.size).joinToString(System.lineSeparator())
+        } catch (e: IOException) {
+            e.printStackTrace()
+            ""
+        }
+    }
 }

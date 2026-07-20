@@ -228,14 +228,14 @@ object TaskScheduler {
 
             DailyTaskApplication.get().openApplication()
 
-            // 开启无障碍文本检测（仅在无障碍模式下）
+            // 开启无障碍文本检测（仅「文本反馈」模式；「截屏反馈」不遍历无障碍节点树）
             val resultSource = SaveKeyValues.loadInt(
                 Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
             )
             val feedbackMode = SaveKeyValues.loadInt(
                 Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0
             )
-            if (resultSource == 2) {
+            if (resultSource == 2 && feedbackMode == 1) {
                 AutoProjectionAccessibilityService.setTextDetectionEnabled(true)
             }
 

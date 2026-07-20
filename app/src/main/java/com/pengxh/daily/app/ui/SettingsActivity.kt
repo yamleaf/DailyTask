@@ -6,12 +6,14 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pengxh.daily.app.BuildConfig
@@ -27,6 +29,7 @@ import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
+import com.pengxh.daily.app.utils.DiagnosticReporter
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
@@ -42,6 +45,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
@@ -261,7 +265,13 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                                     "请先打开无障碍服务".show(context)
                                     return
                                 }
+                                // 选择无障碍模式
                                 SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
+                                // 系统版本低于 Android 14：无障碍截屏 API 不可用，
+                                // 自动切到“文本反馈”，留在无障碍模式（不回退通知）
+                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                    SaveKeyValues.saveInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 1)
+                                }
                                 updateResultSourceView()
                                 binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
                                 binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
@@ -275,6 +285,13 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
         // 反馈方式：点击弹出选择
         binding.accessibilityFeedbackLayout.setOnClickListener {
+            // 系统版本低于 Android 14：无障碍截屏不可用，只能选“文本反馈”
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                SaveKeyValues.saveInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 1)
+                updateAccessibilityFeedbackView()
+                "当前系统版本过低（需 Android 14+），不支持无障碍截屏，已切换为文本反馈".show(this)
+                return@setOnClickListener
+            }
             BottomActionSheet.Builder()
                 .setContext(this)
                 .setActionItemTitle(feedbackModes)
@@ -465,6 +482,31 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         binding.introduceLayout.setOnClickListener {
             navigatePageTo<QuestionAndAnswerActivity>()
         }
+
+        // 一键诊断日志导出：生成报告并经由系统分享面板导出
+        binding.diagnosticLayout.setOnClickListener {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val file = DiagnosticReporter.exportToFile(this@SettingsActivity)
+                withContext(Dispatchers.Main) {
+                    file?.let { reportFile ->
+                        val authority = BuildConfig.APPLICATION_ID + ".fileprovider"
+                        val uri = FileProvider.getUriForFile(this@SettingsActivity, authority, reportFile)
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        try {
+                            startActivity(Intent.createChooser(shareIntent, "导出诊断日志"))
+                        } catch (e: Exception) {
+                            "导出失败：${e.message}".show(context)
+                        }
+                    } ?: run {
+                        "诊断日志导出失败".show(context)
+                    }
+                }
+            }
+        }
     }
 
     private val overlayPermissionLauncher = registerForActivityResult(permissionContract) {
@@ -605,12 +647,19 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.accessibilityTipsView.visibility = View.GONE
             binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
             binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
+            // 系统版本低于 Android 14：无障碍截屏不可用 → 自动切到“文本反馈”，留在无障碍模式
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                if (SaveKeyValues.loadInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0) == 0) {
+                    SaveKeyValues.saveInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 1)
+                }
+            }
             updateAccessibilityFeedbackView()
         } else {
             if (source == 2 && !a11yEnabled) {
-                // 系统无障碍已关闭，但结果来源仍是无障碍 → 回退到通知模式，避免去用不可用的服务
+                // 无障碍服务未开启，但结果来源仍是无障碍 → 回退到通知模式（版本过低的情况留在上面处理）
                 SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
                 updateResultSourceView()
+                "无障碍服务未开启，已切回通知模式".show(context)
             }
             binding.accessibilityTipsView.text = "无障碍服务未开启，无障碍模式无法获取打卡结果"
             binding.accessibilityTipsView.setTextColor(Color.RED)

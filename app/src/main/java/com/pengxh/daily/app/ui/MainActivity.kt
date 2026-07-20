@@ -5,6 +5,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Build
+import android.os.PowerManager
+import android.net.Uri
 import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
@@ -25,6 +28,7 @@ import com.pengxh.daily.app.R
 import com.pengxh.daily.app.adapter.DailyTaskAdapter
 import com.pengxh.daily.app.databinding.ActivityMainBinding
 import com.pengxh.daily.app.extensions.convertToTimeEntity
+import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
@@ -66,6 +70,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.time.LocalDate
@@ -111,6 +116,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     private var taskBeans = mutableListOf<DailyTaskBean>()
+    /** 电池优化引导对话框是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
+    private var batteryOptimizationPrompted = false
     private val dailyTaskAdapter by lazy {
         DailyTaskAdapter(taskBeans).apply {
             setOnItemClickListener(object : DailyTaskAdapter.OnItemClickListener {
@@ -272,8 +279,20 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
 
         // 订阅通知监听事件
-        lifecycleScope.launch {
-            NotificationMonitorService.events.collect { event -> handleMonitorEvent(event) }
+        // P0：单条事件处理异常不得取消整个订阅（否则所有远程指令失效）
+        lifecycleScope.launch(CoroutineExceptionHandler { _, e ->
+            Log.e(kTag, "通知事件订阅协程异常", e)
+            LogFileManager.writeLog("通知事件订阅协程异常: ${e.message}")
+        }) {
+            NotificationMonitorService.events
+                .collect { event ->
+                    try {
+                        handleMonitorEvent(event)
+                    } catch (e: Exception) {
+                        Log.e(kTag, "处理通知事件失败，已跳过: $event", e)
+                        LogFileManager.writeLog("处理通知事件失败: ${e.message}")
+                    }
+                }
         }
 
         // 订阅调度器运行状态 → 按钮 UI
@@ -387,6 +406,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         if (!Settings.canDrawOverlays(this)) {
             "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
         }
+        runStartupSelfCheck()
     }
 
     override fun onPause() {
@@ -790,6 +810,43 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
             TaskScheduler.startTask()
+        }
+    }
+
+    /**
+     * P1 启动自检：核心权限缺失时主动引导用户。
+     * - 通知监听未授权：提示去设置开启（远程指令依赖它）
+     * - 电池优化未豁免：弹一次引导对话框，跳转豁免设置（避免后台被杀）
+     */
+    private fun runStartupSelfCheck() {
+        if (!notificationEnable()) {
+            "通知监听未开启，无法接收远程指令，请到设置页开启".show(this)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !batteryOptimizationPrompted) {
+            val powerManager = getSystemService(PowerManager::class.java)
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                batteryOptimizationPrompted = true
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("建议关闭电池优化")
+                    .setMessage(
+                        "本应用需长时间后台运行以监听打卡结果与远程指令。" +
+                            "若被系统电池优化限制，锁屏后可能被杀掉导致指令失效。" +
+                            "建议将本应用设为“不受电池优化限制”。"
+                    )
+                    .setNegativeButton("暂不") { _, _ -> }
+                    .setPositiveButton("去设置") { _, _ ->
+                        try {
+                            startActivity(
+                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                    .apply { data = Uri.parse("package:$packageName") }
+                            )
+                        } catch (_: Exception) {
+                            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        }
+                    }
+                    .setCancelable(false)
+                    .show()
+            }
         }
     }
 
