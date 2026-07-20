@@ -283,9 +283,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 val elapsed = System.currentTimeMillis() - startTime
                 if (image == null) {
                     Log.e(kTag, "获取图像失败: acquireNextImage返回null, 总耗时: ${elapsed}ms")
-                    MessageDispatcher.sendMessage(
-                        "截屏失败", "acquireNextImage返回null, 总耗时: ${elapsed}ms"
-                    )
                     if (maskShowing) {
                         MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
                     }
