@@ -11,6 +11,13 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.locks.ReentrantLock
 import java.util.stream.Collectors
 
+/**
+ * 日志级别。文件行以 [D]/[I]/[W]/[E] 前缀标记，便于诊断导出时按级别过滤。
+ */
+enum class LogLevel(val char: Char) {
+    D('D'), I('I'), W('W'), E('E')
+}
+
 object LogFileManager {
     private val kTag = "LogFileManager"
     private const val MAX_LOG_SIZE = 5 * 1024 * 1024 // 5MB
@@ -76,14 +83,24 @@ object LogFileManager {
         }
     }
 
+    /** 默认 INFO 级别写入 */
     @Synchronized
-    fun writeLog(log: String) {
+    fun writeLog(log: String) = writeLog(LogLevel.I, log)
+
+    /** 按级别写入：映射 Log.d/i/w/e，并在文件行加 [级别] 前缀 */
+    @Synchronized
+    fun writeLog(level: LogLevel, log: String) {
         if (::currentLogFile.isInitialized) {
             fileLock.lock()
             try {
-                Log.d(kTag, log)
+                when (level) {
+                    LogLevel.D -> Log.d(kTag, log)
+                    LogLevel.I -> Log.i(kTag, log)
+                    LogLevel.W -> Log.w(kTag, log)
+                    LogLevel.E -> Log.e(kTag, log)
+                }
                 val time = System.currentTimeMillis().timestampToCompleteDate()
-                val str = "$time ${log}${System.lineSeparator()}"
+                val str = "$time [${level.char}] ${log}${System.lineSeparator()}"
                 Files.write(currentLogFile, str.toByteArray(), StandardOpenOption.APPEND)
             } catch (e: IOException) {
                 e.printStackTrace()
@@ -97,13 +114,33 @@ object LogFileManager {
 
     /**
      * 读取当前日志文件内容（最多 [maxLines] 行），用于一键诊断导出。
+     * [minLevel] 指定最低级别过滤（默认 [LogLevel.D] 表示不过滤）。
      */
-    fun readLogContent(maxLines: Int = 500): String {
+    fun readLogContent(maxLines: Int = 500): String = readLogContent(maxLines, LogLevel.D)
+
+    fun readLogContent(maxLines: Int = 500, minLevel: LogLevel): String {
         if (!::currentLogFile.isInitialized) return ""
         return try {
             val lines = Files.readAllLines(currentLogFile)
-            val start = (lines.size - maxLines).coerceAtLeast(0)
-            lines.subList(start, lines.size).joinToString(System.lineSeparator())
+            val filtered = if (minLevel == LogLevel.D) {
+                lines
+            } else {
+                lines.filter { line ->
+                    val open = line.indexOf('[')
+                    val close = line.indexOf(']', open + 1)
+                    val c = if (open >= 0 && close > open + 1) line[open + 1] else null
+                    val lvl = when (c) {
+                        'D' -> LogLevel.D
+                        'I' -> LogLevel.I
+                        'W' -> LogLevel.W
+                        'E' -> LogLevel.E
+                        else -> LogLevel.I
+                    }
+                    lvl.ordinal >= minLevel.ordinal
+                }
+            }
+            val start = (filtered.size - maxLines).coerceAtLeast(0)
+            filtered.subList(start, filtered.size).joinToString(System.lineSeparator())
         } catch (e: IOException) {
             e.printStackTrace()
             ""

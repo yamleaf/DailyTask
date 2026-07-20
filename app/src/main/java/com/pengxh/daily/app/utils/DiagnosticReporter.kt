@@ -84,6 +84,9 @@ object DiagnosticReporter {
             appendLine("· 省电模式：${if (AppRuntimeConfig.isPowerSaveMode()) "开启" else "关闭"}")
             appendLine("· 强制伪息屏：${if (AppRuntimeConfig.isForcePseudoMask()) "开启" else "关闭"}")
             appendLine()
+            appendLine("【最近警告/错误（W/E，最近 100 行）】")
+            appendLine(LogFileManager.readLogContent(100, LogLevel.W))
+            appendLine()
             appendLine("【运行日志（最近 500 行）】")
             appendLine(LogFileManager.readLogContent(500))
         }
