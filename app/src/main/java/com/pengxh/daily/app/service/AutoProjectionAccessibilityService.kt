@@ -385,21 +385,30 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             // 可靠性核心：只接受“时间接近本次监听起点、且属于今天”的成功记录。
             // 历史记录（如昨天的 18:11 下班极速打卡成功）要么时间对不上“现在”，
             // 要么被飞书归入“昨天”分组，都会被直接排除，不再依赖脆弱的固定延迟基线。
+            // 注意：now 已在上方节流处取到当前扫描时刻，这里直接使用。
             val (candidateMillis, groupIsToday) = parseSuccessTimeAndGroup(text, keywordPos)
             val accepted = if (candidateMillis != null) {
                 val fresh = candidateMillis in (armTimeMillis - 3 * 60_000)..(armTimeMillis + 5 * 60_000)
                 // groupIsToday == true 或无法确定分组（无日期分组标记）时，结合新鲜度判定
                 fresh && groupIsToday != false
             } else {
-                // 无时间戳的成功词（如“已打卡”按钮状态，或企业微信“自动打卡·正常”）：
-                // 必须本次会话确实见过打卡按钮，证明是本次打卡动作导致的状态变化，
-                // 避免把今天早已打卡的状态误报为本次成功
-                (matchedKeyword == "已打卡" || isWeWorkAuto) && sawPunchButton
+                // 无时间戳的成功词：
+                // 1) “已打卡”按钮状态、企业微信“自动打卡·正常”：必须本次会话确实见过打卡按钮，
+                //    证明是本次打卡动作导致的状态变化，避免把今天早已打卡的状态误报为本次成功。
+                // 2) 其它实时成功词（如飞书“下班极速打卡成功”）：无障碍文本本身不携带时间戳，
+                //    以“检测到该文本的时刻”作为发生时刻，只要在监听窗口内即视为本次成功。
+                when {
+                    matchedKeyword == "已打卡" || isWeWorkAuto -> sawPunchButton
+                    else -> {
+                        val fresh = now in (armTimeMillis - 3 * 60_000)..(armTimeMillis + 5 * 60_000)
+                        fresh && groupIsToday != false
+                    }
+                }
             }
 
             if (accepted) {
                 textDetected = true
-                LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=$candidateMillis，groupIsToday=$groupIsToday）")
+                LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，groupIsToday=$groupIsToday）")
                 val snippet = extractSnippet(text, matchedKeyword)
                 handleTextDetected(snippet, matchedKeyword, packageName)
             } else {
