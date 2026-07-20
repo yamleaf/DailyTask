@@ -39,6 +39,10 @@ import java.util.Locale
 class ForegroundRunningService : Service() {
 
     companion object {
+        /** 服务进程是否存活（保活闹钟据此判断是否需重启） */
+        @Volatile
+        var isRunning = false
+
         private val _notificationText = MutableSharedFlow<String>(extraBufferCapacity = 1)
         val notificationText = _notificationText.asSharedFlow()
 
@@ -78,6 +82,7 @@ class ForegroundRunningService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         // 注入协程作用域给 TaskScheduler
         TaskScheduler.attach(serviceScope)
 
@@ -148,6 +153,7 @@ class ForegroundRunningService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         checkLowBattery()
+        KeepAliveReceiver.schedule(this)
         return START_STICKY
     }
 
@@ -266,6 +272,8 @@ class ForegroundRunningService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning = false
+        KeepAliveReceiver.cancel(this)
         super.onDestroy()
         try {
             unregisterReceiver(systemBroadcastReceiver)

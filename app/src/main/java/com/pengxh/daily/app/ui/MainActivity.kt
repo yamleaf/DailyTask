@@ -793,7 +793,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     /**
-     * 兜底检查：覆盖 Alarm 未触发的场景
+     * 兜底检查：覆盖前台服务重启/进程被杀后，定时链未触发每日重置的场景
      * */
     private fun checkMissedReset() {
         val lastResetDate = SaveKeyValues.loadString(Constant.LAST_RESET_DATE_KEY, "")
@@ -804,7 +804,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             return
         }
 
-        // 今天还未重置，执行重置（覆盖 Alarm 未触发的场景）
+        // 今天还未重置，执行重置（覆盖服务异常退出导致未重置的场景）
         LogFileManager.writeLog("检测到今日尚未重置，执行重置操作")
         SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
 
