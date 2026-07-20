@@ -55,6 +55,10 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         /** 文本识别节流间隔：无障碍事件极密集，限制每 3 秒最多扫描一次 */
         private const val TEXT_SCAN_INTERVAL_MS = 3000L
 
+        /** 成功词最小返回延迟：监听开启后至少等待该时长才允许返回打卡成功，
+         *  避免打开目标 App 瞬间历史打卡记录被秒命中而抢答，导致本次极速打卡结果被漏判。 */
+        private const val MIN_TEXT_RETURN_DELAY_MS = 10_000L
+
         @Volatile
         private var instance: AutoProjectionAccessibilityService? = null
 
@@ -104,6 +108,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 // 因此只有时间接近此刻的打卡成功记录才算本次结果（见 onAccessibilityEvent）。
                 armTimeMillis = System.currentTimeMillis()
                 sawPunchButton = false
+                pendingEarlySuccessHit = false
                 lastTextScanMillis = 0L
                 if (enabled) startActiveScan() else stopActiveScan()
                 Log.d(TAG, "文本检测状态: active=$enabled, armTime=$armTimeMillis")
@@ -140,6 +145,11 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
      *  （用于“已打卡”状态变化的辅助判定，证明本次确实有打卡动作发生）。 */
     @Volatile
     private var sawPunchButton = false
+
+    /** 本次监听会话中是否已因“未达最小返回延迟(10s)”而暂挂过一次成功词命中，
+     *  用于避免 10 秒闸门内重复打日志。 */
+    @Volatile
+    private var pendingEarlySuccessHit = false
 
     /** 记录上次前台包名，用于检测前台任务切换 */
     @Volatile
@@ -407,10 +417,20 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             }
 
             if (accepted) {
-                textDetected = true
-                LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，groupIsToday=$groupIsToday）")
-                val snippet = extractSnippet(text, matchedKeyword)
-                handleTextDetected(snippet, matchedKeyword, packageName)
+                val minReturnTime = armTimeMillis + MIN_TEXT_RETURN_DELAY_MS
+                if (now < minReturnTime) {
+                    // 未达最小返回延迟(10s)：暂挂，继续扫描。防止打开目标 App 瞬间
+                    // 历史打卡记录被秒命中而抢答，导致本次极速打卡尚未真正完成就被误判成功、提前结束监听。
+                    if (!pendingEarlySuccessHit) {
+                        pendingEarlySuccessHit = true
+                        LogFileManager.writeLog("无障碍命中成功词但未达最小返回延迟(${MIN_TEXT_RETURN_DELAY_MS}ms)，暂挂等待极速打卡：$matchedKeyword")
+                    }
+                } else {
+                    textDetected = true
+                    LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，groupIsToday=$groupIsToday）")
+                    val snippet = extractSnippet(text, matchedKeyword)
+                    handleTextDetected(snippet, matchedKeyword, packageName)
+                }
             } else {
                 LogFileManager.writeLog("无障碍忽略成功词（历史/非本次）：keyword=$matchedKeyword，candidateMillis=$candidateMillis，groupIsToday=$groupIsToday")
             }
