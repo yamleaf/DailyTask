@@ -35,6 +35,7 @@ import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.CustomWorkdayManager
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.GestureController
@@ -67,7 +68,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
-import java.time.DayOfWeek
 import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
@@ -143,10 +143,10 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 // 调休补班日（如周末上班补假期）
                 ChinaHolidayManager.isWorkday(now) -> "补班日"
 
-                // 普通日期：周末/工作日
+                // 普通日期：按自定义工作日判定休息日/工作日
                 else -> {
-                    when (now.dayOfWeek) {
-                        DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> "休息日"
+                    when {
+                        CustomWorkdayManager.isWeekdayRestDay(now) -> "休息日"
                         else -> "工作日"
                     }
                 }
