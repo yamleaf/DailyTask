@@ -266,6 +266,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                                 binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
                                 binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
                                 updateAccessibilityFeedbackView()
+                                "部分打卡软件可能会检测无障碍开关，开启后请先验证打卡功能是否正常".show(context)
                             }
                         }
                     }
@@ -359,26 +360,33 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             )
             if (source == 2) {
                 // 无障碍模式：用 takeScreenshot
-                if (!AutoProjectionAccessibilityService.isEnabled(this)) {
-                    "无障碍服务未开启，无法截屏".show(this)
+                if (!AutoProjectionAccessibilityService.canTakeScreenshot(this)) {
+                    "无障碍服务未开启或系统版本过低(需 Android 14+)，无法截屏".show(this)
                     return@setOnClickListener
                 }
             } else {
-                // 截屏模式：用 MediaProjection
-                if (!binding.captureSwitch.isChecked) {
-                    "请先打开截屏服务".show(this)
-                    return@setOnClickListener
-                }
-                if (!ProjectionSession.isStateActive()) {
+                // 截屏模式：优先 MediaProjection，未就绪时回退无障碍截屏
+                if (ProjectionSession.isStateActive()) {
+                    // 已就绪，直接使用 MediaProjection
+                } else if (AutoProjectionAccessibilityService.canTakeScreenshot(this)) {
+                    // MediaProjection 未就绪，回退无障碍截屏
+                } else {
                     binding.captureSwitch.isChecked = false
-                    "截屏授权已失效，请重新授权".show(this)
+                    "截屏服务未开启且无障碍截屏不可用，请检查设置".show(this)
                     return@setOnClickListener
                 }
             }
 
-            // 触发截屏并等待截屏结果
+            // 触发截屏并等待截屏结果：截屏服务模式优先 MediaProjection，
+            // 若其未就绪但有无障碍截屏能力，则回退到无障碍截屏
             lifecycleScope.launch {
-                val imagePath = if (source == 2) {
+                val useAccessibility = if (source == 2) {
+                    true
+                } else {
+                    !ProjectionSession.isStateActive()
+                            && AutoProjectionAccessibilityService.canTakeScreenshot(this@SettingsActivity)
+                }
+                val imagePath = if (useAccessibility) {
                     AutoProjectionAccessibilityService.requestScreenshot()?.await()
                 } else {
                     CaptureImageService.requestCaptureScreen().await()

@@ -73,6 +73,15 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         }
 
         /**
+         * 是否具备无障碍截屏能力：服务已启用，且系统版本满足 AccessibilityService.takeScreenshot 要求（Android 14+）。
+         * 低于 Android 14 时该 API 不可用，即使服务已启用也无法截屏，故此处一并判断。
+         */
+        fun canTakeScreenshot(context: Context): Boolean {
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+                    && isEnabled(context)
+        }
+
+        /**
          * 请求截屏
          * @return CompletableDeferred<String?> 截图文件路径；null 表示服务未连接，"" 表示截屏失败
          */

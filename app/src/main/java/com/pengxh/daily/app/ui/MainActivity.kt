@@ -508,11 +508,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                         delay(minOf(1000L, remaining).coerceAtLeast(1))
                     }
 
-                    // 触发截屏并等待截屏结果（根据结果来源选择截屏方式）
+                    // 触发截屏并等待截屏结果
+                    // 截屏服务模式优先 MediaProjection；若其未就绪但有无障碍截屏能力，则回退到无障碍截屏
                     val source = SaveKeyValues.loadInt(
                         Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
                     )
-                    val imagePath = if (source == 2) {
+                    val useAccessibility = if (source == 2) {
+                        true
+                    } else {
+                        !ProjectionSession.isStateActive()
+                                && AutoProjectionAccessibilityService.canTakeScreenshot(this@MainActivity)
+                    }
+                    val imagePath = if (useAccessibility) {
                         AutoProjectionAccessibilityService.requestScreenshot()?.await()
                     } else {
                         CaptureImageService.requestCaptureScreen().await()
