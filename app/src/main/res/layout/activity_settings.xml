@@ -13,7 +13,7 @@
         android:layout_height="wrap_content"
         android:background="@color/theme_color"
         app:navigationIcon="@drawable/ic_title_left"
-        app:title="设置"
+        app:title="@string/settings_title"
         app:titleTextColor="@color/white" />
 
     <androidx.core.widget.NestedScrollView
@@ -44,7 +44,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="目标应用"
+                        android:text="@string/settings_target_app"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <com.google.android.material.imageview.ShapeableImageView
@@ -74,7 +74,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="消息渠道"
+                        android:text="@string/settings_msg_channel"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <com.google.android.material.textview.MaterialTextView
@@ -103,7 +103,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="结果来源"
+                        android:text="@string/settings_result_source"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <com.google.android.material.textview.MaterialTextView
@@ -133,7 +133,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="反馈方式"
+                        android:text="@string/settings_feedback_mode"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <com.google.android.material.textview.MaterialTextView
@@ -165,7 +165,7 @@
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
                         android:gravity="center_vertical"
-                        android:text="任务配置"
+                        android:text="@string/settings_task_config"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -194,7 +194,7 @@
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
                         android:gravity="center_vertical"
-                        android:text="更新节假日数据"
+                        android:text="@string/settings_update_holiday"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -228,7 +228,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="悬浮权限"
+                            android:text="@string/settings_floating_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -236,7 +236,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
-                            android:text="服务未开启，打完卡无法自动跳回本软件"
+                            android:text="@string/settings_floating_tip"
                             android:textColor="@color/red"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
@@ -270,7 +270,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="通知监听"
+                            android:text="@string/settings_notice_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -278,7 +278,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
-                            android:text="服务未开启，无法监听打卡结果和接收远程指令"
+                            android:text="@string/settings_notice_tip"
                             android:textColor="@color/red"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
@@ -312,7 +312,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="截屏服务"
+                            android:text="@string/settings_capture_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -320,7 +320,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
-                            android:text="服务未开启，无法获取打卡结果"
+                            android:text="@string/settings_capture_tip"
                             android:textColor="@color/red"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
@@ -354,7 +354,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="无障碍服务"
+                            android:text="@string/settings_accessibility_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -362,7 +362,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
-                            android:text="服务未开启，无障碍模式无法获取打卡结果"
+                            android:text="@string/settings_accessibility_tip"
                             android:textColor="@color/red"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
@@ -396,7 +396,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="手势检测"
+                            android:text="@string/settings_gesture_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -405,7 +405,7 @@
                             android:layout_gravity="end"
                             android:layout_marginTop="@dimen/dp_4"
                             android:singleLine="true"
-                            android:text="开启后，支持单手指上下滑动屏幕开启/关闭伪灭屏"
+                            android:text="@string/settings_gesture_tip"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
 
@@ -430,24 +430,23 @@
                     android:paddingHorizontal="@dimen/dp_16">
 
                     <LinearLayout
-                        android:layout_width="match_parent"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:layout_marginEnd="@dimen/dp_72"
                         android:orientation="vertical">
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="省电模式"
+                            android:text="@string/settings_power_save_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="match_parent"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
                             android:singleLine="true"
-                            android:text="降低倒计时通知、内存监控和息屏蒙层动画刷新频率"
+                            android:text="@string/settings_power_save_tip"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
 
@@ -483,7 +482,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="强制伪息屏"
+                            android:text="@string/settings_force_mask_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -491,7 +490,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/dp_4"
                             android:maxLines="3"
-                            android:text="开启后，离开本软件超过 60 秒将主动进入伪息屏模式（可能打断其它 App的正常使用）"
+                            android:text="@string/settings_force_mask_tip"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
 
@@ -524,7 +523,7 @@
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="退回桌面"
+                            android:text="@string/settings_back_home_title"
                             android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -533,7 +532,7 @@
                             android:layout_gravity="end"
                             android:layout_marginTop="@dimen/dp_4"
                             android:singleLine="true"
-                            android:text="开启后，打卡倒计时结束，会先退回桌面再启动本软件"
+                            android:text="@string/settings_back_home_tip"
                             android:textSize="@dimen/sp_10" />
                     </LinearLayout>
 
@@ -544,6 +543,42 @@
                         android:layout_alignParentEnd="true"
                         android:layout_centerVertical="true" />
                 </RelativeLayout>
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/itemLayoutHeight"
+                    android:background="@drawable/bg_solid_layout_white_16"
+                    android:paddingHorizontal="@dimen/dp_16">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_centerVertical="true"
+                        android:orientation="vertical">
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_keep_alive_title"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/dp_4"
+                            android:singleLine="true"
+                            android:text="@string/settings_keep_alive_tip"
+                            android:textSize="@dimen/sp_10" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/keepAliveSwitch"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true" />
+                </RelativeLayout>
+
             </LinearLayout>
 
             <LinearLayout
@@ -563,7 +598,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="全部指令"
+                        android:text="@string/settings_all_commands"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -591,7 +626,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="唤起测试"
+                        android:text="@string/settings_open_test"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -619,7 +654,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="截屏测试"
+                        android:text="@string/settings_capture_test"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -647,7 +682,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="诊断日志"
+                        android:text="@string/settings_diagnostic"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -675,7 +710,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
-                        android:text="常见问题"
+                        android:text="@string/settings_faq"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <ImageView
@@ -703,7 +738,7 @@
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
                         android:gravity="center_vertical"
-                        android:text="当前版本"
+                        android:text="@string/settings_current_version"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <com.google.android.material.textview.MaterialTextView

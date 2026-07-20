@@ -9,7 +9,21 @@ import android.os.Bundle
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
 import android.view.View
+import android.app.Dialog
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
+import android.widget.ArrayAdapter
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ListView
+import android.widget.TextView
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import android.content.pm.ResolveInfo
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -25,6 +39,8 @@ import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.NotificationMonitorService
+import com.pengxh.daily.app.service.ForegroundRunningService
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
@@ -51,15 +67,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
     private val kTag = "SettingsActivity"
     private val context = this
-    private val apps by lazy {
-        listOf(
-            "钉钉",
-            "企业微信",
-            "飞书",
-            "移动办公M3"
-        )
-    }
-    private val icons by lazy {
+    /** 内置目标应用图标（固定顺序，与 Constant.getBuiltInTargets() 对应） */
+    private val builtInIcons by lazy {
         listOf(
             R.drawable.ic_ding_ding,
             R.drawable.ic_wei_xin,
@@ -67,6 +76,9 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             R.mipmap.ic_mobile_m3
         )
     }
+    /** 目标应用显示名：内置 4 项 + 末尾“自定义应用”入口（本地化） */
+    private fun targetAppLabels(): List<String> =
+        Constant.getBuiltInTargets().map { it.second } + listOf(getString(R.string.settings_custom_app_entry))
     private val channels = arrayListOf("QQ邮箱", "企业微信")
     private val resultSources = arrayListOf("通知", "截屏", "无障碍")
     private val feedbackModes = arrayListOf("截屏反馈", "文本反馈")
@@ -90,8 +102,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
     }
 
     override fun initOnCreate(savedInstanceState: Bundle?) {
-        val index = (SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)).coerceIn(0, icons.lastIndex)
-        binding.iconView.setBackgroundResource(icons[index])
+        applyTargetAppIcon()
 
         binding.appVersion.text = BuildConfig.VERSION_NAME
         if (notificationEnable()) {
@@ -172,49 +183,55 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
     override fun initEvent() {
         binding.targetAppLayout.setOnClickListener {
+            val labels = targetAppLabels()
+            val builtInCount = Constant.getBuiltInTargets().size
             BottomActionSheet.Builder()
                 .setContext(this)
-                .setActionItemTitle(apps)
+                .setActionItemTitle(labels)
                 .setItemTextColor(R.color.theme_color.convertColor(this))
                 .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
                     override fun onActionItemClick(position: Int) {
-                        val oldPosition = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
-
-                        if (oldPosition == position) {
-                            binding.iconView.setBackgroundResource(icons[position])
+                        // “自定义应用”入口：打开管理弹窗，不直接选中
+                        if (position == builtInCount) {
+                            showCustomAppManagerDialog()
                             return
                         }
 
-                        when (position) {
-                            0 -> {
-                                // 钉钉：默认通知监听，通知未开则降级截屏，两者都未开则降级无障碍
-                                if (binding.noticeSwitch.isChecked) {
-                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
-                                } else if (binding.captureSwitch.isChecked) {
-                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
-                                } else if (binding.accessibilitySwitch.isChecked) {
-                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
-                                } else {
-                                    "请先打开通知监听、截屏服务或无障碍服务".show(context)
-                                    return
-                                }
-                            }
+                        val oldPosition = Constant.getTargetAppPosition()
 
-                            1, 2, 3 -> {
-                                // 企业微信、飞书、移动办公M3：只能截屏或无障碍
-                                if (binding.captureSwitch.isChecked) {
-                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
-                                } else if (binding.accessibilitySwitch.isChecked) {
-                                    SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
-                                } else {
-                                    "请先打开截屏服务或无障碍服务".show(context)
-                                    return
-                                }
+                        if (oldPosition == position) {
+                            applyTargetAppIcon()
+                            return
+                        }
+
+                        if (position == 0) {
+                            // 钉钉：默认通知监听，通知未开则降级截屏，两者都未开则降级无障碍
+                            if (binding.noticeSwitch.isChecked) {
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
+                            } else if (binding.captureSwitch.isChecked) {
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
+                            } else if (binding.accessibilitySwitch.isChecked) {
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
+                            } else {
+                                "请先打开通知监听、截屏服务或无障碍服务".show(context)
+                                return
+                            }
+                        } else {
+                            // 企业微信、飞书、移动办公M3：只能截屏或无障碍
+                            if (binding.captureSwitch.isChecked) {
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 1)
+                            } else if (binding.accessibilitySwitch.isChecked) {
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 2)
+                            } else {
+                                "请先打开截屏服务或无障碍服务".show(context)
+                                return
                             }
                         }
 
-                        binding.iconView.setBackgroundResource(icons[position])
+                        // 保存选择：内置写索引，并清空自定义选中态
                         SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, position)
+                        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
+                        applyTargetAppIcon()
                         updateResultSourceView()
                     }
                 }).build().show()
@@ -365,6 +382,20 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
         binding.commandLayout.setOnClickListener {
             navigatePageTo<CommandActivity>()
+        }
+
+        binding.keepAliveSwitch.setOnClickListener {
+            val on = binding.keepAliveSwitch.isChecked
+            SaveKeyValues.saveBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, on)
+            if (on) {
+                // 立即拉起前台服务并设置保活闹钟
+                startForegroundService(Intent(this, ForegroundRunningService::class.java))
+                "已开启开机自启/后台保活".show(this)
+            } else {
+                // 取消保活闹钟（前台服务仍在运行时不会重新调度）
+                KeepAliveReceiver.cancel(this)
+                "已关闭开机自启/后台保活".show(this)
+            }
         }
 
         binding.openTestLayout.setOnClickListener {
@@ -564,6 +595,245 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         binding.resultSourceView.setTextColor(R.color.theme_color.convertColor(this))
     }
 
+    /** 按当前选中的目标应用刷新「目标应用」图标：内置用固定图标，自定义用真实 App 图标 */
+    private fun applyTargetAppIcon() {
+        val pkg = Constant.getTargetApp()
+        val builtinIndex = Constant.getBuiltInTargets().indexOfFirst { it.first == pkg }
+        if (builtinIndex >= 0) {
+            binding.iconView.setBackgroundResource(builtInIcons.getOrElse(builtinIndex) { builtInIcons[0] })
+        } else {
+            val drawable = loadAppIcon(pkg)
+            if (drawable != null) binding.iconView.background = drawable
+            else binding.iconView.setBackgroundResource(R.drawable.ic_custom_app)
+        }
+    }
+
+    private fun refreshTargetAppIcon() {
+        applyTargetAppIcon()
+    }
+
+    /** 加载已安装 App 的图标，失败返回 null */
+    private fun loadAppIcon(pkg: String): Drawable? = try {
+        packageManager.getApplicationIcon(pkg)
+    } catch (e: Exception) { null }
+
+    /** 解析已安装 App 的显示名，失败回退包名 */
+    private fun resolveAppLabel(pkg: String): String = try {
+        val pm = packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    } catch (e: Exception) { pkg }
+
+    /** 将多行/逗号/分号/空白混合的文本解析为包名列表 */
+    private fun parsePackageList(text: String): List<String> =
+        text.split(Regex("[\n,，;；\\s]+"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+    /** 校验 Android 包名格式：至少两段，仅含字母数字下划线与点 */
+    private fun isValidPackageName(pkg: String): Boolean =
+        Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+\$").matches(pkg)
+
+    // ============ 自定义打卡应用：从已安装 App 列表选择 ============
+
+    private var customAppDialog: Dialog? = null
+
+    /** 自定义打卡应用管理：使用自定义圆角卡片弹窗，列出已添加项（真实图标+名称+包名），支持移除，并可从已安装应用选择/手动输入 */
+    private fun showCustomAppManagerDialog() {
+        val customApps = Constant.getCustomTargetApps()
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_custom_app_manager, null)
+        val contentContainer = view.findViewById<FrameLayout>(R.id.contentContainer)
+        val closeBtn = view.findViewById<ImageView>(R.id.closeBtn)
+        val pickBtn = view.findViewById<TextView>(R.id.btnPickFromInstalled)
+        val manualBtn = view.findViewById<TextView>(R.id.btnManualInput)
+
+        if (customApps.isEmpty()) {
+            val emptyView = TextView(this).apply {
+                text = getString(R.string.settings_custom_app_empty)
+                setTextColor(Color.parseColor("#9E9E9E"))
+                textSize = 13f
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                ).apply { gravity = Gravity.CENTER }
+            }
+            contentContainer.addView(emptyView)
+        } else {
+            val list = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            val inflater = LayoutInflater.from(this)
+            customApps.forEachIndexed { idx, pkg ->
+                if (idx > 0) {
+                    list.addView(View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            resources.getDimensionPixelSize(R.dimen.dividerLine)
+                        )
+                        setBackgroundColor(Color.parseColor("#EEEEEE"))
+                    })
+                }
+                val row = inflater.inflate(R.layout.dialog_custom_app_item, list, false) as ViewGroup
+                val icon = row.findViewById<ImageView>(R.id.appIcon)
+                val name = row.findViewById<TextView>(R.id.appName)
+                val pkgView = row.findViewById<TextView>(R.id.appPkg)
+                val remove = row.findViewById<TextView>(R.id.btnRemove)
+                val drawable = loadAppIcon(pkg)
+                if (drawable != null) icon.setImageDrawable(drawable) else icon.setImageResource(R.drawable.ic_custom_app)
+                name.text = resolveAppLabel(pkg)
+                pkgView.text = pkg
+                remove.setOnClickListener { removeCustomApp(pkg) }
+                list.addView(row)
+            }
+            contentContainer.addView(list)
+        }
+
+        customAppDialog = Dialog(this).apply {
+            setContentView(view)
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            val width = (resources.displayMetrics.widthPixels * 0.88).toInt()
+            window?.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setCanceledOnTouchOutside(true)
+            show()
+        }
+
+        closeBtn.setOnClickListener { customAppDialog?.dismiss() }
+        pickBtn.setOnClickListener {
+            customAppDialog?.dismiss()
+            showAppPickerDialog()
+        }
+        manualBtn.setOnClickListener {
+            customAppDialog?.dismiss()
+            showCustomAppTextDialog()
+        }
+    }
+
+    /** 从已安装（拥有桌面图标）的 App 列表中直接选择，列表带真实图标，使用自定义圆角卡片弹窗 */
+    private fun showAppPickerDialog() {
+        val pm = packageManager
+        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = pm.queryIntentActivities(launchIntent, 0)
+            .filter { it.activityInfo.packageName != BuildConfig.APPLICATION_ID }
+            .sortedBy { it.loadLabel(pm).toString() }
+        if (apps.isEmpty()) {
+            getString(R.string.settings_custom_app_no_apps).show(this)
+            return
+        }
+
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
+        val listView = view.findViewById<ListView>(R.id.appListView)
+        val closeBtn = view.findViewById<ImageView>(R.id.closeBtn)
+        val cancelBtn = view.findViewById<TextView>(R.id.btnCancel)
+
+        val maxH = (320 * resources.displayMetrics.density).toInt()
+        listView.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            maxH
+        )
+        listView.divider = null
+        listView.selector = getDrawable(android.R.color.transparent)
+        listView.adapter = object : ArrayAdapter<ResolveInfo>(this, 0, apps) {
+            private val inflater = LayoutInflater.from(this@SettingsActivity)
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val item = convertView
+                    ?: inflater.inflate(R.layout.dialog_app_picker_item, parent, false)
+                val ri = getItem(position)
+                item.findViewById<ImageView>(R.id.appIcon).setImageDrawable(ri?.loadIcon(pm))
+                item.findViewById<TextView>(R.id.appLabel).text = ri?.loadLabel(pm).toString()
+                return item
+            }
+        }
+
+        val dialog = Dialog(this).apply {
+            setContentView(view)
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            val width = (resources.displayMetrics.widthPixels * 0.88).toInt()
+            window?.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setCanceledOnTouchOutside(true)
+            show()
+        }
+
+        listView.setOnItemClickListener { _, _, which, _ ->
+            dialog.dismiss()
+            addCustomApp(apps[which].activityInfo.packageName)
+        }
+        closeBtn.setOnClickListener { dialog.dismiss() }
+        cancelBtn.setOnClickListener { dialog.dismiss() }
+    }
+
+    /** 添加并直接选中一个自定义打卡应用 */
+    private fun addCustomApp(pkg: String) {
+        val list = Constant.getCustomTargetApps().toMutableList()
+        if (!list.contains(pkg)) list.add(pkg)
+        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, list.joinToString(","))
+        SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, Constant.CUSTOM_TARGET_INDEX)
+        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, pkg)
+        applyTargetAppIcon()
+        getString(R.string.settings_pick_app_added, resolveAppLabel(pkg)).show(this)
+    }
+
+    /** 移除自定义打卡应用；若当前正选中该项则回退钉钉 */
+    private fun removeCustomApp(pkg: String) {
+        val list = Constant.getCustomTargetApps().toMutableList()
+        list.remove(pkg)
+        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, list.joinToString(","))
+        if (SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0) == Constant.CUSTOM_TARGET_INDEX
+            && SaveKeyValues.loadString(Constant.CUSTOM_TARGET_SELECTED_KEY, "") == pkg
+        ) {
+            SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, 0)
+            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
+        }
+        applyTargetAppIcon()
+        customAppDialog?.dismiss()
+        showCustomAppManagerDialog()
+    }
+
+    /** 手动输入包名的兜底入口（少数无桌面图标的 App 可能需要） */
+    private fun showCustomAppTextDialog() {
+        val current = Constant.getCustomTargetApps().joinToString("\n")
+        val input = EditText(this).apply {
+            setText(current)
+            hint = "每行一个包名，例如：\ncom.example.punchapp"
+            isSingleLine = false
+            minLines = 3
+            gravity = Gravity.START or Gravity.TOP
+            setPadding(
+                resources.getDimensionPixelSize(R.dimen.dp_16),
+                resources.getDimensionPixelSize(R.dimen.dp_12),
+                resources.getDimensionPixelSize(R.dimen.dp_16),
+                resources.getDimensionPixelSize(R.dimen.dp_12)
+            )
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.settings_custom_target_app)
+            .setMessage(R.string.settings_custom_app_manual_hint)
+            .setView(input)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val pkgs = parsePackageList(input.text.toString())
+                val invalid = pkgs.filter { !isValidPackageName(it) }
+                if (invalid.isNotEmpty()) {
+                    "无效的包名格式：${invalid.joinToString()}".show(this)
+                    return@setPositiveButton
+                }
+                SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, pkgs.joinToString(","))
+                val selected = SaveKeyValues.loadString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
+                if (SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0) == Constant.CUSTOM_TARGET_INDEX
+                    && !pkgs.contains(selected)
+                ) {
+                    SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, 0)
+                    SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
+                }
+                applyTargetAppIcon()
+                "已保存自定义打卡应用".show(this)
+            }
+            .show()
+    }
+
     /**
      * 根据 ACCESSIBILITY_FEEDBACK_MODE_KEY 更新反馈方式显示文字
      */
@@ -679,6 +949,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
+            binding.keepAliveSwitch.isChecked =
+                SaveKeyValues.loadBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, true)
         } finally {
             syncingSwitchState = false
         }

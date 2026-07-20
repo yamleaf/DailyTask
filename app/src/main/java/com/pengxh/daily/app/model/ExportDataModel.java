@@ -14,7 +14,8 @@ public class ExportDataModel {
     private int overtime; // 超时时间
     private int timeRange; // 时间范围
     private int msgChannel; // 消息渠道
-    private int targetApp; // 目标应用
+    private int targetApp; // 目标应用(0-3 内置; 100 自定义)
+    private String targetAppPackage; // 目标应用实际包名(自定义目标时用于还原)
 
     private String remoteCommand; // 口令
     private String msgTitle; // 打卡消息标题
@@ -69,6 +70,14 @@ public class ExportDataModel {
 
     public void setMsgChannel(int msgChannel) {
         this.msgChannel = msgChannel;
+    }
+
+    public String getTargetAppPackage() {
+        return targetAppPackage;
+    }
+
+    public void setTargetAppPackage(String targetAppPackage) {
+        this.targetAppPackage = targetAppPackage;
     }
 
     public String getRemoteCommand() {
