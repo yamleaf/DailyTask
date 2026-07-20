@@ -119,25 +119,20 @@ object TaskScheduler {
 
         val tempJob = currentScope.launch {
             while (isActive) {
-                // 每日重置点之后，调度下一天的任务；
-                // 旧逻辑在重置点重跑“今天”已过期任务并空等 24h，导致次日任务永不执行
+                // 始终基于"今天"排程；跨重置点的任务由 loadTodayTaskPlans 偏移 +1 天，
+                // 实际执行日的休息/节假日由 executeSchedule 内部逐任务再判（shouldSkipDay）。
+                // 因此即使"今天"是休息日（如周日），下一工作日（如周一）的任务仍会被正确排入并执行，
+                // 不能在此处对"周期起始日"整轮跳过，否则跨天任务永远不会排程（曾导致周一 8:30 不执行）。
                 val scheduleDate = resolveScheduleDate()
-                if (shouldSkipDay(scheduleDate)) {
-                    runningDetail = "今日休息已跳过"
-                    _tipsEvent.emit(TipsEvent.Skip)
-                    ForegroundRunningService.emitNotificationText("今日休息，任务已跳过")
+                val schedule = buildSchedule(scheduleDate)
+                if (schedule.isEmpty()) {
+                    LogFileManager.writeLog("任务列表为空，进入等待期")
                 } else {
-                    val schedule = buildSchedule(scheduleDate)
-                    if (schedule.isEmpty()) {
-                        LogFileManager.writeLog("任务列表为空，停止调度")
-                        return@launch
-                    }
-
                     LogFileManager.writeLog("开始执行本轮任务（${scheduleDate}），共 ${schedule.size} 个")
                     executeSchedule(schedule)
                 }
 
-                // 今天结束，睡到下一个重置点
+                // 本轮结束，睡到下一个重置点
                 if (isActive) waitUntilNextReset()
             }
         }
@@ -342,6 +337,10 @@ object TaskScheduler {
         runningDetail = message
         LogFileManager.writeLog(message)
         ForegroundRunningService.emitNotificationText(message)
+        // 本轮全部被跳过（如整日休息/节假日）→ 维持"今日休息"UI 高亮
+        if (executedCount == 0 && skippedCount > 0) {
+            _tipsEvent.emit(TipsEvent.Skip)
+        }
     }
 
     /**
@@ -629,7 +628,10 @@ object TaskScheduler {
             target.add(Calendar.DATE, 1)
         }
 
-        return ((target.timeInMillis - now.timeInMillis) / 1000).toInt()
+        val diffMillis = target.timeInMillis - now.timeInMillis
+        // ceil 到秒并兜底至少 1 秒：边界处 (target-now) 不足 1s 时整数除法会截断为 0，
+        // 导致 withTimeout(0) 立即返回 → 外层重排 → 又立即返回，形成 21:59:59 刷屏死循环。
+        return ((diffMillis + 999) / 1000).toInt().coerceAtLeast(1)
     }
 
     data class TaskPlanItem(

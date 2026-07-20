@@ -28,7 +28,10 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -93,6 +96,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 armTimeMillis = System.currentTimeMillis()
                 sawPunchButton = false
                 lastTextScanMillis = 0L
+                if (enabled) startActiveScan() else stopActiveScan()
                 Log.d(TAG, "文本检测状态: active=$enabled, armTime=$armTimeMillis")
                 LogFileManager.writeLog("无障碍文本检测: active=$enabled")
             }
@@ -135,6 +139,11 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     /** 上次文本扫描时间戳（节流用），避免无障碍事件高频触发反复扫描同一界面 */
     @Volatile
     private var lastTextScanMillis = 0L
+
+    /** 主动轮询扫描协程：setTextDetectionEnabled(true) 期间每 TEXT_SCAN_INTERVAL_MS 扫描一次，
+     *  保证屏幕关闭/界面静止（无障碍事件稀少）时仍能按频率识别打卡结果。 */
+    @Volatile
+    private var scanJob: Job? = null
 
     /** 打卡成功关键词（仅真正的成功提示，不含“上班打卡/下班打卡”等按钮文字） */
     private val successKeywords = listOf(
@@ -298,13 +307,26 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             }
         }
 
-        if (!textDetectionActive || textDetected) return
+        // 仅对窗口/内容变化做即时扫描；频率由 scanCurrentWindow 内部节流控制，
+        // 与主动轮询协程共享 lastTextScanMillis，保证每 TEXT_SCAN_INTERVAL_MS 最多一次。
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
             && event?.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
         ) {
             return
         }
 
+        if (textDetectionActive && !textDetected) {
+            scanCurrentWindow()
+        }
+    }
+
+    /**
+     * 扫描当前前台窗口文本并尝试识别打卡结果。
+     * 由 onAccessibilityEvent（事件即时触发）与主动轮询协程（屏幕静止兜底）共同调用，
+     * 内部用 [lastTextScanMillis] 节流，保证每 [TEXT_SCAN_INTERVAL_MS] 最多扫描一次。
+     */
+    private fun scanCurrentWindow() {
+        if (!textDetectionActive || textDetected) return
         val root = rootInActiveWindow ?: return
         try {
             val packageName = root.packageName?.toString() ?: return
@@ -314,8 +336,8 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 return
             }
 
-            // 文本识别节流：无障碍事件（尤其 TYPE_WINDOW_CONTENT_CHANGED）在飞书中极密集，
-            // 原逻辑每秒触发数十次重复扫描。用户要求每 3 秒识别一次即可，故在此限流。
+            // 文本识别节流：与主动轮询共享同一时间戳，保证每 3 秒最多扫描一次，
+            // 既避免飞书高频事件重复扫描，也保证屏幕静止时主动轮询按频率兜底。
             val now = System.currentTimeMillis()
             if (now - lastTextScanMillis < TEXT_SCAN_INTERVAL_MS) {
                 return
@@ -371,6 +393,26 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         } finally {
             root.recycle()
         }
+    }
+
+    /**
+     * 主动轮询扫描：检测开关开启期间每 [TEXT_SCAN_INTERVAL_MS] 扫描一次当前窗口。
+     * 兜底屏幕关闭/界面静止导致无障碍事件稀少、被动节流几乎不扫描的问题，
+     * 保证“每 3 秒识别一次”既能限频（不冗余）又能兜底（事件少时也扫）。
+     */
+    private fun startActiveScan() {
+        stopActiveScan()
+        scanJob = serviceScope.launch {
+            while (isActive && textDetectionActive && !textDetected) {
+                scanCurrentWindow()
+                delay(TEXT_SCAN_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopActiveScan() {
+        scanJob?.cancel()
+        scanJob = null
     }
 
     /**
