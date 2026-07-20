@@ -7,8 +7,17 @@ import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
 import com.pengxh.daily.app.extensions.notificationEnable
+import com.pengxh.daily.app.service.ForegroundRunningService
+import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.TemporalAdjusters
 import java.util.Date
 import java.util.Locale
 
@@ -46,6 +55,7 @@ object StatusReporter {
         val plans = TaskScheduler.loadTodayTaskPlans()
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
+        val cal = computePunchCalendar(14, 14)
 
         return buildString {
             appendLine("====================")
@@ -80,10 +90,13 @@ object StatusReporter {
                 }"
             )
             appendLine("· 距下次重置：${TaskScheduler.secondsUntilNextReset().formatTime()}")
+            appendLine("· 下次打卡：${nextPunchText(cal, plans, now)}")
+            appendLine("· 最近打卡：${recentPunchText(cal)}")
             appendLine()
             appendTaskPlanSection(plans, pending.size, now)
             appendLine()
             appendLine("【服务状态】")
+            appendLine("· 前台服务：${if (ForegroundRunningService.isRunning) "运行中" else "未运行"}")
             appendLine("· 悬浮窗权限：${if (Settings.canDrawOverlays(context)) "已获取" else "未获取"}")
             appendLine(
                 "· 通知监听：${
@@ -114,6 +127,28 @@ object StatusReporter {
                     }
                 }"
             )
+            appendLine()
+            appendLine("【近两周打卡日历】")
+            val punchedCount = cal.punched.count { !it.isAfter(cal.today) }
+            val scheduledPast = cal.scheduled.count { !it.isAfter(cal.today) }
+            val missed = (scheduledPast - punchedCount).coerceAtLeast(0)
+            appendLine("· 已打卡 $punchedCount 天 · 计划 $scheduledPast 天 · 漏打卡 $missed 天")
+            appendLine("· 窗口内：节假日 ${cal.holidays.size} 天 · 休息日 ${cal.restDays.size} 天 · 调休补班 ${cal.makeupWorkdays.size} 天")
+            if (cal.holidays.isNotEmpty()) {
+                appendLine("· 节假日跳过：${cal.holidays.sorted().joinToString("、") { it.toString().substring(5) }}")
+            }
+            if (cal.makeupWorkdays.isNotEmpty()) {
+                appendLine("· 调休补班：${cal.makeupWorkdays.sorted().joinToString("、") { it.toString().substring(5) }}")
+            }
+            val missedDates = cal.scheduled.filter { it.isBefore(cal.today) && it !in cal.punched }.sorted()
+            if (missedDates.isNotEmpty()) {
+                appendLine("· 漏打卡：${missedDates.joinToString("、") { it.toString().substring(5) }}")
+            }
+            val futurePlanned = cal.scheduled.filter { !it.isBefore(cal.today) }.sorted().take(7)
+            if (futurePlanned.isNotEmpty()) {
+                appendLine("· 未来计划打卡：${futurePlanned.joinToString("、") { it.toString().substring(5) }}")
+            }
+            appendLine("· 今日：${buildTodayTextNote(cal)}")
             appendLine()
             appendLine("【设备信息】")
             appendLine("· 当前时间：${dateTimeFormat.format(Date())}")
@@ -374,6 +409,241 @@ object StatusReporter {
         }
     }
 
+    // ======================== 近两周打卡日历 ========================
+
+    /** 日历中每一天的分类，用于精确表达「为什么这天打/不打」 */
+    private enum class DayKind {
+        PUNCHED,      // 已打卡
+        MISSED,       // 漏打卡（已过计划工作日但无打卡记录）
+        SCHEDULED,    // 计划打卡（未来工作日）
+        MAKEUP,       // 调休补班（周末但需上班，会打卡）
+        HOLIDAY,      // 法定节假日，自动跳过
+        REST,         // 自定义休息日，自动跳过
+        NO_TASK       // 未配置任务，无打卡计划
+    }
+
+    private data class PunchCalendarData(
+        val windowStart: LocalDate,
+        val windowEnd: LocalDate,
+        val today: LocalDate,
+        val scheduled: Set<LocalDate>,
+        val punched: Set<LocalDate>,
+        val holidays: Set<LocalDate>,
+        val makeupWorkdays: Set<LocalDate>,
+        val restDays: Set<LocalDate>,
+        val customWorkdays: Set<DayOfWeek>,
+        val hasTasks: Boolean,
+        val skipHolidayEnabled: Boolean
+    )
+
+    /**
+     * 计算 [pastDays] 天前到 [futureDays] 天后窗口内的
+     * 计划打卡日、实际打卡日，以及每一天的跳过原因（节假日 / 调休补班 / 自定义休息日）。
+     */
+    private suspend fun computePunchCalendar(pastDays: Int, futureDays: Int): PunchCalendarData {
+        val today = LocalDate.now()
+        val windowStart = today.minusDays(pastDays.toLong())
+        val windowEnd = today.plusDays(futureDays.toLong())
+        val allTasks = withContext(Dispatchers.IO) {
+            DatabaseWrapper.loadAllTask()
+        }
+        val hasTasks = allTasks.isNotEmpty()
+        val skipHolidayEnabled = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
+        val customWorkdays = CustomWorkdayManager.loadWorkdays()
+
+        val scheduled = mutableSetOf<LocalDate>()
+        val holidays = mutableSetOf<LocalDate>()
+        val makeupWorkdays = mutableSetOf<LocalDate>()
+        val restDays = mutableSetOf<LocalDate>()
+        var d = windowStart
+        while (!d.isAfter(windowEnd)) {
+            if (TaskScheduler.isPunchScheduled(d, allTasks)) scheduled.add(d)
+            if (skipHolidayEnabled && ChinaHolidayManager.isHoliday(d)) holidays.add(d)
+            if (ChinaHolidayManager.isWorkday(d)) makeupWorkdays.add(d)
+            if (d.dayOfWeek !in customWorkdays) restDays.add(d)
+            d = d.plusDays(1)
+        }
+        val punched = DatabaseWrapper.loadPunchDatesBetween(windowStart, windowEnd.plusDays(1))
+        return PunchCalendarData(
+            windowStart, windowEnd, today, scheduled, punched,
+            holidays, makeupWorkdays, restDays, customWorkdays, hasTasks, skipHolidayEnabled
+        )
+    }
+
+    /** 今天是哪一类（供 HTML / 纯文本共用） */
+    private fun todayKind(cal: PunchCalendarData): DayKind {
+        val today = cal.today
+        val punched = today in cal.punched
+        val holiday = cal.skipHolidayEnabled && today in cal.holidays
+        val makeup = today in cal.makeupWorkdays
+        val customRest = today.dayOfWeek !in cal.customWorkdays
+        return when {
+            punched -> DayKind.PUNCHED
+            holiday -> DayKind.HOLIDAY
+            makeup -> DayKind.MAKEUP
+            customRest -> DayKind.REST
+            !cal.hasTasks -> DayKind.NO_TASK
+            else -> DayKind.SCHEDULED
+        }
+    }
+
+    private fun legendDot(color: String, label: String): String {
+        return "<span style=\"display:inline-flex;align-items:center;gap:4px;\">" +
+            "<span style=\"width:9px;height:9px;border-radius:50%;background:$color;display:inline-block;\"></span>$label</span>"
+    }
+
+    private fun calendarCell(date: LocalDate, cal: PunchCalendarData): String {
+        val inWindow = !date.isBefore(cal.windowStart) && !date.isAfter(cal.windowEnd)
+        val punched = date in cal.punched
+        val isToday = date == cal.today
+        val isPast = date.isBefore(cal.today)
+        val holiday = cal.skipHolidayEnabled && date in cal.holidays
+        val makeup = date in cal.makeupWorkdays
+        val customRest = date.dayOfWeek !in cal.customWorkdays
+
+        val kind = when {
+            punched -> DayKind.PUNCHED
+            holiday -> DayKind.HOLIDAY
+            makeup -> if (isPast && !punched) DayKind.MISSED else DayKind.MAKEUP
+            customRest -> DayKind.REST
+            !cal.hasTasks -> DayKind.NO_TASK
+            else -> if (isPast) DayKind.MISSED else DayKind.SCHEDULED
+        }
+
+        val (bg, fg, mark) = when (kind) {
+            DayKind.PUNCHED -> Triple("#e6f7ec", "#389e0d", "✓")
+            DayKind.MISSED -> Triple("#fff1f0", "#cf1322", "✗")
+            DayKind.SCHEDULED -> Triple("#e6f0ff", "#4f6ef7", "●")
+            DayKind.MAKEUP -> Triple("#f9f0ff", "#722ed1", "班")
+            DayKind.HOLIDAY -> Triple("#fff7e6", "#d46b08", "假")
+            DayKind.REST -> Triple("#fafafa", "#bbb", "休")
+            DayKind.NO_TASK -> Triple("#fafafa", "#ccc", "—")
+        }
+        val border = if (isToday) "border:2px solid #4f6ef7;" else "border:1px solid #eee;"
+        val opacity = if (inWindow) "1" else "0.35"
+        val dayNum = date.dayOfMonth
+        return "<td style=\"text-align:center;vertical-align:middle;\">" +
+            "<div style=\"background:$bg;$border;border-radius:8px;padding:6px 0;opacity:$opacity;\">" +
+            "<div style=\"font-size:13px;font-weight:${if (isToday) 700 else 500};color:$fg;line-height:1.1;\">$dayNum</div>" +
+            "<div style=\"font-size:11px;color:$fg;height:14px;line-height:14px;\">$mark</div>" +
+            "</div></td>"
+    }
+
+    private fun punchCalendarHtml(cal: PunchCalendarData): String {
+        val calStart = cal.windowStart.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val calEnd = cal.windowEnd.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        val headers = listOf("一", "二", "三", "四", "五", "六", "日")
+
+        val sb = StringBuilder()
+        sb.append("<div style=\"margin-bottom:14px;\">")
+        sb.append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">📅 打卡日历 <span style=\"font-weight:400;font-size:12px;color:#888;\">近两周（含未来两周）</span></div>")
+        // 图例
+        sb.append("<div style=\"font-size:11px;color:#888;margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap;\">")
+        sb.append(legendDot("#389e0d", "已打卡"))
+        sb.append(legendDot("#cf1322", "漏打卡"))
+        sb.append(legendDot("#4f6ef7", "计划打卡"))
+        sb.append(legendDot("#722ed1", "调休补班"))
+        sb.append(legendDot("#d46b08", "节假日"))
+        sb.append(legendDot("#bbb", "休息日"))
+        sb.append("</div>")
+        // 周网格
+        sb.append("<table cellpadding=\"0\" cellspacing=\"4\" border=\"0\" width=\"100%\" style=\"font-size:12px;border-collapse:separate;\">")
+        sb.append("<tr>")
+        headers.forEach { h ->
+            sb.append("<td style=\"text-align:center;color:#aaa;font-size:11px;padding:2px 0;\">$h</td>")
+        }
+        sb.append("</tr>")
+        var d = calStart
+        while (!d.isAfter(calEnd)) {
+            sb.append("<tr>")
+            for (i in 0..6) {
+                sb.append(calendarCell(d.plusDays(i.toLong()), cal))
+            }
+            sb.append("</tr>")
+            d = d.plusDays(7)
+        }
+        sb.append("</table>")
+        // 汇总
+        val punchedCount = cal.punched.count { !it.isAfter(cal.today) }
+        val scheduledPast = cal.scheduled.count { !it.isAfter(cal.today) }
+        val missed = (scheduledPast - punchedCount).coerceAtLeast(0)
+        val futureScheduled = cal.scheduled.filter { !it.isBefore(cal.today) }.size
+        sb.append("<div style=\"font-size:12px;color:#555;margin-top:8px;line-height:1.7;\">")
+        sb.append("已打卡 <b style=\"color:#389e0d;\">$punchedCount</b> 天 · 计划 <b>$futureScheduled</b> 天 · 漏打卡 <b style=\"color:#cf1322;\">$missed</b> 天<br>")
+        sb.append("窗口内：节假日 <b style=\"color:#d46b08;\">${cal.holidays.size}</b> 天 · 休息日 <b>${cal.restDays.size}</b> 天 · 调休补班 <b style=\"color:#722ed1;\">${cal.makeupWorkdays.size}</b> 天")
+        sb.append("</div>")
+        // 今日明确说明
+        sb.append(todayCalendarNote(cal))
+        sb.append("</div>")
+        return sb.toString()
+    }
+
+    /** 今日是否会自动打卡的明确说明，避免「停止循环没成功误打卡」类问题 */
+    private fun todayCalendarNote(cal: PunchCalendarData): String {
+        val kind = todayKind(cal)
+        val text = when (kind) {
+            DayKind.PUNCHED -> "今日已打卡"
+            DayKind.HOLIDAY -> "今日为法定节假日，自动跳过（不会打卡）"
+            DayKind.MAKEUP -> "今日为调休补班日，计划打卡"
+            DayKind.REST -> "今日为休息日，自动跳过（不会打卡）"
+            DayKind.NO_TASK -> "未配置任务，今日无打卡计划"
+            DayKind.SCHEDULED -> "今日为工作日，计划打卡"
+            DayKind.MISSED -> "今日为工作日但尚未打卡"
+        }
+        val running = TaskScheduler.isRunning()
+        val warn = when {
+            (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && running ->
+                "（调度运行中，将自动打卡）"
+            (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && !running ->
+                "（当前调度未运行，今日不会自动打卡）"
+            else -> ""
+        }
+        return "<div style=\"font-size:12px;color:#333;margin-top:6px;padding:6px 10px;background:#f6f8ff;border-radius:6px;\">" +
+            "📌 今日：$text$warn</div>"
+    }
+
+    /** 纯文本邮件的今日说明 */
+    private fun buildTodayTextNote(cal: PunchCalendarData): String {
+        val kind = todayKind(cal)
+        val base = when (kind) {
+            DayKind.PUNCHED -> "已打卡"
+            DayKind.HOLIDAY -> "法定节假日，自动跳过"
+            DayKind.MAKEUP -> "调休补班日，计划打卡"
+            DayKind.REST -> "休息日，自动跳过"
+            DayKind.NO_TASK -> "未配置任务，无打卡计划"
+            DayKind.SCHEDULED -> "工作日，计划打卡"
+            DayKind.MISSED -> "工作日尚未打卡"
+        }
+        val running = TaskScheduler.isRunning()
+        return when {
+            (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && running ->
+                "$base（调度运行中，将自动打卡）"
+            (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && !running ->
+                "$base（当前调度未运行，不会自动打卡）"
+            else -> base
+        }
+    }
+
+    private fun nextPunchText(cal: PunchCalendarData, plans: List<TaskScheduler.TaskPlanItem>, now: Long): String {
+        val next = plans.filter { it.actualTimeMillis > now }.minByOrNull { it.actualTimeMillis }
+        return if (next != null) {
+            val d = LocalDate.ofInstant(Instant.ofEpochMilli(next.actualTimeMillis), ZoneId.systemDefault())
+            val rel = when {
+                d == cal.today -> "今天"
+                d == cal.today.plusDays(1) -> "明天"
+                else -> "${"%02d".format(d.monthValue)}-${"%02d".format(d.dayOfMonth)}"
+            }
+            "$rel ${next.actualTime}"
+        } else {
+            "今日无（已执行完）"
+        }
+    }
+
+    private fun recentPunchText(cal: PunchCalendarData): String {
+        val recent = cal.punched.filter { !it.isAfter(cal.today) }.maxOrNull()
+        return recent?.toString() ?: "—"
+    }
+
     @JvmStatic
     suspend fun buildStatusReportHtml(context: Context, listenerConnected: Boolean): String {
         val batteryManager = context.getSystemService(BatteryManager::class.java)
@@ -384,6 +654,7 @@ object StatusReporter {
         val plans = TaskScheduler.loadTodayTaskPlans()
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
+        val cal = computePunchCalendar(14, 14)
 
         val body = buildString {
             // 概览卡片
@@ -437,6 +708,8 @@ object StatusReporter {
                 row("任务调度", "$runBadge <span style=\"font-size:11px;color:#888;\">${if (runDetail.isNotEmpty()) runDetail else ""}</span>"),
                 row("每日循环", cycleText),
                 row("距下次重置", TaskScheduler.secondsUntilNextReset().formatTime()),
+                row("下次打卡", nextPunchText(cal, plans, now)),
+                row("最近打卡", recentPunchText(cal)),
                 row("省电模式", powerSaveText),
                 row("跳过节假日", holidayText),
                 row("强制伪息屏", maskText)
@@ -471,10 +744,14 @@ object StatusReporter {
             }
 
             append(section("🔌 服务状态",
+                row("前台服务", if (ForegroundRunningService.isRunning) badge("运行中", "ok") else badge("未运行", "err")),
                 row("悬浮窗权限", overlay),
                 row("通知监听", notify),
                 row("结果来源", screen)
             ))
+
+            // 打卡日历
+            append(punchCalendarHtml(cal))
 
             // 远程指令
             append(section("💬 远程指令",

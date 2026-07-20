@@ -606,6 +606,23 @@ object TaskScheduler {
             }
     }
 
+    /**
+     * 供状态查询日历使用：判断指定日期是否安排了打卡任务。
+     * 已配置任务且当日不被跳过（非节假日/自定义休息日）时返回 true。
+     */
+    suspend fun isPunchScheduled(date: LocalDate): Boolean {
+        val allTasks = withContext(Dispatchers.IO) {
+            DatabaseWrapper.loadAllTask()
+        }
+        return isPunchScheduled(date, allTasks)
+    }
+
+    /** 复用已加载的任务列表，避免日历逐日重复查库 */
+    fun isPunchScheduled(date: LocalDate, allTasks: List<DailyTaskBean>): Boolean {
+        if (allTasks.isEmpty()) return false
+        return !shouldSkipDay(date)
+    }
+
     fun secondsUntilNextReset(): Int {
         val resetHour = SaveKeyValues.loadInt(
             Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR

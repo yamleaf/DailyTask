@@ -35,6 +35,20 @@ object DatabaseWrapper {
         return noticeDao.loadCurrentDayNotice("${LocalDate.now()}")
     }
 
+    /**
+     * 返回 [start, endExclusive) 区间内含"考勤打卡"的通知所属日期集合，
+     * 用于状态查询日历的"实际打卡"标记。
+     */
+    suspend fun loadPunchDatesBetween(start: LocalDate, endExclusive: LocalDate): Set<LocalDate> {
+        val from = "${start} 00:00:00"
+        val to = "${endExclusive} 00:00:00"
+        val notices = noticeDao.loadBetween(from, to)
+        return notices.filter { it.noticeMessage.contains("考勤打卡") }
+            .mapNotNull { note ->
+                runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull()
+            }.toSet()
+    }
+
     suspend fun insertNotice(bean: NotificationBean) {
         noticeDao.insert(bean)
     }
