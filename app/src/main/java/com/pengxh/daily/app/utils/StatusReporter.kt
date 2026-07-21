@@ -684,10 +684,20 @@ object StatusReporter {
                 }
             }
             // 调度未运行，但每日循环开启：下次会在每日重置后自动启动，
-            // 重置点之前随机偏移尚未生成，因此只显示基准计划时间（不含随机时间）
+            // 重置点之前随机偏移尚未生成，因此只显示基准计划时间，并提示随机范围
             autoRecycle -> {
                 val t = plans.firstOrNull()?.plannedTime
-                if (t != null) "次日 $t（不含随机时间）" else "任务未配置，无下次打卡"
+                if (t != null) {
+                    val needRandom = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
+                    val range =
+                        SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
+                    val suffix = if (needRandom) {
+                        "（不含 $range min 随机时间）"
+                    } else {
+                        "（随机时间已关闭）"
+                    }
+                    "次日 $t$suffix"
+                } else "任务未配置，无下次打卡"
             }
             // 调度未运行且每日循环关闭：完全不会自动打卡
             else -> "任务未启动，无下次打卡"
