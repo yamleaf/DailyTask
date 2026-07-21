@@ -984,8 +984,14 @@ object StatusReporter {
         snippet: String,
         keyword: String,
         appName: String,
-        extra: String? = null
+        extra: String? = null,
+        clockInTime: Long? = null
     ): String {
+        val clockInText = if (clockInTime != null && clockInTime > 0L) {
+            SimpleDateFormat("HH:mm", Locale.CHINA).format(java.util.Date(clockInTime))
+        } else {
+            null
+        }
         val body = buildString {
             append("<div style=\"text-align:center;padding:12px 0;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">✅</div>")
@@ -994,6 +1000,9 @@ object StatusReporter {
             append("</div>")
             append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">应用来源</td><td style=\"font-size:12px;color:#333;text-align:right;\">$appName</td></tr>")
+            if (clockInText != null) {
+                append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">打卡时间</td><td style=\"font-size:12px;color:#333;text-align:right;\">$clockInText</td></tr>")
+            }
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">匹配关键词</td><td style=\"font-size:12px;color:#333;text-align:right;\">$keyword</td></tr>")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;vertical-align:top;\">识别摘要</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${snippet.ifBlank { "—" }}</td></tr>")
             if (!extra.isNullOrBlank()) {

@@ -55,9 +55,14 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         /** 文本识别节流间隔：无障碍事件极密集，限制每 3 秒最多扫描一次 */
         private const val TEXT_SCAN_INTERVAL_MS = 3000L
 
-        /** 成功词最小返回延迟：监听开启后至少等待该时长才允许返回打卡成功，
-         *  避免打开目标 App 瞬间历史打卡记录被秒命中而抢答，导致本次极速打卡结果被漏判。 */
-        private const val MIN_TEXT_RETURN_DELAY_MS = 10_000L
+        /** 打卡 App 进入前台后、开始判定前的等待时长：飞书极速打卡自触发 + 成功消息渲染到
+         *  列表需要时间。等待期间只扫描不判定，避免列表尚未刷新时扫到历史消息抢答。 */
+        private const val PUNCH_FOREGROUND_WAIT_MS = 5_000L
+
+        /** 打卡成功消息时间戳与「当前扫描时刻」的最大允许偏差：极速打卡即时产生，其时间戳
+         *  必落在当前时刻附近；历史消息相差几小时，必然超出。±2 分钟已覆盖「分钟级时间戳
+         *  向下取整 + 渲染/扫描延迟」的极端叠加，同时远小于真实历史的间隔。 */
+        private const val PUNCH_TIME_WINDOW_MS = 120_000L
 
         @Volatile
         private var instance: AutoProjectionAccessibilityService? = null
@@ -102,17 +107,16 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
          */
         fun setTextDetectionEnabled(enabled: Boolean) {
             instance?.apply {
-                textDetectionActive = enabled
-                textDetected = false
-                // 记录“开始监听”的时刻：极速打卡会在打开 App 后短时间内自动完成，
-                // 因此只有时间接近此刻的打卡成功记录才算本次结果（见 onAccessibilityEvent）。
-                armTimeMillis = System.currentTimeMillis()
-                sawPunchButton = false
-                pendingEarlySuccessHit = false
-                lastTextScanMillis = 0L
-                if (enabled) startActiveScan() else stopActiveScan()
-                Log.d(TAG, "文本检测状态: active=$enabled, armTime=$armTimeMillis")
-                LogFileManager.writeLog("无障碍文本检测: active=$enabled")
+            textDetectionActive = enabled
+            textDetected = false
+            // 目标App进入前台时刻：首次扫描到目标App时记录（见 scanCurrentWindow），
+            // 此后 PUNCH_FOREGROUND_WAIT_MS 内不判定，等飞书极速打卡自触发 + 成功消息渲染完成。
+            foregroundEnterMillis = 0L
+            sawPunchButton = false
+            lastTextScanMillis = 0L
+            if (enabled) startActiveScan() else stopActiveScan()
+            Log.d(TAG, "文本检测状态: active=$enabled")
+            LogFileManager.writeLog("无障碍文本检测: active=$enabled")
             }
         }
 
@@ -136,20 +140,16 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     @Volatile
     private var textDetected = false
 
-    /** 开始监听打卡结果的时刻（setTextDetectionEnabled(true) 时记录）。
-     *  极速打卡在打开 App 后短时间内自动完成，故只有时间接近此刻的成功记录才算本次结果。 */
+    /** 目标打卡App进入前台的时刻：首次扫描到目标App（或捕获其窗口切换事件）时记录。
+     *  此后 PUNCH_FOREGROUND_WAIT_MS 内不判定打卡结果，等飞书极速打卡自触发 + 成功消息渲染完成，
+     *  避免在列表尚未刷新时把历史打卡消息误判为本次成功。 */
     @Volatile
-    private var armTimeMillis = 0L
+    private var foregroundEnterMillis = 0L
 
     /** 本次监听会话中是否曾在界面上看到“上班打卡/下班打卡/外出打卡”按钮
      *  （用于“已打卡”状态变化的辅助判定，证明本次确实有打卡动作发生）。 */
     @Volatile
     private var sawPunchButton = false
-
-    /** 本次监听会话中是否已因“未达最小返回延迟(10s)”而暂挂过一次成功词命中，
-     *  用于避免 10 秒闸门内重复打日志。 */
-    @Volatile
-    private var pendingEarlySuccessHit = false
 
     /** 记录上次前台包名，用于检测前台任务切换 */
     @Volatile
@@ -320,9 +320,16 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         // 前台任务切换时重置伪息屏倒计时（不依赖文本检测开关）
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
-            if (pkg != null && pkg != packageName && pkg != lastForegroundPackage) {
-                lastForegroundPackage = pkg
-                IdlePseudoMaskController.onForegroundTaskChanged()
+            if (pkg != null && pkg != packageName) {
+                // 目标打卡App进入前台：重置5秒等待计时起点（飞书极速打卡自触发+消息渲染需要时间）
+                if (textDetectionActive && pkg == Constant.getTargetApp() && pkg != lastForegroundPackage) {
+                    foregroundEnterMillis = System.currentTimeMillis()
+                    LogFileManager.writeLog("无障碍目标App进入前台，开始5秒等待：pkg=$pkg")
+                }
+                if (pkg != lastForegroundPackage) {
+                    lastForegroundPackage = pkg
+                    IdlePseudoMaskController.onForegroundTaskChanged()
+                }
             }
         }
 
@@ -372,6 +379,16 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             }
             val text = directedText
 
+            // 目标App进入前台等待：首次观察到目标App时记录起点，PUNCH_FOREGROUND_WAIT_MS 内只扫描不判定，
+            // 避免飞书极速打卡尚未自触发、成功消息尚未渲染时扫到历史消息抢答。
+            if (foregroundEnterMillis == 0L) {
+                foregroundEnterMillis = now
+                LogFileManager.writeLog("无障碍首次观察到目标App，开始${PUNCH_FOREGROUND_WAIT_MS}ms等待")
+            }
+            if (now - foregroundEnterMillis < PUNCH_FOREGROUND_WAIT_MS) {
+                return
+            }
+
             LogFileManager.writeLog("无障碍读取文本：package=$packageName, text=${text.take(120)}")
 
             // 记录本次会话是否见到打卡按钮（用于“已打卡”状态变化判定）
@@ -392,47 +409,33 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 successKeywords[keywordIndex] to text.indexOf(successKeywords[keywordIndex])
             }
 
-            // 可靠性核心：只接受“时间接近本次监听起点、且属于今天”的成功记录。
-            // 历史记录（如昨天的 18:11 下班极速打卡成功）要么时间对不上“现在”，
-            // 要么被飞书归入“昨天”分组，都会被直接排除，不再依赖脆弱的固定延迟基线。
-            // 注意：now 已在上方节流处取到当前扫描时刻，这里直接使用。
-            val (candidateMillis, groupIsToday) = parseSuccessTimeAndGroup(text, keywordPos)
+            // 时间戳优先取自命中节点的「兄弟节点」（飞书把 08:38 与「上班极速打卡成功」
+            // 放在同一条消息容器内平级），退而求其次解析关键词内嵌时间（企业微信）。
+            val (textMillis, groupIsToday) = parseSuccessTimeAndGroup(text, keywordPos)
+            val siblingMillis = findSiblingTimestamp(root, matchedKeyword)
+            val candidateMillis = siblingMillis ?: textMillis
+
+            // 判定：打卡时间落在当前时间 ±PUNCH_TIME_WINDOW_MS 内即视为本次打卡成功。
+            // 极速打卡即时产生，其时间戳必接近“现在”；历史消息相差几小时，必然落在窗口外。
+            // groupIsToday!=false 为二次保险（显式“昨天/前天”分组直接排除）。
             val accepted = if (candidateMillis != null) {
-                val fresh = candidateMillis in (armTimeMillis - 3 * 60_000)..(armTimeMillis + 5 * 60_000)
-                // groupIsToday == true 或无法确定分组（无日期分组标记）时，结合新鲜度判定
-                fresh && groupIsToday != false
+                val diff = kotlin.math.abs(now - candidateMillis)
+                diff <= PUNCH_TIME_WINDOW_MS && (groupIsToday != false)
             } else {
-                // 无时间戳的成功词：
-                // 1) “已打卡”按钮状态、企业微信“自动打卡·正常”：必须本次会话确实见过打卡按钮，
-                //    证明是本次打卡动作导致的状态变化，避免把今天早已打卡的状态误报为本次成功。
-                // 2) 其它实时成功词（如飞书“下班极速打卡成功”）：无障碍文本本身不携带时间戳，
-                //    以“检测到该文本的时刻”作为发生时刻，只要在监听窗口内即视为本次成功。
-                when {
-                    matchedKeyword == "已打卡" || isWeWorkAuto -> sawPunchButton
-                    else -> {
-                        val fresh = now in (armTimeMillis - 3 * 60_000)..(armTimeMillis + 5 * 60_000)
-                        fresh && groupIsToday != false
-                    }
-                }
+                // 无时间戳的成功词：仅“已打卡”状态或企业微信“自动打卡·正常”，
+                // 且本次会话确实见过打卡按钮（证明是本次打卡动作导致的状态变化）。
+                (matchedKeyword == "已打卡" || isWeWorkAuto) && sawPunchButton
             }
 
             if (accepted) {
-                val minReturnTime = armTimeMillis + MIN_TEXT_RETURN_DELAY_MS
-                if (now < minReturnTime) {
-                    // 未达最小返回延迟(10s)：暂挂，继续扫描。防止打开目标 App 瞬间
-                    // 历史打卡记录被秒命中而抢答，导致本次极速打卡尚未真正完成就被误判成功、提前结束监听。
-                    if (!pendingEarlySuccessHit) {
-                        pendingEarlySuccessHit = true
-                        LogFileManager.writeLog("无障碍命中成功词但未达最小返回延迟(${MIN_TEXT_RETURN_DELAY_MS}ms)，暂挂等待极速打卡：$matchedKeyword")
-                    }
-                } else {
-                    textDetected = true
-                    LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，groupIsToday=$groupIsToday）")
-                    val snippet = extractSnippet(text, matchedKeyword)
-                    handleTextDetected(snippet, matchedKeyword, packageName)
-                }
+                textDetected = true
+                val diffMs = candidateMillis?.let { kotlin.math.abs(now - it) } ?: -1L
+                LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，diff=${diffMs}ms，groupIsToday=$groupIsToday）")
+                val snippet = extractSnippet(text, matchedKeyword)
+                handleTextDetected(snippet, matchedKeyword, packageName, candidateMillis)
             } else {
-                LogFileManager.writeLog("无障碍忽略成功词（历史/非本次）：keyword=$matchedKeyword，candidateMillis=$candidateMillis，groupIsToday=$groupIsToday")
+                // 命中成功词但被拒（历史消息/时间不在 ±窗口内）：正常路径，仅记一行便于核对。
+                LogFileManager.writeLog("无障碍忽略成功词（历史/非本次）：keyword=$matchedKeyword，candidateMillis=$candidateMillis，diff=${candidateMillis?.let { kotlin.math.abs(now - it) } ?: -1}ms，groupIsToday=$groupIsToday")
             }
         } finally {
             root.recycle()
@@ -490,7 +493,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
      * - 截屏反馈：再截一张图并发送
      * 最后通知 TaskScheduler 取消超时等待。
      */
-    private fun handleTextDetected(snippet: String, keyword: String, packageName: String) {
+    private fun handleTextDetected(snippet: String, keyword: String, packageName: String, clockInTime: Long? = null) {
         val resultSource = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
         if (resultSource != 2) return
 
@@ -502,7 +505,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             // 文本反馈：直接发文本
             MessageDispatcher.sendMessage(
                 messageTitle,
-                StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName),
+                StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName, clockInTime = clockInTime),
                 appendMeta = false
             )
             NotificationMonitorService.emitMonitorEvent(
@@ -521,13 +524,13 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 if (!imagePath.isNullOrEmpty()) {
                     MessageDispatcher.sendAttachmentMessage(
                         messageTitle,
-                        StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName),
+                        StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName, clockInTime = clockInTime),
                         imagePath
                     )
                 } else {
                     MessageDispatcher.sendMessage(
                         messageTitle,
-                        StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName, "截屏失败，仅有文本结果"),
+                        StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName, "截屏失败，仅有文本结果", clockInTime),
                         appendMeta = false
                     )
                 }
@@ -580,10 +583,17 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         val start = (keywordPos - 40).coerceAtLeast(0)
         val end = (keywordPos + 40).coerceAtMost(text.length)
         val window = text.substring(start, end)
-        val timeMatch = timePattern.find(window)
-        val candidateMillis = if (timeMatch != null) {
-            val (h, m) = timeMatch.destructured
+        val keywordOffsetInWindow = keywordPos - start
+
+        // 窗口内可能有多个时间（状态栏、其他会话、同一条消息等），
+        // 取与关键词位置最近的一个作为该消息的时间，避免误把远处的时间当成本次打卡时间。
+        val timeMatches = timePattern.findAll(window).toList()
+        val candidateMillis = if (timeMatches.isNotEmpty()) {
             try {
+                val match = timeMatches.minByOrNull {
+                    Math.abs((it.range.first + it.range.last) / 2 - keywordOffsetInWindow)
+                } ?: timeMatches.first()
+                val (h, m) = match.destructured
                 val cal = Calendar.getInstance()
                 cal.set(Calendar.HOUR_OF_DAY, h.toInt())
                 cal.set(Calendar.MINUTE, m.toInt())
@@ -620,6 +630,44 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             else -> null
         }
         return candidateMillis to groupIsToday
+    }
+
+    /**
+     * 从命中成功词的节点出发，仅扫描其“消息条目容器”（直接父节点的子节点），
+     * 找出与命中节点平级的时间戳 TextView（如飞书“08:38”与“上班极速打卡成功”是兄弟节点，
+     * dump 调试已确认该布局）。绝不扫描整列表，保持定向查找的性能优势。
+     * 返回：命中消息的时间戳毫秒（今天基准），找不到返回 null。
+     */
+    private fun findSiblingTimestamp(root: AccessibilityNodeInfo, keyword: String): Long? {
+        val nodes = runCatching { root.findAccessibilityNodeInfosByText(keyword) }.getOrNull() ?: return null
+        for (n in nodes) {
+            scanSiblingTime(n)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * 扫描节点直接父节点的所有子节点，找到与命中节点平级、文本匹配 HH:mm 的时间戳。
+     * 仅一层（父节点的子节点），范围限定在单条消息容器内，性能可控、不波及会话列表。
+     */
+    private fun scanSiblingTime(node: AccessibilityNodeInfo): Long? {
+        val parent = node.parent ?: return null
+        for (i in 0 until parent.childCount) {
+            val child = runCatching { parent.getChild(i) }.getOrNull() ?: continue
+            if (child == node) continue
+            val t = child.text?.toString() ?: continue
+            val match = timePattern.find(t) ?: continue
+            val (h, m) = match.destructured
+            runCatching {
+                Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, h.toInt())
+                    set(Calendar.MINUTE, m.toInt())
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            }.getOrNull()?.let { return it }
+        }
+        return null
     }
 
     override fun onInterrupt() {
