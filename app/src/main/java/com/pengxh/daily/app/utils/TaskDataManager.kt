@@ -24,6 +24,15 @@ class TaskDataManager() {
             // 保存相关配置
             saveConfiguration(config)
 
+            // 解密并自动填充邮箱授权码（导出时以 AES 加密写入文件，避免明文/脱敏泄露）
+            val encryptedAuth = config.emailAuthEncrypted
+            if (!encryptedAuth.isNullOrBlank()) {
+                val decrypted = ConfigCipher.decrypt(encryptedAuth)
+                if (decrypted.isNotBlank()) {
+                    EmailSecureConfig.saveAuthCode(decrypted)
+                }
+            }
+
             // 导入任务
             val importedTasks = mutableListOf<DailyTaskBean>()
             for (task in config.tasks.orEmpty()) {

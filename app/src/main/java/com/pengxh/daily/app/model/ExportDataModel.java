@@ -30,6 +30,9 @@ public class ExportDataModel {
     private boolean savePower; // 省电模式
 
     private Triple<String, String, String> emailConfig; // 邮箱配置<发件箱、授权码、收件箱>
+    /** 加密（可逆）的邮箱授权码：导出时以 AES 加密写入文件，导入时解密后自动填充，
+     *  避免在配置文件中以明文/脱敏形式泄露授权码。密钥内置于应用，仅供配置随文件迁移使用。 */
+    private String emailAuthEncrypted;
     private List<DailyTaskBean> tasks; // 任务列表
 
     public int getResetTime() {
@@ -167,6 +170,14 @@ public class ExportDataModel {
 
     public void setEmailConfig(Triple<String, String, String> emailConfig) {
         this.emailConfig = emailConfig;
+    }
+
+    public String getEmailAuthEncrypted() {
+        return emailAuthEncrypted;
+    }
+
+    public void setEmailAuthEncrypted(String emailAuthEncrypted) {
+        this.emailAuthEncrypted = emailAuthEncrypted;
     }
 
     public List<DailyTaskBean> getTasks() {

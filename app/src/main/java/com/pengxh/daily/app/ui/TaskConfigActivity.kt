@@ -1,8 +1,8 @@
 package com.pengxh.daily.app.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
+import android.os.Environment
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -12,7 +12,8 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
-import com.pengxh.daily.app.extensions.isApplicationExist
+import com.pengxh.daily.app.utils.ConfigCipher
+import com.pengxh.daily.app.utils.TaskDataManager
 import com.pengxh.daily.app.model.ExportDataModel
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.KeepAliveReceiver
@@ -36,6 +37,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import com.pengxh.daily.app.BuildConfig
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
@@ -43,8 +51,40 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
     private val context = this
     private val hourArray = arrayListOf("0", "1", "2", "3", "4", "5", "6", "自定义（单位：时）")
     private val timeArray = arrayListOf("15", "30", "45", "自定义（单位：秒）")
-    private val optionArray = arrayListOf("QQ", "微信", "TIM", "支付宝", "剪切板")
-    private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
+    private val taskDataManager by lazy { TaskDataManager() }
+
+    /** 配置导入：系统文件选择器（SAF）选取导出的 .json 配置文件 */
+    private val pickConfigLauncher =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch(Dispatchers.IO) {
+                val json = runCatching {
+                    this@TaskConfigActivity.contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { it.readText() }
+                }.getOrNull().orEmpty()
+                if (json.isBlank()) {
+                    withContext(Dispatchers.Main) { "读取配置文件失败".show(context) }
+                    return@launch
+                }
+                when (val result = taskDataManager.importTasks(json)) {
+                    is TaskDataManager.ImportResult.Success -> {
+                        withContext(Dispatchers.Main) {
+                            // 刷新界面开关显示
+                            binding.skipHolidaySwitch.isChecked =
+                                SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
+                            binding.randomTimeSwitch.isChecked =
+                                SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
+                            binding.autoTaskSwitch.isChecked =
+                                SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+                            "配置导入成功（含邮箱授权码自动填充）".show(context)
+                        }
+                    }
+                    is TaskDataManager.ImportResult.Error -> {
+                        withContext(Dispatchers.Main) { result.message.show(context) }
+                    }
+                }
+            }
+        }
 
     override fun initViewBinding(): ActivityTaskConfigBinding {
         return ActivityTaskConfigBinding.inflate(layoutInflater)
@@ -219,15 +259,16 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             exportData.isSavePower =
                 SaveKeyValues.loadBoolean(Constant.POWER_SAVE_MODE_KEY, false)
 
-            // EmailConfig（授权码脱敏，不随配置明文导出）
+            // 邮箱：收发箱照常导出；授权码以 AES 加密形式写入文件，导入时自动解密填充（避免明文/脱敏泄露）
             val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
             if (!obj.isEmpty) {
                 val outbox = if (obj.has("outbox")) obj.get("outbox").asString else ""
                 val inbox = if (obj.has("inbox")) obj.get("inbox").asString else ""
-                val authCode = EmailSecureConfig.loadAuthCode()
                 if (outbox.isNotBlank() && inbox.isNotBlank()) {
-                    exportData.emailConfig =
-                        Triple(outbox, EmailSecureConfig.maskAuthCode(authCode), inbox)
+                    val rawAuth = EmailSecureConfig.loadAuthCode()
+                    exportData.emailConfig = Triple(outbox, "", inbox)
+                    exportData.emailAuthEncrypted =
+                        if (rawAuth.isNotBlank()) ConfigCipher.encrypt(rawAuth) else ""
                 }
             }
 
@@ -236,36 +277,44 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                 val taskBeans = withContext(Dispatchers.IO) {
                     DatabaseWrapper.loadAllTask()
                 }
-                if (taskBeans.isNotEmpty()) {
-                    exportData.tasks = taskBeans
-                } else {
-                    exportData.tasks = ArrayList<DailyTaskBean>()
-                }
+                exportData.tasks = if (taskBeans.isNotEmpty()) taskBeans else ArrayList<DailyTaskBean>()
 
                 val json = exportData.toJson()
-                Log.d(kTag, json)
+                Log.d(kTag, "导出配置长度=${json.length}")
 
-                // 分享
-                BottomActionSheet.Builder()
-                    .setContext(this@TaskConfigActivity)
-                    .setActionItemTitle(optionArray)
-                    .setItemTextColor(R.color.theme_color.convertColor(this@TaskConfigActivity))
-                    .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
-                        override fun onActionItemClick(position: Int) {
-                            when (position) {
-                                0 -> shareTextTo(Constant.QQ, "QQ", json)
-                                1 -> shareTextTo(Constant.WECHAT, "微信", json)
-                                2 -> shareTextTo(Constant.TIM, "TIM", json)
-                                3 -> shareTextTo(Constant.ZFB, "支付宝", json)
-                                4 -> {
-                                    val cipData = ClipData.newPlainText("TaskConfig", json)
-                                    clipboard.setPrimaryClip(cipData)
-                                    "已复制到剪切板".show(context)
-                                }
-                            }
-                        }
-                    }).build().show()
+                // 写入文件（getExternalFilesDir/Documents，无需存储权限）
+                val dir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                if (dir == null) {
+                    "导出失败：外部存储不可用".show(context)
+                    return@launch
+                }
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA).format(Date())
+                val file = File(dir, "dailytask_config_$timeStamp.json")
+                runCatching { file.writeText(json) }.onFailure {
+                    "导出失败：${it.message}".show(context)
+                    return@launch
+                }
+
+                // 通过系统分享面板导出文件（FileProvider 授权临时读取）
+                val authority = BuildConfig.APPLICATION_ID + ".fileprovider"
+                val uri = FileProvider.getUriForFile(this@TaskConfigActivity, authority, file)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                try {
+                    startActivity(Intent.createChooser(shareIntent, "导出配置"))
+                    "配置已导出为文件：${file.name}".show(context)
+                } catch (e: Exception) {
+                    "导出失败：${e.message}".show(context)
+                }
             }
+
+        }
+
+        binding.importLayout.setOnClickListener {
+            pickConfigLauncher.launch("application/json")
         }
     }
 
@@ -380,24 +429,6 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         binding.timeoutTextView.text = "${time}s"
         SaveKeyValues.saveInt(Constant.STAY_OVERTIME_KEY, time)
         FloatingWindowController.setOvertime(time)
-    }
-
-    private fun shareTextTo(packageName: String, appName: String, text: String) {
-        if (!isApplicationExist(packageName)) {
-            "请先安装${appName}".show(this)
-            return
-        }
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
-            setPackage(packageName)
-        }
-        try {
-            startActivity(intent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            "分享失败".show(this)
-        }
     }
 
     private fun updateRandomMinuteRange(value: Int) {
