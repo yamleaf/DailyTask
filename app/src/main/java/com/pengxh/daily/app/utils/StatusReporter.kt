@@ -683,11 +683,11 @@ object StatusReporter {
                     "今日无（已执行完）"
                 }
             }
-            // 调度未运行，但每日循环开启：下次在每日重置点后自动启动，
-            // 任务于次日定时时间触发（含 5min 随机抖动），故显示「次日 HH:MM（含5min随机）」
+            // 调度未运行，但每日循环开启：下次会在每日重置后自动启动，
+            // 重置点之前随机偏移尚未生成，因此只显示基准计划时间（不含随机时间）
             autoRecycle -> {
-                val t = plans.firstOrNull()?.actualTime
-                if (t != null) "次日 $t（含5min随机）" else "任务未配置，无下次打卡"
+                val t = plans.firstOrNull()?.plannedTime
+                if (t != null) "次日 $t（不含随机时间）" else "任务未配置，无下次打卡"
             }
             // 调度未运行且每日循环关闭：完全不会自动打卡
             else -> "任务未启动，无下次打卡"
