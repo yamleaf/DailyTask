@@ -90,7 +90,7 @@ object StatusReporter {
                 }"
             )
             appendLine("· 距下次重置：${TaskScheduler.secondsUntilNextReset().formatTime()}")
-            appendLine("· 下次打卡：${nextPunchText(cal, plans, now)}")
+            appendLine("· 下次打卡：${nextPunchText(cal, plans, now, autoRecycle)}")
             appendLine("· 最近打卡：${recentPunchText(cal)}")
             appendLine()
             appendTaskPlanSection(plans, pending.size, now)
@@ -132,7 +132,7 @@ object StatusReporter {
             val punchedCount = cal.punched.count { !it.isAfter(cal.today) }
             val scheduledPast = cal.scheduled.count { !it.isAfter(cal.today) }
             val missed = (scheduledPast - punchedCount).coerceAtLeast(0)
-            appendLine("· 已打卡 $punchedCount 天 · 计划 $scheduledPast 天 · 漏打卡 $missed 天")
+            appendLine("· 已打卡 $punchedCount 天 · 计划 $scheduledPast 天 · 未计划 $missed 天")
             appendLine("· 窗口内：节假日 ${cal.holidays.size} 天 · 休息日 ${cal.restDays.size} 天 · 调休补班 ${cal.makeupWorkdays.size} 天")
             if (cal.holidays.isNotEmpty()) {
                 appendLine("· 节假日跳过：${cal.holidays.sorted().joinToString("、") { it.toString().substring(5) }}")
@@ -142,7 +142,7 @@ object StatusReporter {
             }
             val missedDates = cal.scheduled.filter { it.isBefore(cal.today) && it !in cal.punched }.sorted()
             if (missedDates.isNotEmpty()) {
-                appendLine("· 漏打卡：${missedDates.joinToString("、") { it.toString().substring(5) }}")
+                appendLine("· 未计划：${missedDates.joinToString("、") { it.toString().substring(5) }}")
             }
             val futurePlanned = cal.scheduled.filter { !it.isBefore(cal.today) }.sorted().take(7)
             if (futurePlanned.isNotEmpty()) {
@@ -414,7 +414,7 @@ object StatusReporter {
     /** 日历中每一天的分类，用于精确表达「为什么这天打/不打」 */
     private enum class DayKind {
         PUNCHED,      // 已打卡
-        MISSED,       // 漏打卡（已过计划工作日但无打卡记录）
+        MISSED,       // 未计划（已过计划工作日但无打卡记录，日历中以「未计划」展示）
         SCHEDULED,    // 计划打卡（未来工作日）
         MAKEUP,       // 调休补班（周末但需上班，会打卡）
         HOLIDAY,      // 法定节假日，自动跳过
@@ -523,7 +523,7 @@ object StatusReporter {
 
         val (bg, fg, mark) = when (kind) {
             DayKind.PUNCHED -> Triple("#e6f7ec", "#389e0d", "✓")
-            DayKind.MISSED -> Triple("#fff1f0", "#cf1322", "✗")
+            DayKind.MISSED -> Triple("#f5f5f5", "#999", "未")
             DayKind.SCHEDULED -> Triple("#e6f0ff", "#4f6ef7", "●")
             DayKind.MAKEUP -> Triple("#f9f0ff", "#722ed1", "班")
             DayKind.HOLIDAY -> Triple("#fff7e6", "#d46b08", "假")
@@ -552,7 +552,7 @@ object StatusReporter {
         // 图例
         sb.append("<div style=\"font-size:11px;color:#888;margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap;\">")
         sb.append(legendDot("#389e0d", "已打卡"))
-        sb.append(legendDot("#cf1322", "漏打卡"))
+        sb.append(legendDot("#999", "未计划"))
         sb.append(legendDot("#4f6ef7", "计划打卡"))
         sb.append(legendDot("#722ed1", "调休补班"))
         sb.append(legendDot("#d46b08", "节假日"))
@@ -585,7 +585,7 @@ object StatusReporter {
             .filter { !it.isBefore(cal.today) }
             .let { if (todayNotRunning) (it - cal.today).size else it.size }
         sb.append("<div style=\"font-size:12px;color:#555;margin-top:8px;line-height:1.7;\">")
-        sb.append("已打卡 <b style=\"color:#389e0d;\">$punchedCount</b> 天 · 计划 <b>$futureScheduled</b> 天 · 漏打卡 <b style=\"color:#cf1322;\">$missed</b> 天<br>")
+        sb.append("已打卡 <b style=\"color:#389e0d;\">$punchedCount</b> 天 · 计划 <b>$futureScheduled</b> 天 · 未计划 <b style=\"color:#999;\">$missed</b> 天<br>")
         sb.append("窗口内：节假日 <b style=\"color:#d46b08;\">${cal.holidays.size}</b> 天 · 休息日 <b>${cal.restDays.size}</b> 天 · 调休补班 <b style=\"color:#722ed1;\">${cal.makeupWorkdays.size}</b> 天")
         sb.append("</div>")
         // 今日明确说明
@@ -604,7 +604,7 @@ object StatusReporter {
             DayKind.REST -> "今日为休息日，自动跳过（不会打卡）"
             DayKind.NO_TASK -> "未配置任务，今日无打卡计划"
             DayKind.SCHEDULED -> "今日为工作日，计划打卡"
-            DayKind.MISSED -> "今日为工作日但尚未打卡"
+            DayKind.MISSED -> "今日未计划打卡"
             DayKind.NOT_RUNNING -> "今日调度未启动，不会自动打卡"
         }
         val running = TaskScheduler.isRunning()
@@ -630,7 +630,7 @@ object StatusReporter {
             DayKind.REST -> "休息日，自动跳过"
             DayKind.NO_TASK -> "未配置任务，无打卡计划"
             DayKind.SCHEDULED -> "工作日，计划打卡"
-            DayKind.MISSED -> "工作日尚未打卡"
+            DayKind.MISSED -> "未计划打卡"
             DayKind.NOT_RUNNING -> "调度未启动，不会自动打卡"
         }
         val running = TaskScheduler.isRunning()
@@ -644,21 +644,36 @@ object StatusReporter {
         }
     }
 
-    private fun nextPunchText(cal: PunchCalendarData, plans: List<TaskScheduler.TaskPlanItem>, now: Long): String {
-        if (!TaskScheduler.isRunning()) {
-            return "调度未启动，无下次打卡"
-        }
-        val next = plans.filter { it.actualTimeMillis > now }.minByOrNull { it.actualTimeMillis }
-        return if (next != null) {
-            val d = LocalDate.ofInstant(Instant.ofEpochMilli(next.actualTimeMillis), ZoneId.systemDefault())
-            val rel = when {
-                d == cal.today -> "今天"
-                d == cal.today.plusDays(1) -> "明天"
-                else -> "${"%02d".format(d.monthValue)}-${"%02d".format(d.dayOfMonth)}"
+    private fun nextPunchText(
+        cal: PunchCalendarData,
+        plans: List<TaskScheduler.TaskPlanItem>,
+        now: Long,
+        autoRecycle: Boolean
+    ): String {
+        val running = TaskScheduler.isRunning()
+        return when {
+            running -> {
+                val next = plans.filter { it.actualTimeMillis > now }.minByOrNull { it.actualTimeMillis }
+                if (next != null) {
+                    val d = LocalDate.ofInstant(Instant.ofEpochMilli(next.actualTimeMillis), ZoneId.systemDefault())
+                    val rel = when {
+                        d == cal.today -> "今天"
+                        d == cal.today.plusDays(1) -> "明天"
+                        else -> "${"%02d".format(d.monthValue)}-${"%02d".format(d.dayOfMonth)}"
+                    }
+                    "$rel ${next.actualTime}"
+                } else {
+                    "今日无（已执行完）"
+                }
             }
-            "$rel ${next.actualTime}"
-        } else {
-            "今日无（已执行完）"
+            // 调度未运行，但每日循环开启：下次在每日重置点后自动启动，
+            // 任务于次日定时时间触发（含 5min 随机抖动），故显示「次日 HH:MM（含5min随机）」
+            autoRecycle -> {
+                val t = plans.firstOrNull()?.actualTime
+                if (t != null) "次日 $t（含5min随机）" else "任务未配置，无下次打卡"
+            }
+            // 调度未运行且每日循环关闭：完全不会自动打卡
+            else -> "任务未启动，无下次打卡"
         }
     }
 
@@ -731,7 +746,7 @@ object StatusReporter {
                 row("任务调度", "$runBadge <span style=\"font-size:11px;color:#888;\">${if (runDetail.isNotEmpty()) runDetail else ""}</span>"),
                 row("每日循环", cycleText),
                 row("距下次重置", TaskScheduler.secondsUntilNextReset().formatTime()),
-                row("下次打卡", nextPunchText(cal, plans, now)),
+                row("下次打卡", nextPunchText(cal, plans, now, autoRecycle)),
                 row("最近打卡", recentPunchText(cal)),
                 row("省电模式", powerSaveText),
                 row("跳过节假日", holidayText),
