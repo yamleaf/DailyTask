@@ -434,7 +434,8 @@ object StatusReporter {
         val restDays: Set<LocalDate>,
         val customWorkdays: Set<DayOfWeek>,
         val hasTasks: Boolean,
-        val skipHolidayEnabled: Boolean
+        val skipHolidayEnabled: Boolean,
+        val autoRecycle: Boolean
     )
 
     /**
@@ -450,6 +451,7 @@ object StatusReporter {
         }
         val hasTasks = allTasks.isNotEmpty()
         val skipHolidayEnabled = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
+        val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
         val customWorkdays = CustomWorkdayManager.loadWorkdays()
 
         val scheduled = mutableSetOf<LocalDate>()
@@ -467,7 +469,8 @@ object StatusReporter {
         val punched = DatabaseWrapper.loadPunchDatesBetween(windowStart, windowEnd.plusDays(1))
         return PunchCalendarData(
             windowStart, windowEnd, today, scheduled, punched,
-            holidays, makeupWorkdays, restDays, customWorkdays, hasTasks, skipHolidayEnabled
+            holidays, makeupWorkdays, restDays, customWorkdays, hasTasks, skipHolidayEnabled,
+            autoRecycle
         )
     }
 
@@ -503,21 +506,27 @@ object StatusReporter {
         val holiday = cal.skipHolidayEnabled && date in cal.holidays
         val makeup = date in cal.makeupWorkdays
         val customRest = date.dayOfWeek !in cal.customWorkdays
-        // 只有“今天”受调度运行状态影响；历史/未来日期按配置规则展示
-        val schedulerRunningToday = !isToday || TaskScheduler.isRunning()
+        // 历史按已发生事实展示；今天看调度是否在跑；未来看每日循环是否开启（关闭则不会重启，未来不自动打卡）
+        val willSchedule = if (isPast) {
+            false
+        } else if (isToday) {
+            TaskScheduler.isRunning()
+        } else {
+            cal.autoRecycle
+        }
 
         val kind = when {
             punched -> DayKind.PUNCHED
             holiday -> DayKind.HOLIDAY
             makeup -> when {
                 isPast && !punched -> DayKind.MISSED
-                schedulerRunningToday -> DayKind.MAKEUP
+                willSchedule -> DayKind.MAKEUP
                 else -> DayKind.NOT_RUNNING
             }
             customRest -> DayKind.REST
             !cal.hasTasks -> DayKind.NO_TASK
             isPast -> DayKind.MISSED
-            schedulerRunningToday -> DayKind.SCHEDULED
+            willSchedule -> DayKind.SCHEDULED
             else -> DayKind.NOT_RUNNING
         }
 
@@ -557,7 +566,7 @@ object StatusReporter {
         sb.append(legendDot("#722ed1", "调休补班"))
         sb.append(legendDot("#d46b08", "节假日"))
         sb.append(legendDot("#bbb", "休息日"))
-        sb.append(legendDot("#cf1322", "未计划(今日)"))
+        sb.append(legendDot("#cf1322", "未计划(今日/未来)"))
         sb.append("</div>")
         // 周网格
         sb.append("<table cellpadding=\"0\" cellspacing=\"4\" border=\"0\" width=\"100%\" style=\"font-size:12px;border-collapse:separate;\">")
@@ -583,10 +592,18 @@ object StatusReporter {
         val todayNotRunning = todayKind(cal) == DayKind.NOT_RUNNING
         val futureScheduled = cal.scheduled
             .filter { !it.isBefore(cal.today) }
-            .let { if (todayNotRunning) (it - cal.today).size else it.size }
+            .let { list ->
+                val withoutToday = if (todayNotRunning) (list - cal.today) else list
+                // 每日循环关闭时未来不会自动重启调度，未来工作日不计入“计划”
+                if (cal.autoRecycle) withoutToday else emptySet()
+            }
+            .size
         sb.append("<div style=\"font-size:12px;color:#555;margin-top:8px;line-height:1.7;\">")
         sb.append("已打卡 <b style=\"color:#389e0d;\">$punchedCount</b> 天 · 计划 <b>$futureScheduled</b> 天 · 未计划 <b style=\"color:#999;\">$missed</b> 天<br>")
         sb.append("窗口内：节假日 <b style=\"color:#d46b08;\">${cal.holidays.size}</b> 天 · 休息日 <b>${cal.restDays.size}</b> 天 · 调休补班 <b style=\"color:#722ed1;\">${cal.makeupWorkdays.size}</b> 天")
+        if (!cal.autoRecycle) {
+            sb.append("<br><span style=\"color:#cf1322;\">⚠️ 每日循环已关闭，未来日期不会自动打卡（已标红「未计划」）</span>")
+        }
         sb.append("</div>")
         // 今日明确说明
         sb.append(todayCalendarNote(cal))
