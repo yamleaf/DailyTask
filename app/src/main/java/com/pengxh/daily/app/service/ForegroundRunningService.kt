@@ -17,6 +17,7 @@ import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.LogLevel
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskScheduler
@@ -305,7 +306,7 @@ class ForegroundRunningService : Service() {
 
                 LogFileManager.writeLog("重置点已自动清理临时诊断文件（diagnostic_*.txt / *.png）")
             } catch (e: Exception) {
-                LogFileManager.writeLog(LogFileManager.LogLevel.W, "重置点清理临时诊断文件失败：${e.message}")
+                LogFileManager.writeLog(LogLevel.W, "重置点清理临时诊断文件失败：${e.message}")
             }
         }
     }
