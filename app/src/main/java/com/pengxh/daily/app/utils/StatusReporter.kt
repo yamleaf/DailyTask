@@ -419,7 +419,8 @@ object StatusReporter {
         MAKEUP,       // 调休补班（周末但需上班，会打卡）
         HOLIDAY,      // 法定节假日，自动跳过
         REST,         // 自定义休息日，自动跳过
-        NO_TASK       // 未配置任务，无打卡计划
+        NO_TASK,      // 未配置任务，无打卡计划
+        NOT_RUNNING   // 今天调度未启动，不会自动打卡（仅用于“今天”）
     }
 
     private data class PunchCalendarData(
@@ -477,13 +478,15 @@ object StatusReporter {
         val holiday = cal.skipHolidayEnabled && today in cal.holidays
         val makeup = today in cal.makeupWorkdays
         val customRest = today.dayOfWeek !in cal.customWorkdays
+        val schedulerRunning = TaskScheduler.isRunning()
         return when {
             punched -> DayKind.PUNCHED
             holiday -> DayKind.HOLIDAY
-            makeup -> DayKind.MAKEUP
+            makeup -> if (schedulerRunning) DayKind.MAKEUP else DayKind.NOT_RUNNING
             customRest -> DayKind.REST
             !cal.hasTasks -> DayKind.NO_TASK
-            else -> DayKind.SCHEDULED
+            schedulerRunning -> DayKind.SCHEDULED
+            else -> DayKind.NOT_RUNNING
         }
     }
 
@@ -500,14 +503,22 @@ object StatusReporter {
         val holiday = cal.skipHolidayEnabled && date in cal.holidays
         val makeup = date in cal.makeupWorkdays
         val customRest = date.dayOfWeek !in cal.customWorkdays
+        // 只有“今天”受调度运行状态影响；历史/未来日期按配置规则展示
+        val schedulerRunningToday = !isToday || TaskScheduler.isRunning()
 
         val kind = when {
             punched -> DayKind.PUNCHED
             holiday -> DayKind.HOLIDAY
-            makeup -> if (isPast && !punched) DayKind.MISSED else DayKind.MAKEUP
+            makeup -> when {
+                isPast && !punched -> DayKind.MISSED
+                schedulerRunningToday -> DayKind.MAKEUP
+                else -> DayKind.NOT_RUNNING
+            }
             customRest -> DayKind.REST
             !cal.hasTasks -> DayKind.NO_TASK
-            else -> if (isPast) DayKind.MISSED else DayKind.SCHEDULED
+            isPast -> DayKind.MISSED
+            schedulerRunningToday -> DayKind.SCHEDULED
+            else -> DayKind.NOT_RUNNING
         }
 
         val (bg, fg, mark) = when (kind) {
@@ -518,6 +529,7 @@ object StatusReporter {
             DayKind.HOLIDAY -> Triple("#fff7e6", "#d46b08", "假")
             DayKind.REST -> Triple("#fafafa", "#bbb", "休")
             DayKind.NO_TASK -> Triple("#fafafa", "#ccc", "—")
+            DayKind.NOT_RUNNING -> Triple("#f0f0f0", "#999", "停")
         }
         val border = if (isToday) "border:2px solid #4f6ef7;" else "border:1px solid #eee;"
         val opacity = if (inWindow) "1" else "0.35"
@@ -545,6 +557,7 @@ object StatusReporter {
         sb.append(legendDot("#722ed1", "调休补班"))
         sb.append(legendDot("#d46b08", "节假日"))
         sb.append(legendDot("#bbb", "休息日"))
+        sb.append(legendDot("#999", "调度未启动"))
         sb.append("</div>")
         // 周网格
         sb.append("<table cellpadding=\"0\" cellspacing=\"4\" border=\"0\" width=\"100%\" style=\"font-size:12px;border-collapse:separate;\">")
@@ -567,7 +580,10 @@ object StatusReporter {
         val punchedCount = cal.punched.count { !it.isAfter(cal.today) }
         val scheduledPast = cal.scheduled.count { !it.isAfter(cal.today) }
         val missed = (scheduledPast - punchedCount).coerceAtLeast(0)
-        val futureScheduled = cal.scheduled.filter { !it.isBefore(cal.today) }.size
+        val todayNotRunning = todayKind(cal) == DayKind.NOT_RUNNING
+        val futureScheduled = cal.scheduled
+            .filter { !it.isBefore(cal.today) }
+            .let { if (todayNotRunning) (it - cal.today).size else it.size }
         sb.append("<div style=\"font-size:12px;color:#555;margin-top:8px;line-height:1.7;\">")
         sb.append("已打卡 <b style=\"color:#389e0d;\">$punchedCount</b> 天 · 计划 <b>$futureScheduled</b> 天 · 漏打卡 <b style=\"color:#cf1322;\">$missed</b> 天<br>")
         sb.append("窗口内：节假日 <b style=\"color:#d46b08;\">${cal.holidays.size}</b> 天 · 休息日 <b>${cal.restDays.size}</b> 天 · 调休补班 <b style=\"color:#722ed1;\">${cal.makeupWorkdays.size}</b> 天")
@@ -589,9 +605,11 @@ object StatusReporter {
             DayKind.NO_TASK -> "未配置任务，今日无打卡计划"
             DayKind.SCHEDULED -> "今日为工作日，计划打卡"
             DayKind.MISSED -> "今日为工作日但尚未打卡"
+            DayKind.NOT_RUNNING -> "今日调度未启动，不会自动打卡"
         }
         val running = TaskScheduler.isRunning()
         val warn = when {
+            kind == DayKind.NOT_RUNNING -> ""
             (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && running ->
                 "（调度运行中，将自动打卡）"
             (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && !running ->
@@ -613,9 +631,11 @@ object StatusReporter {
             DayKind.NO_TASK -> "未配置任务，无打卡计划"
             DayKind.SCHEDULED -> "工作日，计划打卡"
             DayKind.MISSED -> "工作日尚未打卡"
+            DayKind.NOT_RUNNING -> "调度未启动，不会自动打卡"
         }
         val running = TaskScheduler.isRunning()
         return when {
+            kind == DayKind.NOT_RUNNING -> base
             (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && running ->
                 "$base（调度运行中，将自动打卡）"
             (kind == DayKind.SCHEDULED || kind == DayKind.MAKEUP) && !running ->
@@ -625,6 +645,9 @@ object StatusReporter {
     }
 
     private fun nextPunchText(cal: PunchCalendarData, plans: List<TaskScheduler.TaskPlanItem>, now: Long): String {
+        if (!TaskScheduler.isRunning()) {
+            return "调度未启动，无下次打卡"
+        }
         val next = plans.filter { it.actualTimeMillis > now }.minByOrNull { it.actualTimeMillis }
         return if (next != null) {
             val d = LocalDate.ofInstant(Instant.ofEpochMilli(next.actualTimeMillis), ZoneId.systemDefault())
