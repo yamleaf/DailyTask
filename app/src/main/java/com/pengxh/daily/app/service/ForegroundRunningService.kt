@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
@@ -163,6 +164,8 @@ class ForegroundRunningService : Service() {
             ) {
                 TaskScheduler.startTask()
             }
+            // 重置点顺手清理临时诊断文件（诊断报告 txt + 截屏兜底 png），防止长期累积占用存储
+            cleanupTempDiagnosticFiles()
         }
         return START_STICKY
     }
@@ -278,6 +281,32 @@ class ForegroundRunningService : Service() {
         // 任务重置
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
             TaskScheduler.startTask()
+        }
+    }
+
+    /**
+     * 重置点自动清理临时生成的诊断文件，避免长期累积占用存储：
+     *  - Documents 目录下的 diagnostic_*.txt（一键诊断导出报告）
+     *  - Pictures 目录下的 *.png（无障碍识别失败时的截屏兜底图）
+     * 二者均为一次性临时文件，可安全删除；删除失败仅记录日志，不影响重置主流程。
+     * 在 IO 协程中执行，避免阻塞重置广播处理。
+     */
+    private fun cleanupTempDiagnosticFiles() {
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val docsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                docsDir?.listFiles { file ->
+                    file.name.startsWith("diagnostic_") && file.name.endsWith(".txt")
+                }?.forEach { it.delete() }
+
+                val picsDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+                picsDir?.listFiles { file -> file.name.endsWith(".png") }
+                    ?.forEach { it.delete() }
+
+                LogFileManager.writeLog("重置点已自动清理临时诊断文件（diagnostic_*.txt / *.png）")
+            } catch (e: Exception) {
+                LogFileManager.writeLog(LogFileManager.LogLevel.W, "重置点清理临时诊断文件失败：${e.message}")
+            }
         }
     }
 
