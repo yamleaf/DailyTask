@@ -15,6 +15,7 @@ import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
 import com.pengxh.daily.app.extensions.isApplicationExist
 import com.pengxh.daily.app.model.ExportDataModel
 import com.pengxh.daily.app.service.ForegroundRunningService
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.ConfigStore
@@ -146,6 +147,15 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                 binding.minuteRangeView.text = "${value}分钟"
             } else {
                 binding.minuteRangeLayout.visibility = View.GONE
+            }
+        }
+
+        binding.autoTaskSwitch.setOnCheckedChangeListener { _, isChecked ->
+            SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, isChecked)
+            if (isChecked) {
+                KeepAliveReceiver.scheduleResetAlarm(this)
+            } else {
+                KeepAliveReceiver.cancelResetAlarm(this)
             }
         }
 
@@ -333,6 +343,8 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         ForegroundRunningService.emitResetTaskTime()
         // 通知调度器：重置时间已修改，立即按新时间重算每日等待（下一分钟级生效，不重启任务）
         TaskScheduler.notifyResetTimeChanged()
+        // 重新调度每日重置精确闹钟，使自定义重置点即时生效
+        KeepAliveReceiver.scheduleResetAlarm(this, hour)
     }
 
     private fun setTimeByPosition(position: Int) {

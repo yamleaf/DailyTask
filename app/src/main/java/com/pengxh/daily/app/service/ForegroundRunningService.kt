@@ -154,6 +154,16 @@ class ForegroundRunningService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         checkLowBattery()
         KeepAliveReceiver.schedule(this)
+        // 无论是否收到重置广播，每次服务启动都确保每日重置闹钟已调度（幂等）
+        KeepAliveReceiver.scheduleResetAlarm(this)
+        // 由每日重置闹钟触发：到点后启动任务调度
+        if (intent?.action == KeepAliveReceiver.ACTION_RESET_TASK) {
+            if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+                && !TaskScheduler.isRunning()
+            ) {
+                TaskScheduler.startTask()
+            }
+        }
         return START_STICKY
     }
 

@@ -206,6 +206,7 @@ class NotificationMonitorService : NotificationListenerService() {
             command.contains("开启循环") -> {
                 LogFileManager.writeLog("收到开启循环指令")
                 SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+                KeepAliveReceiver.scheduleResetAlarm(this)
                 MessageDispatcher.sendMessage(
                     "循环任务状态通知", StatusReporter.buildCycleStatusHtml(true),
                     force = true, appendMeta = false
@@ -215,6 +216,7 @@ class NotificationMonitorService : NotificationListenerService() {
             command.contains("关闭循环") -> {
                 LogFileManager.writeLog("收到关闭循环指令")
                 SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, false)
+                KeepAliveReceiver.cancelResetAlarm(this)
                 MessageDispatcher.sendMessage(
                     "循环任务状态通知", StatusReporter.buildCycleStatusHtml(false),
                     force = true, appendMeta = false

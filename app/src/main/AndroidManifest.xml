@@ -108,7 +108,7 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- 后台保活：开机自启 + 精确闹钟复活前台服务 -->
+        <!-- 后台保活：开机自启 + 精确闹钟复活前台服务 + 自定义重置点准时启动调度 -->
         <receiver
             android:name=".service.KeepAliveReceiver"
             android:enabled="true"
@@ -116,6 +116,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.pengxh.daily.action.RESURRECT" />
+                <action android:name="com.pengxh.daily.action.RESET_TASK" />
             </intent-filter>
         </receiver>
     </application>
