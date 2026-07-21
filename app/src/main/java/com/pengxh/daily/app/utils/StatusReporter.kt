@@ -529,7 +529,7 @@ object StatusReporter {
             DayKind.HOLIDAY -> Triple("#fff7e6", "#d46b08", "假")
             DayKind.REST -> Triple("#fafafa", "#bbb", "休")
             DayKind.NO_TASK -> Triple("#fafafa", "#ccc", "—")
-            DayKind.NOT_RUNNING -> Triple("#f0f0f0", "#999", "停")
+            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#cf1322", "未")
         }
         val border = if (isToday) "border:2px solid #4f6ef7;" else "border:1px solid #eee;"
         val opacity = if (inWindow) "1" else "0.35"
@@ -552,12 +552,12 @@ object StatusReporter {
         // 图例
         sb.append("<div style=\"font-size:11px;color:#888;margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap;\">")
         sb.append(legendDot("#389e0d", "已打卡"))
-        sb.append(legendDot("#999", "未计划"))
+        sb.append(legendDot("#999", "未计划(过去)"))
         sb.append(legendDot("#4f6ef7", "计划打卡"))
         sb.append(legendDot("#722ed1", "调休补班"))
         sb.append(legendDot("#d46b08", "节假日"))
         sb.append(legendDot("#bbb", "休息日"))
-        sb.append(legendDot("#999", "调度未启动"))
+        sb.append(legendDot("#cf1322", "未计划(今日)"))
         sb.append("</div>")
         // 周网格
         sb.append("<table cellpadding=\"0\" cellspacing=\"4\" border=\"0\" width=\"100%\" style=\"font-size:12px;border-collapse:separate;\">")
@@ -605,7 +605,7 @@ object StatusReporter {
             DayKind.NO_TASK -> "未配置任务，今日无打卡计划"
             DayKind.SCHEDULED -> "今日为工作日，计划打卡"
             DayKind.MISSED -> "今日未计划打卡"
-            DayKind.NOT_RUNNING -> "今日调度未启动，不会自动打卡"
+            DayKind.NOT_RUNNING -> "今日未计划打卡（调度未启动）"
         }
         val running = TaskScheduler.isRunning()
         val warn = when {
@@ -631,7 +631,7 @@ object StatusReporter {
             DayKind.NO_TASK -> "未配置任务，无打卡计划"
             DayKind.SCHEDULED -> "工作日，计划打卡"
             DayKind.MISSED -> "未计划打卡"
-            DayKind.NOT_RUNNING -> "调度未启动，不会自动打卡"
+            DayKind.NOT_RUNNING -> "未计划打卡（调度未启动）"
         }
         val running = TaskScheduler.isRunning()
         return when {
