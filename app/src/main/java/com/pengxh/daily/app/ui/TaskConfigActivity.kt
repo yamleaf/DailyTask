@@ -129,6 +129,8 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         } else {
             binding.minuteRangeLayout.visibility = View.GONE
         }
+
+        // 通知转移开关已移至设置页“通知监听”下方
     }
 
     override fun initEvent() {

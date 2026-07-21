@@ -15,6 +15,8 @@
     <string name="settings_floating_tip">服务未开启，打完卡无法自动跳回本软件</string>
     <string name="settings_notice_title">通知监听</string>
     <string name="settings_notice_tip">服务未开启，无法监听打卡结果和接收远程指令</string>
+    <string name="settings_transfer_title">通知转移</string>
+    <string name="settings_transfer_tip">打卡应用通知经现有消息渠道转发到目标手机</string>
     <string name="settings_capture_title">截屏服务</string>
     <string name="settings_capture_tip">服务未开启，无法获取打卡结果</string>
     <string name="settings_accessibility_title">无障碍服务</string>

@@ -33,6 +33,7 @@ object Constant {
     const val TASK_AUTO_RECYCLE_KEY = "TASK_AUTO_RECYCLE_KEY" // 任务每日自动循环(Boolean)
     const val RANDOM_TIME_KEY = "RANDOM_TIME_KEY" // 随机时间(Boolean)
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
+    const val NOTIFICATION_TRANSFER_KEY = "NOTIFICATION_TRANSFER_KEY" // 通知转移：将目标打卡应用通知经现有消息渠道(企业微信/邮箱)转发到目标手机(Boolean)
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY" // 省电模式(Boolean)
     /** 强制伪息屏：离开 App 超过 60s 主动盖黑屏蒙层 */
     const val FORCE_PSEUDO_MASK_KEY = "FORCE_PSEUDO_MASK_KEY" // Boolean

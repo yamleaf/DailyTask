@@ -46,6 +46,8 @@ import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.DiagnosticReporter
+import com.pengxh.daily.app.utils.ConfigStore
+import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
@@ -395,6 +397,37 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 // 取消保活闹钟（前台服务仍在运行时不会重新调度）
                 KeepAliveReceiver.cancel(this)
                 "已关闭开机自启/后台保活".show(this)
+            }
+        }
+
+        // 通知转移：复用现有消息渠道（企业微信/邮箱）转发目标打卡应用通知到目标手机。
+        // 开启时按当前渠道校验配置是否齐全。
+        binding.transferSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (syncingSwitchState) {
+                return@setOnCheckedChangeListener
+            }
+            SaveKeyValues.saveBoolean(Constant.NOTIFICATION_TRANSFER_KEY, isChecked)
+            if (isChecked) {
+                val channel = SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
+                when (channel) {
+                    0 -> { // 邮箱
+                        val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
+                        val inbox =
+                            if (!obj.isEmpty && obj.has("inbox")) obj.get("inbox").asString else ""
+                        if (inbox.isBlank() || EmailSecureConfig.loadAuthCode().isBlank()) {
+                            "通知转移依赖邮箱配置，请先完善邮箱与授权码".show(this)
+                        }
+                    }
+
+                    1 -> { // 企业微信
+                        val wxKey = SaveKeyValues.loadString(Constant.WX_WEB_HOOK_KEY, "")
+                        if (wxKey.isBlank()) {
+                            "通知转移依赖企业微信配置，请先填写企业微信 Webhook".show(this)
+                        }
+                    }
+
+                    else -> "请先在设置中配置消息渠道（邮箱/企业微信）".show(this)
+                }
             }
         }
 
@@ -951,6 +984,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
             binding.keepAliveSwitch.isChecked =
                 SaveKeyValues.loadBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, true)
+            binding.transferSwitch.isChecked =
+                SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)
         } finally {
             syncingSwitchState = false
         }

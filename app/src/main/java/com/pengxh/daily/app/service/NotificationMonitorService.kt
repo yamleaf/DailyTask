@@ -17,7 +17,9 @@ import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.ui.MainActivity
+import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
@@ -111,6 +113,9 @@ class NotificationMonitorService : NotificationListenerService() {
         // 保存指定包名的通知，其他的一律不保存
         saveTargetNotice(pkg, targetApp, title, notice)
 
+        // 通知转移：开启后将目标打卡 App 的通知原文经邮件转发到目标手机
+        forwardNotificationIfEnabled(pkg, targetApp, title, notice)
+
         // 截屏模式选中 + 钉钉手动打卡 → 通知被第 99 行拦截，仅测试场景会出现
         // 目标应用打卡通知，如果设置通知监听，那么结果来源只能选通知监听。
         if (SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX) == 0) {
@@ -176,6 +181,60 @@ class NotificationMonitorService : NotificationListenerService() {
                     Log.e(kTag, "Insert notice failed", e)
                 }
             }
+        }
+    }
+
+    /**
+     * 通知转移：开启后，将目标打卡 App 的通知原文经用户已配置的现有消息渠道
+     * （企业微信 / 邮箱，与打卡结果等通知共用同一渠道）转发到目标手机。
+     * 范围限制为当前目标打卡 App（仅飞书/企微/钉钉/M3/自定义打卡应用），
+     * 不去转发辅助聊天 App 或本应用自身。
+     * 去重由 MessageDispatcher 的 90s 同标题同正文窗口保证，避免同一条通知重复发送刷屏。
+     */
+    private fun forwardNotificationIfEnabled(
+        pkg: String,
+        targetApp: String,
+        title: String,
+        notice: String
+    ) {
+        if (!SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)) return
+        if (pkg != targetApp) return
+        if (notice.isBlank()) return
+
+        val appName = Constant.getAppName(pkg)
+        val time = System.currentTimeMillis().timestampToCompleteDate()
+        val html = StatusReporter.buildNotificationTransferHtml(appName, title, notice, time)
+        // 复用用户已配置的消息渠道（企业微信/邮箱），不强制特定通道，与打卡结果通知保持一致
+        MessageDispatcher.sendMessage(
+            "通知转移 · $appName",
+            html,
+            appendMeta = false
+        )
+    }
+
+    /**
+     * 校验通知转移配置是否齐全。开启时若渠道/授权码缺失，返回告警文案（仍会保存开关态，待用户补全配置）。
+     * 复用与设置页通知转移开关一致的校验逻辑，远程开启时通过消息回执提示而非 Toast。
+     */
+    private fun validateTransferConfig(enabled: Boolean): String? {
+        if (!enabled) return null
+        val channel = SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
+        return when (channel) {
+            0 -> { // 邮箱
+                val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
+                val inbox =
+                    if (!obj.isEmpty && obj.has("inbox")) obj.get("inbox").asString else ""
+                if (inbox.isBlank() || EmailSecureConfig.loadAuthCode().isBlank()) {
+                    "邮箱或授权码未配置，开启后无法转发，请先在设置补全"
+                } else null
+            }
+
+            1 -> { // 企业微信
+                val wxKey = SaveKeyValues.loadString(Constant.WX_WEB_HOOK_KEY, "")
+                if (wxKey.isBlank()) "企业微信 Webhook 未配置，开启后无法转发，请先在设置补全" else null
+            }
+
+            else -> "消息渠道未配置，开启后无法转发，请先配置渠道"
         }
     }
 
@@ -330,6 +389,27 @@ class NotificationMonitorService : NotificationListenerService() {
                         appendMeta = false
                     )
                 }
+            }
+
+            command.contains("开启转移") -> {
+                LogFileManager.writeLog("收到开启通知转移指令")
+                val warning = validateTransferConfig(true)
+                SaveKeyValues.saveBoolean(Constant.NOTIFICATION_TRANSFER_KEY, true)
+                MessageDispatcher.sendMessage(
+                    "通知转移状态通知",
+                    StatusReporter.buildTransferStatusHtml(true, warning),
+                    force = true, appendMeta = false
+                )
+            }
+
+            command.contains("关闭转移") -> {
+                LogFileManager.writeLog("收到关闭通知转移指令")
+                SaveKeyValues.saveBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)
+                MessageDispatcher.sendMessage(
+                    "通知转移状态通知",
+                    StatusReporter.buildTransferStatusHtml(false, null),
+                    force = true, appendMeta = false
+                )
             }
 
             else -> {

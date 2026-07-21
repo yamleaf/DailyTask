@@ -40,7 +40,9 @@ object StatusReporter {
         "DT#考勤记录" to "导出当天监听的打卡通知",
         "DT#打卡" to "触发一次临时打卡",
         "DT#状态查询" to "查询程序状态信息等",
-        "DT#截屏" to "截取App 画面并回传"
+        "DT#截屏" to "截取App 画面并回传",
+        "DT#开启转移" to "开启通知转移（打卡应用通知转发到目标手机）",
+        "DT#关闭转移" to "关闭通知转移"
     )
 
     suspend fun buildStatusReport(context: Context, listenerConnected: Boolean): String {
@@ -767,6 +769,7 @@ object StatusReporter {
             }
             val powerSaveText = if (AppRuntimeConfig.isPowerSaveMode()) badge("开启", "ok") else badge("关闭", "info")
             val holidayText = if (SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)) badge("开启", "ok") else badge("关闭", "info")
+            val transferText = if (SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)) badge("开启", "ok") else badge("关闭", "warn")
             val runDetail = if (running.startsWith("运行中")) running.substringAfter("｜", "") else "需手动或远程启动，每日循环仅在每日重置时生效"
 
             append(section("⚙️ 运行状态",
@@ -777,7 +780,8 @@ object StatusReporter {
                 row("最近打卡", recentPunchText(cal)),
                 row("省电模式", powerSaveText),
                 row("跳过节假日", holidayText),
-                row("强制伪息屏", maskText)
+                row("强制伪息屏", maskText),
+                row("通知转移", transferText)
             ))
 
             // 今日任务
@@ -1029,6 +1033,27 @@ object StatusReporter {
     }
 
     @JvmStatic
+    fun buildNotificationTransferHtml(
+        appName: String,
+        title: String,
+        content: String,
+        time: String
+    ): String {
+        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
+                "<div style=\"font-size:40px;margin-bottom:8px;\">📨</div>" +
+                "<div style=\"font-size:16px;font-weight:600;color:#1677ff;margin-bottom:4px;\">通知转移</div>" +
+                "<div style=\"font-size:13px;color:#888;\">${appName} 的通知已转发到本机</div>" +
+                "</div>" +
+                "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">来源应用</td><td style=\"font-size:12px;color:#333;text-align:right;\">$appName</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${title.ifBlank { "—" }}</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;vertical-align:top;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${content.ifBlank { "—" }}</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">接收时间</td><td style=\"font-size:12px;color:#333;text-align:right;\">$time</td></tr>" +
+                "</table>"
+        return centerShell("📨 通知转移 · $appName", body)
+    }
+
+    @JvmStatic
     fun buildStopTaskHtml(): String {
         val battery = batteryCap()
         val body = "<div style=\"text-align:center;padding:12px 0;\">" +
@@ -1060,6 +1085,35 @@ object StatusReporter {
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
         return centerShell("${if (enabled) "🔄" else "⏸️"} 循环状态通知", body)
+    }
+
+    /**
+     * 通知转移开关状态回执（远程指令 DT#开启转移 / DT#关闭转移 触发）。
+     * warning 不为空时提示配置未补全，但仍会保存开关态。
+     */
+    @JvmStatic
+    fun buildTransferStatusHtml(enabled: Boolean, warning: String?): String {
+        val (icon, color, label, tip) = if (enabled) {
+            arrayOf("📨", "#1677ff", "通知转移已开启", "目标打卡应用通知将经现有渠道转发到目标手机")
+        } else {
+            arrayOf("🔕", "#fa8c16", "通知转移已关闭", "不再转发打卡应用通知")
+        }
+        val battery = batteryCap()
+        val body = buildString {
+            append("<div style=\"text-align:center;padding:12px 0;\">")
+            append("<div style=\"font-size:40px;margin-bottom:8px;\">$icon</div>")
+            append("<div style=\"font-size:16px;font-weight:600;color:$color;margin-bottom:4px;\">$label</div>")
+            append("<div style=\"font-size:13px;color:#888;\">$tip</div>")
+            append("</div>")
+            append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">")
+            append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">当前状态</td><td style=\"font-size:12px;color:#333;text-align:right;\">${if (enabled) "转发中" else "已停用"}</td></tr>")
+            append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>")
+            append("</table>")
+            if (!warning.isNullOrBlank()) {
+                append("<div style=\"margin-top:10px;padding:8px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:6px;font-size:12px;color:#ad6800;line-height:1.4;\">⚠️ $warning</div>")
+            }
+        }
+        return centerShell("${if (enabled) "📨" else "🔕"} 通知转移状态通知", body)
     }
 
     @JvmStatic
