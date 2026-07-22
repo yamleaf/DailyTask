@@ -313,7 +313,9 @@ class ForegroundRunningService : Service() {
 
     override fun onDestroy() {
         isRunning = false
-        KeepAliveReceiver.cancel(this)
+        // 注意：此处不再调用 KeepAliveReceiver.cancel(this)。
+        // 关闭保活时已由 SettingsActivity 显式取消闹钟；若此处取消，会在服务被系统杀死时
+        // 误删“下一次复活闹钟”，导致进程被杀后无法被 RESURRECT 心跳拉起。
         super.onDestroy()
         try {
             unregisterReceiver(systemBroadcastReceiver)

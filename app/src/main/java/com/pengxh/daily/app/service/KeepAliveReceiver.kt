@@ -123,6 +123,10 @@ class KeepAliveReceiver : BroadcastReceiver() {
             }
             ACTION_RESURRECT -> {
                 if (!SaveKeyValues.loadBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, true)) return
+                // 关键修复：无论本次是否拉起服务，都先续约下一次心跳闹钟。
+                // 原实现在服务存活时直接 return、拉起后也只续重置闹钟，导致 15 分钟心跳只触发一次，
+                // 进程被杀后无复活闹钟，只能苦等每日重置点。现改为每次心跳都自续约，链条永不中断。
+                schedule(context)
                 if (ForegroundRunningService.isRunning) return
                 tryStartForegroundService(context)
                 // 复活后同时确保每日重置闹钟存在
