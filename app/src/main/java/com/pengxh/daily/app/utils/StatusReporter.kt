@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.utils
 
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -1250,9 +1251,14 @@ object StatusReporter {
     }
 
     /** 蓝牙开关状态（不支持时返回“不支持”） */
+    @Suppress("DEPRECATION")
     private fun bluetoothStatusText(context: Context): String {
         return try {
-            val adapter = BluetoothAdapter.getDefaultAdapter()
+            val adapter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                context.getSystemService(BluetoothManager::class.java)?.adapter
+            } else {
+                BluetoothAdapter.getDefaultAdapter()
+            }
             if (adapter == null) "不支持" else if (adapter.isEnabled) "已开启" else "未开启"
         } catch (_: Exception) {
             "未知"
