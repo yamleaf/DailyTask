@@ -12,6 +12,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
+import com.pengxh.daily.app.utils.BatteryHistory
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.Constant
@@ -151,6 +152,8 @@ class ForegroundRunningService : Service() {
 
         // 检查电量
         checkLowBattery()
+        // 立即记录一笔电池采样（之后由每分钟 TIME_TICK 续记）
+        BatteryHistory.recordSample(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -178,6 +181,7 @@ class ForegroundRunningService : Service() {
                     Intent.ACTION_TIME_TICK -> {
                         updateResetTimeView()
                         checkAndTriggerReset()
+                        BatteryHistory.recordSample(this@ForegroundRunningService)
                     }
 
                     Intent.ACTION_BATTERY_CHANGED -> checkLowBattery()

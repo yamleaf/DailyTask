@@ -163,6 +163,11 @@ object StatusReporter {
             appendLine("· 当前时间：${dateTimeFormat.format(Date())}")
             appendLine("· 当前电量：${if (battery >= 0) "$battery%" else "未知"}")
             appendLine("· 充电状态：${chargingStatusText(context)}")
+            appendLine("· 电池电流：${batteryCurrentText(context)}")
+            appendLine("· 电池健康：${batteryHealthText(context)}")
+            appendLine("· 过去1小时掉电：${BatteryHistory.drainOver(context, 1)}")
+            appendLine("· 过去6小时掉电：${BatteryHistory.drainOver(context, 6)}")
+            appendLine("· 过去12小时掉电：${BatteryHistory.drainOver(context, 12)}")
             appendLine("· WiFi 状态：${wifiStatusText(context)}")
             appendLine("· 蓝牙状态：${bluetoothStatusText(context)}")
             appendLine("· 手机温度：${batteryTemperatureText(context)}")
@@ -835,6 +840,11 @@ object StatusReporter {
             append(section("📱 设备信息",
                 row("当前时间", dateTimeFormat.format(Date())),
                 row("充电状态", chargingStatusText(context)),
+                row("电池电流", batteryCurrentText(context)),
+                row("电池健康", batteryHealthText(context)),
+                row("过去1小时掉电", BatteryHistory.drainOver(context, 1)),
+                row("过去6小时掉电", BatteryHistory.drainOver(context, 6)),
+                row("过去12小时掉电", BatteryHistory.drainOver(context, 12)),
                 row("WiFi 状态", wifiStatusText(context)),
                 row("蓝牙状态", bluetoothStatusText(context)),
                 row("手机温度", batteryTemperatureText(context)),
@@ -1268,6 +1278,44 @@ object StatusReporter {
     /** 安卓系统版本，如 Android 14 (API 34) */
     private fun androidVersionText(): String {
         return "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+    }
+
+    /** 电池瞬时电流（mA）；方向以系统充电状态为准，避免厂商 CURRENT_NOW 符号约定不一致导致误判 */
+    private fun batteryCurrentText(context: Context): String {
+        return try {
+            val mgr = context.getSystemService(android.content.Context.BATTERY_SERVICE) as? BatteryManager
+            val microAmp = mgr?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Int.MIN_VALUE
+            if (microAmp == Int.MIN_VALUE) "未知"
+            else {
+                val milliAmp = Math.abs(microAmp) / 1000.0
+                // CURRENT_NOW 的符号各厂商约定相反，不可靠；充放电方向以系统 EXTRA_STATUS 为准
+                val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                val charging = status == BatteryManager.BATTERY_STATUS_CHARGING
+                if (charging) "充电 +${"%.0f".format(milliAmp)} mA"
+                else "放电 -${"%.0f".format(milliAmp)} mA"
+            }
+        } catch (_: Exception) {
+            "未知"
+        }
+    }
+
+    /** 电池健康状态，来自系统电池广播 */
+    private fun batteryHealthText(context: Context): String {
+        return try {
+            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            when (intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1) {
+                BatteryManager.BATTERY_HEALTH_GOOD -> "良好"
+                BatteryManager.BATTERY_HEALTH_OVERHEAT -> "过热"
+                BatteryManager.BATTERY_HEALTH_DEAD -> "已损坏"
+                BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "过压"
+                BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "故障"
+                BatteryManager.BATTERY_HEALTH_COLD -> "过冷"
+                else -> "未知"
+            }
+        } catch (_: Exception) {
+            "未知"
+        }
     }
 
     /** 快捷获取电量字符串 */
