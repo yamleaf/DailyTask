@@ -35,8 +35,10 @@ object Constant {
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
     const val NOTIFICATION_TRANSFER_KEY = "NOTIFICATION_TRANSFER_KEY" // 通知转移：将目标打卡应用通知经现有消息渠道(企业微信/邮箱)转发到目标手机(Boolean)
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY" // 省电模式(Boolean)
-    /** 强制伪息屏：离开 App 超过 60s 主动盖黑屏蒙层 */
+    /** 强制伪息屏：离开 App 超过设定秒数主动盖黑屏蒙层 */
     const val FORCE_PSEUDO_MASK_KEY = "FORCE_PSEUDO_MASK_KEY" // Boolean
+    /** 强制伪息屏：离开 App 多少秒后进入伪息屏（Int，秒，默认 60，范围 10~3600） */
+    const val IDLE_PSEUDO_MASK_TIMEOUT_KEY = "IDLE_PSEUDO_MASK_TIMEOUT_KEY" // Int
 
     /** 后台保活：开机自启 + 进程被杀后由精确闹钟兜底重启前台服务(Boolean) */
     const val BACKGROUND_KEEP_ALIVE_KEY = "BACKGROUND_KEEP_ALIVE_KEY"

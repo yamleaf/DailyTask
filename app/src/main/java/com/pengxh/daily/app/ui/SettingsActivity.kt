@@ -10,6 +10,8 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
+import android.text.InputFilter
+import android.text.InputType
 import android.view.View
 import android.app.Dialog
 import android.graphics.drawable.ColorDrawable
@@ -512,6 +514,21 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             AppRuntimeConfig.setPowerSaveMode(isChecked)
         }
 
+        // 强制伪息屏 / 伪息屏增强 总开关：两者状态完全一致，双向同步
+        val applyForcePseudoMask = { checked: Boolean ->
+            if (checked) {
+                AppRuntimeConfig.setForcePseudoMask(true)
+                "强制伪息屏已开启".show(this)
+            } else {
+                AppRuntimeConfig.setForcePseudoMask(false)
+            }
+            // 同步两个开关的显示状态（防止监听器回环）
+            syncingSwitchState = true
+            binding.forcePseudoMaskSwitch.isChecked = checked
+            binding.pseudoMaskGroupSwitch.isChecked = checked
+            syncingSwitchState = false
+        }
+
         binding.forcePseudoMaskSwitch.setOnCheckedChangeListener { _, isChecked ->
             if (syncingSwitchState) {
                 return@setOnCheckedChangeListener
@@ -521,7 +538,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     .setTitle("开启强制伪息屏？")
                     .setMessage(
                         "开启后：\n\n" +
-                                "1. 离开本软件超过 60 秒，将主动进入伪息屏模式\n" +
+                                "1. 离开本软件超过设定秒数（可在下方设置，默认 60 秒），将主动进入伪息屏模式\n" +
                                 "2. 可能打断你正在使用的其它 App（微信、浏览器等）\n" +
                                 "3. 离开期间会尽量阻止系统自动灭屏（透明保亮）\n" +
                                 "4. 打卡等待窗口内不会盖黑屏\n\n" +
@@ -530,17 +547,70 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     .setNegativeButton("取消") { _, _ ->
                         syncingSwitchState = true
                         binding.forcePseudoMaskSwitch.isChecked = false
+                        binding.pseudoMaskGroupSwitch.isChecked = false
                         syncingSwitchState = false
                     }
-                    .setPositiveButton("确认开启") { _, _ ->
-                        AppRuntimeConfig.setForcePseudoMask(true)
-                        "强制伪息屏已开启".show(this)
-                    }
+                    .setPositiveButton("确认开启") { _, _ -> applyForcePseudoMask(true) }
                     .setCancelable(false)
                     .show()
             } else {
-                AppRuntimeConfig.setForcePseudoMask(false)
+                applyForcePseudoMask(false)
             }
+        }
+
+        // 「伪息屏增强」标题行右侧总开关：与强制伪息屏开关共用同一份状态
+        binding.pseudoMaskGroupSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (syncingSwitchState) {
+                return@setOnCheckedChangeListener
+            }
+            if (isChecked) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("开启强制伪息屏？")
+                    .setMessage(
+                        "开启后：\n\n" +
+                                "1. 离开本软件超过设定秒数（可在下方设置，默认 60 秒），将主动进入伪息屏模式\n" +
+                                "2. 可能打断你正在使用的其它 App（微信、浏览器等）\n" +
+                                "3. 离开期间会尽量阻止系统自动灭屏（透明保亮）\n" +
+                                "4. 打卡等待窗口内不会盖黑屏\n\n" +
+                                "适合无人值守挂机；若白天还要操作手机，建议关闭。"
+                    )
+                    .setNegativeButton("取消") { _, _ ->
+                        syncingSwitchState = true
+                        binding.forcePseudoMaskSwitch.isChecked = false
+                        binding.pseudoMaskGroupSwitch.isChecked = false
+                        syncingSwitchState = false
+                    }
+                    .setPositiveButton("确认开启") { _, _ -> applyForcePseudoMask(true) }
+                    .setCancelable(false)
+                    .show()
+            } else {
+                applyForcePseudoMask(false)
+            }
+        }
+
+        // 强制伪息屏延时（秒）：离开本软件超过该秒数进入伪息屏（10~3600，默认 60）
+        // 折叠为可点击行，点击弹出对话框设置，避免内联输入框占用空间
+        val delaySec = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
+            .coerceIn(10, 3600)
+        binding.pseudoMaskDelayValueText.text =
+            getString(R.string.settings_pseudo_mask_delay_value, delaySec)
+        binding.pseudoMaskDelayLayout.setOnClickListener {
+            // 每次点击都重新读取最新已存值，避免改完一次后再打开显示旧值
+            val current = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
+                .coerceIn(10, 3600)
+            showPseudoMaskDelayDialog(current)
+        }
+
+        // 「伪息屏增强」分组：点击标题行（开关除外）展开/收起（箭头旋转动画），默认折叠
+        var pseudoGroupExpanded = false
+        binding.pseudoMaskGroupHeader.setOnClickListener {
+            pseudoGroupExpanded = !pseudoGroupExpanded
+            binding.pseudoMaskGroupContent.visibility =
+                if (pseudoGroupExpanded) View.VISIBLE else View.GONE
+            binding.pseudoMaskGroupArrow.animate()
+                .rotation(if (pseudoGroupExpanded) -90f else 90f)
+                .setDuration(200)
+                .start()
         }
 
         binding.introduceLayout.setOnClickListener {
@@ -611,6 +681,31 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             putExtra("data", data)
             startForegroundService(this)
         }
+    }
+
+    /**
+     * 伪息屏延时设置对话框：折叠在「伪息屏延时」行内，点击弹出输入。
+     * 取值区间 10~3600 秒（默认 60），保存后刷新右侧显示值。
+     */
+    private fun showPseudoMaskDelayDialog(currentSec: Int) {
+        val editText = EditText(this@SettingsActivity).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(currentSec.toString())
+            filters = arrayOf(InputFilter.LengthFilter(4))
+            gravity = Gravity.END
+        }
+        MaterialAlertDialogBuilder(this@SettingsActivity)
+            .setTitle(R.string.settings_pseudo_mask_delay_title)
+            .setMessage(R.string.settings_pseudo_mask_delay_tip)
+            .setView(editText)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val v = editText.text.toString().toIntOrNull()?.coerceIn(10, 3600) ?: 60
+                SaveKeyValues.saveInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, v)
+                binding.pseudoMaskDelayValueText.text =
+                    getString(R.string.settings_pseudo_mask_delay_value, v)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     /**
@@ -982,6 +1077,11 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
+            binding.pseudoMaskGroupSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
+            val delaySec = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
+                .coerceIn(10, 3600)
+            binding.pseudoMaskDelayValueText.text =
+                getString(R.string.settings_pseudo_mask_delay_value, delaySec)
             binding.keepAliveSwitch.isChecked =
                 SaveKeyValues.loadBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, true)
             binding.transferSwitch.isChecked =

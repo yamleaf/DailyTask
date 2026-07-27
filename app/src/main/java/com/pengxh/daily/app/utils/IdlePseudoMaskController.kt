@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.utils
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
@@ -12,47 +13,122 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import com.pengxh.daily.app.DailyTaskApplication
+import com.pengxh.daily.app.extensions.bringDailyTaskToFront
+import com.pengxh.daily.app.utils.Constant
+import com.pengxh.kt.lite.utils.SaveKeyValues
 
 /**
  * 离开本软件后的「强制伪息屏」策略（需在设置中开启）：
  * 1. 立刻铺一层「透明保亮」悬浮窗，尽量阻止系统自动灭屏（触摸可穿透）
- * 2. 无回到本软件超过 [IDLE_TO_MASK_MS] 后，升级为黑屏伪息屏蒙层
- * 3. 若系统仍发出 SCREEN_OFF，则主动亮屏并进入黑屏蒙层
+ * 2. 离开本软件超过设定秒数（默认 60s，可配置）后，升级为黑屏伪息屏蒙层
+ * 3. 进入伪息屏前按「返回桌面」开关分流：开启则先退回桌面再跳回本 App，关闭则直接跳回本 App
+ * 4. 若系统仍发出 SCREEN_OFF，则主动亮屏并进入黑屏蒙层
  *
  * 开关关闭时不执行上述行为。打卡等待窗口内不盖黑屏。
+ * 注意：本控制器只负责「强制伪息屏」路径；远程打卡复原使用独立的 bringMainActivityForMask，互不打扰。
  */
 object IdlePseudoMaskController {
 
-    private const val IDLE_TO_MASK_MS = 60_000L
+    private const val DEFAULT_IDLE_TO_MASK_SEC = 60
+    private const val MIN_IDLE_TO_MASK_SEC = 10
+    private const val MAX_IDLE_TO_MASK_SEC = 3600
+    /** 先回桌面、再拉起本 App 的间隔：等桌面切换稳定后再拉起，避免两个 Intent 抢前台导致蒙层闪退 */
+    private const val HOME_TO_APP_DELAY_MS = 800L
     private const val WAKE_LOCK_MS = 5_000L
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var appInBackground = false
+    /** 是否正处于「进入伪息屏」的过渡中（离开超时后到蒙层真正显示前），用于阻止倒计时被重复重置 */
+    private var enteringMask = false
     private var keepAwakeView: View? = null
+
+    /** 离开本软件多少秒后进入伪息屏（可配置，默认 60s，范围 10~3600s） */
+    private fun idleToMaskMs(): Long {
+        val sec = SaveKeyValues.loadInt(
+            Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, DEFAULT_IDLE_TO_MASK_SEC
+        ).coerceIn(MIN_IDLE_TO_MASK_SEC, MAX_IDLE_TO_MASK_SEC)
+        return sec * 1000L
+    }
 
     private val upgradeToMaskRunnable: Runnable = Runnable {
         if (!appInBackground) return@Runnable
         if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
         if (TaskScheduler.isInActivePunch()) {
             LogFileManager.writeLog("打卡进行中，延后伪息屏")
-            mainHandler.postDelayed(upgradeToMaskRunnable, IDLE_TO_MASK_MS)
+            mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
             return@Runnable
         }
         val context = DailyTaskApplication.get()
         if (MaskOverlayHelper.isShowing()) return@Runnable
-        LogFileManager.writeLog("强制伪息屏：离开本软件超时，升级为伪息屏蒙层")
+        LogFileManager.writeLog("强制伪息屏：离开本软件超时，进入伪息屏流程")
+        enterPseudoMask(context)
+    }
+
+    /**
+     * 当前 DailyTask 应用是否整体处于前台（由 DailyTaskApplication 的 Activity 生命周期统计得出）。
+     * 区别于「MainActivity 是否在后台」：停留在设置页等其它本应用页面时，应用仍在前台，
+     * 不应被判定为「离开了本软件」，否则会误触发回桌面+跳回（用户在设置页就撞到的 bug）。
+     */
+    private fun isDailyTaskAppForeground(): Boolean = DailyTaskApplication.isAppForeground
+
+    /**
+     * 进入伪息屏：按「返回桌面」开关分流。
+     * - 开启：先退回桌面（步骤1），等桌面切换稳定后再拉起本 App 并由其显示蒙层（步骤2）。
+     * - 关闭：直接拉起本 App 再显示蒙层（不经由桌面）。
+     * 两个 Intent 串行化（延迟 [HOME_TO_APP_DELAY_MS]），避免抢前台导致蒙层闪退。
+     * 全程不影响远程打卡：打卡复原路径使用独立的 bringMainActivityForMask，不经此方法。
+     */
+    private fun enterPseudoMask(context: Context) {
+        if (!appInBackground) {
+            LogFileManager.writeLog("强制伪息屏：已进入前台，跳过蒙层")
+            return
+        }
+        // 双保险：确认本应用整体确实已离开前台（用户在其它 App / 桌面）。
+        // 仅以 MainActivity 的 onPause 判断会误把「停留在设置页」当成离开，这里用应用级前台状态兜底。
+        if (isDailyTaskAppForeground()) {
+            LogFileManager.writeLog("强制伪息屏：本应用仍在前台（如设置页），跳过蒙层（防误触发）")
+            return
+        }
+        if (MaskOverlayHelper.isShowing()) return
+        val backToHome = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
+        enteringMask = true
         removeKeepAwake(context)
-        MaskOverlayHelper.show(context)
+        if (backToHome) {
+            // 步骤1（受「返回桌面」开关控制）：先退回桌面
+            try {
+                context.startActivity(
+                    Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_HOME)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            } catch (e: Exception) {
+                LogFileManager.writeLog("强制伪息屏：返回桌面失败: ${e.message}")
+            }
+            LogFileManager.writeLog("强制伪息屏：已退回桌面，稍后跳回 DailyTask 显示蒙层")
+            // 串行化：等桌面切换稳定后再拉起本 App，避免两个 Intent 抢前台导致蒙层闪退
+            mainHandler.postDelayed({
+                if (!appInBackground || !enteringMask) return@postDelayed
+                if (MaskOverlayHelper.isShowing()) return@postDelayed
+                context.bringDailyTaskToFront(true)
+            }, HOME_TO_APP_DELAY_MS)
+        } else {
+            // 步骤1 关闭：直接跳回本 App 再显示蒙层
+            LogFileManager.writeLog("强制伪息屏：直接跳回 DailyTask 显示蒙层（未开启返回桌面）")
+            context.bringDailyTaskToFront(true)
+        }
     }
 
     fun onAppForegrounded(context: Context) {
         appInBackground = false
+        enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         removeKeepAwake(context)
     }
 
     fun onAppBackgrounded(context: Context) {
         appInBackground = true
+        enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         if (!AppRuntimeConfig.isForcePseudoMask()) {
             LogFileManager.writeLog("已离开本软件（强制伪息屏未开启，跳过保亮/倒计时）")
@@ -63,9 +139,9 @@ object IdlePseudoMaskController {
         if (MaskOverlayHelper.isShowing()) {
             return
         }
-        mainHandler.postDelayed(upgradeToMaskRunnable, IDLE_TO_MASK_MS)
+        mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
         LogFileManager.writeLog(
-            "强制伪息屏已开启：离开本软件，启动 ${IDLE_TO_MASK_MS / 1000}s 倒计时（已开启透明保亮）"
+            "强制伪息屏已开启：离开本软件，启动 ${idleToMaskMs() / 1000}s 倒计时（已开启透明保亮）"
         )
     }
 
@@ -108,6 +184,7 @@ object IdlePseudoMaskController {
     }
 
     fun onForcePseudoMaskDisabled() {
+        enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
         LogFileManager.writeLog("强制伪息屏已关闭，取消后台保亮与倒计时")
@@ -115,6 +192,7 @@ object IdlePseudoMaskController {
 
     fun cancel() {
         appInBackground = false
+        enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
     }
@@ -123,9 +201,10 @@ object IdlePseudoMaskController {
     fun onBlackMaskHidden(context: Context) {
         if (!appInBackground) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
+        enteringMask = false
         ensureKeepAwake(context)
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
-        mainHandler.postDelayed(upgradeToMaskRunnable, IDLE_TO_MASK_MS)
+        mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
         LogFileManager.writeLog("伪息屏已解除但仍在外部，重新开启透明保亮与倒计时")
     }
 
@@ -137,10 +216,11 @@ object IdlePseudoMaskController {
     fun onForegroundTaskChanged() {
         if (!appInBackground) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
+        if (enteringMask) return
         if (MaskOverlayHelper.isShowing()) return
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
-        mainHandler.postDelayed(upgradeToMaskRunnable, IDLE_TO_MASK_MS)
-        LogFileManager.writeLog("前台任务切换，伪息屏倒计时已重置（${IDLE_TO_MASK_MS / 1000}s）")
+        mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
+        LogFileManager.writeLog("前台任务切换，伪息屏倒计时已重置（${idleToMaskMs() / 1000}s）")
     }
 
     private fun ensureKeepAwake(context: Context) {

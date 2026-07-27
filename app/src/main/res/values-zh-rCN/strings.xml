@@ -25,8 +25,13 @@
     <string name="settings_gesture_tip">开启后，支持单手指上下滑动屏幕开启/关闭伪灭屏</string>
     <string name="settings_power_save_title">省电模式</string>
     <string name="settings_power_save_tip">降低倒计时通知、内存监控和息屏蒙层动画刷新频率</string>
+    <string name="settings_pseudo_mask_group_title">伪息屏增强</string>
+    <string name="settings_pseudo_mask_group_tip">离开本软件超过设定秒数后主动进入伪息屏</string>
     <string name="settings_force_mask_title">强制伪息屏</string>
-    <string name="settings_force_mask_tip">开启后，离开本软件超过 60 秒将主动进入伪息屏模式（可能打断其它 App的正常使用）</string>
+    <string name="settings_force_mask_tip">开启后，离开本软件且超时将进入伪息屏模式（可能打断其它 App 的正常使用）</string>
+    <string name="settings_pseudo_mask_delay_title">伪息屏延时</string>
+    <string name="settings_pseudo_mask_delay_tip">离开本软件超过该秒数后进入伪息屏（10~3600，默认 60）</string>
+    <string name="settings_pseudo_mask_delay_value">%1$d 秒</string>
     <string name="settings_back_home_title">退回桌面</string>
     <string name="settings_back_home_tip">开启后，打卡倒计时结束，会先退回桌面再启动本软件</string>
     <string name="settings_keep_alive_title">后台自启</string>
