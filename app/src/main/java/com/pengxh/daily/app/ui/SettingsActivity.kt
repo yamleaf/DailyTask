@@ -51,6 +51,7 @@ import com.pengxh.daily.app.utils.DiagnosticReporter
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.MessageDispatcher
+import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.utils.WatermarkDrawable
@@ -481,7 +482,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
                 LoadingDialog.show(context, "消息发送中，请稍后...")
                 MessageDispatcher.sendAttachmentMessage(
-                    "邮箱测试", "这是一封测试邮件，不必关注", imagePath,
+                    "邮箱测试", StatusReporter.buildTestEmailHtml(), imagePath,
                     onSuccess = {
                         LoadingDialog.dismiss()
                         "发送成功，请注意查收".show(context)

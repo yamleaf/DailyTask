@@ -11,6 +11,7 @@ import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
+import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -305,11 +306,14 @@ object TaskScheduler {
                     )
                     LogFileManager.writeLog("发送打卡超时截屏: $imagePath")
                 } else {
-                    val failTip =
+                    val failTip = StatusReporter.buildTimeoutAlertHtml(
+                        "任务执行结果",
                         "超时未检测到打卡成功，且当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查"
+                    )
                     // force=true：关键告警跳过去重，保证一定送达
-                    MessageDispatcher.sendMessage("任务执行结果通知", failTip, force = true)
-                    LogFileManager.writeLog("任务执行结果：无可截屏权限: $failTip")
+                    // appendMeta=false：failTip 为 HTML，避免被纯文本壳包裹导致邮箱显示原始 HTML 源码
+                    MessageDispatcher.sendMessage("任务执行结果通知", failTip, force = true, appendMeta = false)
+                    LogFileManager.writeLog("任务执行结果：无可截屏权限")
                 }
             }
 

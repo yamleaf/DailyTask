@@ -10,6 +10,7 @@ import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.MessageDispatcher
+import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.kt.lite.base.KotlinBaseActivity
 import com.pengxh.kt.lite.extensions.isEmail
 import com.pengxh.kt.lite.extensions.show
@@ -158,8 +159,9 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             .setPositiveButton("继续") { _, _ ->
                 LoadingDialog.show(context, "邮件发送中，请稍后....")
                 MessageDispatcher.sendMessage(
-                    "邮箱测试", "这是一封测试邮件，不必关注",
+                    "邮箱测试", StatusReporter.buildTestEmailHtml(),
                     channelOverride = 0,
+                    appendMeta = false,
                     onSuccess = {
                         LoadingDialog.dismiss()
                         "发送成功，请注意查收".show(context)

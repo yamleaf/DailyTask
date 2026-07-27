@@ -547,7 +547,10 @@ class NotificationMonitorService : NotificationListenerService() {
                                         } else {
                                             MessageDispatcher.sendMessage(
                                                 "远程打卡结果",
-                                                "远程打卡已执行，但当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查是否成功",
+                                                StatusReporter.buildTimeoutAlertHtml(
+                                                    "远程打卡结果",
+                                                    "远程打卡已执行，但当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查是否成功"
+                                                ),
                                                 force = true,
                                                 appendMeta = false
                                             )

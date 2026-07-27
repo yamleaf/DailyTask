@@ -1,7 +1,13 @@
 package com.pengxh.daily.app.utils
 
+import android.bluetooth.BluetoothAdapter
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import android.os.Build
 import android.provider.Settings
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.DailyTaskApplication
@@ -75,11 +81,11 @@ object StatusReporter {
                     }
                 }"
             )
-            appendLine("· 待机方式：伪息屏常亮（禁止系统自动灭屏）")
             appendLine(
-                "· 强制伪息屏：${
+                "· 伪息屏增强：${
                     if (AppRuntimeConfig.isForcePseudoMask()) {
-                        "开启（离开本软件超过 60 秒会主动盖黑屏）"
+                        val sec = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
+                        "开启（离开本软件超过 ${sec} 秒会主动盖黑屏）"
                     } else {
                         "关闭"
                     }
@@ -155,6 +161,11 @@ object StatusReporter {
             appendLine("【设备信息】")
             appendLine("· 当前时间：${dateTimeFormat.format(Date())}")
             appendLine("· 当前电量：${if (battery >= 0) "$battery%" else "未知"}")
+            appendLine("· 充电状态：${chargingStatusText(context)}")
+            appendLine("· WiFi 状态：${wifiStatusText(context)}")
+            appendLine("· 蓝牙状态：${bluetoothStatusText(context)}")
+            appendLine("· 手机温度：${batteryTemperatureText(context)}")
+            appendLine("· 系统版本：${androidVersionText()}")
             appendLine("· 版本号：${BuildConfig.VERSION_NAME}")
             appendLine()
             appendRemoteCommandSection()
@@ -220,7 +231,6 @@ object StatusReporter {
             appendLine("====================")
             appendLine()
             appendLine("· 当前为节假日/休息日，任务已自动跳过")
-            appendLine("· 待机方式：伪息屏常亮")
         }
     }
 
@@ -763,7 +773,8 @@ object StatusReporter {
                 badge("关闭", "warn") + " <span style=\"font-size:11px;color:#888;\">需手动启动</span>"
             }
             val maskText = if (AppRuntimeConfig.isForcePseudoMask()) {
-                "${badge("开启", "ok")} <span style=\"font-size:11px;color:#888;\">离开60s自动黑屏</span>"
+                val sec = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
+                "${badge("开启", "ok")} <span style=\"font-size:11px;color:#888;\">离开${sec}s自动黑屏</span>"
             } else {
                 badge("关闭", "warn")
             }
@@ -780,7 +791,7 @@ object StatusReporter {
                 row("最近打卡", recentPunchText(cal)),
                 row("省电模式", powerSaveText),
                 row("跳过节假日", holidayText),
-                row("强制伪息屏", maskText),
+                row("伪息屏增强", maskText),
                 row("通知转移", transferText)
             ))
 
@@ -817,6 +828,17 @@ object StatusReporter {
                 row("悬浮窗权限", overlay),
                 row("通知监听", notify),
                 row("结果来源", screen)
+            ))
+
+            // 设备信息
+            append(section("📱 设备信息",
+                row("当前时间", dateTimeFormat.format(Date())),
+                row("充电状态", chargingStatusText(context)),
+                row("WiFi 状态", wifiStatusText(context)),
+                row("蓝牙状态", bluetoothStatusText(context)),
+                row("手机温度", batteryTemperatureText(context)),
+                row("系统版本", androidVersionText()),
+                row("版本号", BuildConfig.VERSION_NAME)
             ))
 
             // 打卡日历
@@ -882,8 +904,7 @@ object StatusReporter {
             // 省电模式
             val ps = if (AppRuntimeConfig.isPowerSaveMode()) badge("开启", "ok") else badge("关闭", "info")
             append(section("⚙️ 运行模式",
-                row("省电模式", ps),
-                row("待机方式", "伪息屏常亮")
+                row("省电模式", ps)
             ))
         }
 
@@ -930,7 +951,7 @@ object StatusReporter {
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">🏖️</div>")
             append("<div style=\"font-size:16px;font-weight:600;color:#fa8c16;margin-bottom:4px;\">节假日/休息日</div>")
-            append("<div style=\"font-size:13px;color:#888;\">任务已自动跳过，待机方式：伪息屏常亮</div>")
+            append("<div style=\"font-size:13px;color:#888;\">任务已自动跳过</div>")
             append("</div>")
         }
         return htmlShell("⏭️ 任务跳过通知", body)
@@ -1186,6 +1207,63 @@ object StatusReporter {
         return centerShell("💾 内存预警", body)
     }
 
+    // ======================== 设备状态辅助 ========================
+
+    /** 充电状态：充电中 / 已充满 / 未充电 */
+    private fun chargingStatusText(context: Context): String {
+        return try {
+            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            when (status) {
+                BatteryManager.BATTERY_STATUS_CHARGING -> "充电中"
+                BatteryManager.BATTERY_STATUS_FULL -> "已充满"
+                BatteryManager.BATTERY_STATUS_DISCHARGING -> "未充电（放电中）"
+                BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "未充电"
+                else -> "未知"
+            }
+        } catch (_: Exception) {
+            "未知"
+        }
+    }
+
+    /** 电池温度（℃），来自系统电池广播 */
+    private fun batteryTemperatureText(context: Context): String {
+        return try {
+            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+            if (temp > 0) String.format(Locale.CHINA, "%.1f℃", temp / 10.0) else "未知"
+        } catch (_: Exception) {
+            "未知"
+        }
+    }
+
+    /** WiFi 连接状态 */
+    private fun wifiStatusText(context: Context): String {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val net = cm?.activeNetwork
+            val caps = if (net != null) cm.getNetworkCapabilities(net) else null
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) "已连接" else "未连接"
+        } catch (_: Exception) {
+            "未知"
+        }
+    }
+
+    /** 蓝牙开关状态（不支持时返回“不支持”） */
+    private fun bluetoothStatusText(context: Context): String {
+        return try {
+            val adapter = BluetoothAdapter.getDefaultAdapter()
+            if (adapter == null) "不支持" else if (adapter.isEnabled) "已开启" else "未开启"
+        } catch (_: Exception) {
+            "未知"
+        }
+    }
+
+    /** 安卓系统版本，如 Android 14 (API 34) */
+    private fun androidVersionText(): String {
+        return "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+    }
+
     /** 快捷获取电量字符串 */
     private fun batteryCap(): String {
         return try {
@@ -1212,5 +1290,16 @@ object StatusReporter {
             append("</div>")
         }
         return htmlShell("👆 远程打卡通知", body)
+    }
+
+    /** 测试邮件（HTML 版，供「邮箱测试」按钮发送，确保渲染美观） */
+    @JvmStatic
+    fun buildTestEmailHtml(): String {
+        val body = "<div style=\"text-align:center;padding:16px 0 10px;\">" +
+                "<div style=\"font-size:40px;margin-bottom:8px;\">📧</div>" +
+                "<div style=\"font-size:16px;font-weight:600;color:#4f6ef7;margin-bottom:4px;\">邮件通道测试</div>" +
+                "<div style=\"font-size:13px;color:#888;line-height:1.7;\">这是一封测试邮件，不必关注。<br>若你能看到此卡片样式，说明 HTML 邮件发送正常。</div>" +
+                "</div>"
+        return htmlShell("📧 邮箱测试", body)
     }
 }
