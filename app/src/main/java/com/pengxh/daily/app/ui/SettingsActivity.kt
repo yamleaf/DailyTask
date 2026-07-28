@@ -13,6 +13,9 @@ import android.view.Gravity
 import android.text.InputFilter
 import android.text.InputType
 import android.view.View
+import java.io.File
+import android.webkit.WebView
+import android.widget.Toast
 import android.app.Dialog
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -491,6 +494,23 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                         LoadingDialog.dismiss()
                         "发送失败：$it".show(context)
                     })
+            }
+        }
+
+        // 状态查询：生成 HTML 状态报告并以尽量大的 WebView 弹窗展示
+        binding.statusQueryLayout.setOnClickListener {
+            lifecycleScope.launch {
+                val html = runCatching {
+                    StatusReporter.buildStatusReportHtml(this@SettingsActivity, false)
+                }.getOrElse { e ->
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        "状态查询生成失败：${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+                showStatusReportDialog(html)
             }
         }
 
@@ -1119,5 +1139,48 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 e.printStackTrace()
             }
         }
+    }
+
+    /**
+     * 以尽量大且紧凑的 WebView 弹窗渲染 HTML 状态报告。
+     * - 无对话框标题栏（避免与 HTML 内容重复，节省顶部空间）。
+     * - 容器仅保留左右内边距，WebView 在垂直方向贴满内容区，减少上下空白。
+     * Dialog 关闭时清理 WebView，避免内存泄漏。
+     */
+    private fun showStatusReportDialog(html: String) {
+        val dm = resources.displayMetrics
+        val sidePad = (12 * dm.density).toInt()
+        val webView = WebView(this).apply {
+            settings.javaScriptEnabled = false
+            settings.defaultTextEncodingName = "UTF-8"
+            setBackgroundColor(Color.WHITE)
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            // 仅左右内边距：上下不额外加 padding，让 WebView 充分利用对话框内容区高度
+            setPadding(sidePad, 0, sidePad, 0)
+            addView(
+                webView,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (dm.heightPixels * 0.90).toInt()
+                )
+            )
+        }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(null) // 不显示对话框标题（HTML 内已不含顶部 header，去掉重复）
+            .setView(container)
+            .setPositiveButton("关闭", null)
+            .create()
+        dialog.setOnDismissListener {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.destroy()
+        }
+        dialog.show()
+        // 让对话框宽度贴近屏幕宽度
+        dialog.window?.setLayout(dm.widthPixels - 2 * sidePad, ViewGroup.LayoutParams.WRAP_CONTENT)
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
 }

@@ -11,7 +11,9 @@ import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
+import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.utils.StatusReporter
+import com.pengxh.kt.lite.extensions.timestampToCompleteDate
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -314,6 +316,22 @@ object TaskScheduler {
                     // appendMeta=false：failTip 为 HTML，避免被纯文本壳包裹导致邮箱显示原始 HTML 源码
                     MessageDispatcher.sendMessage("任务执行结果通知", failTip, force = true, appendMeta = false)
                     LogFileManager.writeLog("任务执行结果：无可截屏权限")
+                }
+                // 记录打卡超时到通知表：供状态查询日历标记"超时未确认" + "考勤记录"远程指令使用。
+                // 与成功路径（MainActivity.onClockInSuccess 写"考勤打卡成功"）对称，message 含"考勤打卡超时"子串。
+                val nowTs = System.currentTimeMillis().timestampToCompleteDate()
+                scope?.launch {
+                    try {
+                        DatabaseWrapper.insertNotice(NotificationBean().apply {
+                            packageName = Constant.getTargetApp()
+                            noticeTitle = "考勤打卡"
+                            noticeMessage = "考勤打卡超时 · $nowTs"
+                            postTime = nowTs
+                        })
+                    } catch (e: Exception) {
+                        // 写入失败不影响超时兜底邮件发送，但需记录以便排查（曾因主线程写库被 Room 静默拒绝而丢失超时记录）
+                        LogFileManager.writeLog("写入打卡超时记录失败: ${e.message}")
+                    }
                 }
             }
 

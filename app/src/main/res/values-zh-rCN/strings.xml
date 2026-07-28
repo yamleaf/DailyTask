@@ -39,6 +39,7 @@
     <string name="settings_all_commands">全部指令</string>
     <string name="settings_open_test">唤起测试</string>
     <string name="settings_capture_test">截屏测试</string>
+    <string name="settings_status_query">状态查询</string>
     <string name="settings_diagnostic">诊断日志</string>
     <string name="settings_faq">常见问题</string>
     <string name="settings_current_version">当前版本</string>

@@ -36,6 +36,7 @@ import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
+import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
@@ -62,6 +63,7 @@ import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.navigatePageTo
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.extensions.toJson
+import com.pengxh.kt.lite.extensions.timestampToCompleteDate
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.AlertInputDialog
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
@@ -483,6 +485,21 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             is MonitorEvent.ClockInSuccess -> {
                 TaskScheduler.notifyClockIn() // 通知 TaskScheduler：打卡成功，取消超时等待分支
                 backToMainActivity()
+                // 记录打卡成功到通知表，供状态查询日历"已打卡"判定 + "考勤记录"远程指令使用
+                // 原 Calendar 仅过滤 contains("考勤打卡")，但全工程无任何代码写入该关键字，导致"已打卡"永远 0 天
+                lifecycleScope.launch {
+                    try {
+                        val now = System.currentTimeMillis().timestampToCompleteDate()
+                        DatabaseWrapper.insertNotice(NotificationBean().apply {
+                            packageName = Constant.getTargetApp()
+                            noticeTitle = "考勤打卡"
+                            noticeMessage = "考勤打卡成功 · $now"
+                            postTime = now
+                        })
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Insert punch notice failed", e)
+                    }
+                }
             }
 
             is MonitorEvent.StartTaskCommand -> {

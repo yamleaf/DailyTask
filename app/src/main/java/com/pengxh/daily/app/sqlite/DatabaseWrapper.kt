@@ -4,6 +4,8 @@ import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object DatabaseWrapper {
     private val dailyTaskDao by lazy { DailyTaskApplication.get().dataBase.dailyTaskDao() }
@@ -36,20 +38,41 @@ object DatabaseWrapper {
     }
 
     /**
-     * 返回 [start, endExclusive) 区间内含"考勤打卡"的通知所属日期集合，
-     * 用于状态查询日历的"实际打卡"标记。
+     * [start, endExclusive) 区间内打卡结果所属日期集合，用于状态查询日历：
+     * - successDates：含"考勤打卡成功"的通知（已确认打卡）
+     * - timeoutDates：含"考勤打卡超时"的通知（超时未确认，需人工核对截图）
+     * 两者均含"考勤打卡"子串，故远程"考勤记录"指令（过滤 contains("考勤打卡")）仍可查到。
      */
-    suspend fun loadPunchDatesBetween(start: LocalDate, endExclusive: LocalDate): Set<LocalDate> {
+    data class PunchDateResult(
+        val successDates: Set<LocalDate>,
+        val timeoutDates: Set<LocalDate>
+    )
+
+    suspend fun loadPunchResults(start: LocalDate, endExclusive: LocalDate): PunchDateResult {
         val from = "${start} 00:00:00"
         val to = "${endExclusive} 00:00:00"
         val notices = noticeDao.loadBetween(from, to)
-        return notices.filter { it.noticeMessage.contains("考勤打卡") }
-            .mapNotNull { note ->
-                runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull()
-            }.toSet()
+        val successDates = notices.filter { it.noticeMessage.contains("考勤打卡成功") }
+            .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull() }
+            .toSet()
+        val timeoutDates = notices.filter { it.noticeMessage.contains("考勤打卡超时") }
+            .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull() }
+            .toSet()
+        return PunchDateResult(successDates, timeoutDates)
     }
 
+    /**
+     * 写入一条通知记录。
+     * 注意：底层 noticeDao.insert 是非 suspend 的阻塞式 @Insert，必须在 IO 线程执行，
+     * 否则当调用方位于主线程（如 TaskScheduler.scope=Dispatchers.Main、
+     * MainActivity.lifecycleScope=Dispatchers.Main）时，Room 会因默认禁止主线程访问数据库
+     * 抛出 IllegalStateException，被上层 catch 静默吞掉，导致"考勤打卡成功/超时"记录丢失，
+     * 状态查询日历无法正确标记当天打卡状态（曾导致超时后日历仍显示"计划打卡"）。
+     * 此处统一切到 Dispatchers.IO，确保任何调用方线程下都能安全落库。
+     */
     suspend fun insertNotice(bean: NotificationBean) {
-        noticeDao.insert(bean)
+        withContext(Dispatchers.IO) {
+            noticeDao.insert(bean)
+        }
     }
 }
