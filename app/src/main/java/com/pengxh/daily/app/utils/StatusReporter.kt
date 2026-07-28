@@ -571,12 +571,12 @@ object StatusReporter {
             DayKind.PUNCHED -> Triple("#ffffff", "#22c55e", dotMark("#22c55e", "✓"))
             DayKind.TIMEOUT -> Triple("#ffffff", "#fa8c16", dotMark("#fa8c16", "☃"))
             DayKind.SCHEDULED -> Triple("#ffffff", "#4f6ef7", dotMark("#4f6ef7", "●"))
-            DayKind.MISSED -> Triple("#f5f5f5", "#9aa0a6", textMark("#9aa0a6", "未"))
+            DayKind.MISSED -> Triple("#f5f5f5", "#9aa0a6", dotMark("#9aa0a6", "✕"))
+            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#ef4444", dotMark("#ef4444", "✕"))
             DayKind.MAKEUP -> Triple("#f9f0ff", "#722ed1", textMark("#722ed1", "班"))
             DayKind.HOLIDAY -> Triple("#e6f7ff", "#0ea5e9", textMark("#0ea5e9", "假"))
             DayKind.REST -> Triple("#e6f7f7", "#0e9b98", textMark("#0e9b98", "休"))
             DayKind.NO_TASK -> Triple("#fafafa", "#cfd3d6", textMark("#cfd3d6", "—"))
-            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#ef4444", textMark("#ef4444", "未"))
         }
         val border = if (isToday) "border:2px solid #4f6ef7;" else "border:1px solid #eee;"
         val opacity = if (inWindow) "1" else "0.35"
