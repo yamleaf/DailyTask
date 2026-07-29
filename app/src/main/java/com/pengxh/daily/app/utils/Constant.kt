@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.utils
 
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import java.util.UUID
 
 /**
  * @author: Pengxh
@@ -12,6 +13,7 @@ object Constant {
     // SharedPreferences 键
     // ============================================================
     const val RESET_TIME_KEY = "RESET_TIME_KEY" // 任务重置时间点(Int)
+    const val SCHEDULED_EXEC_TIME_KEY = "SCHEDULED_EXEC_TIME_KEY"
     const val STAY_OVERTIME_KEY = "STAY_OVERTIME_KEY" // 打卡停留在目标APP的时间(Int)
     const val TIME_RANGE_KEY = "TIME_RANGE_KEY" // 随机时间范围[0,range](Int)
     const val MSG_CHANNEL_KEY = "MSG_CHANNEL_KEY" // 消息渠道：0-邮件，1-企业微信(Int)
@@ -53,6 +55,7 @@ object Constant {
     const val ACCESSIBILITY_FEEDBACK_MODE_KEY = "ACCESSIBILITY_FEEDBACK_MODE_KEY"
     /** 电量低于 30% 是否已提醒过（回升到 30% 以上后清零） */
     const val LOW_BATTERY_NOTIFIED_KEY = "LOW_BATTERY_NOTIFIED_KEY"
+    const val INSTALL_ID_KEY = "INSTALL_ID_KEY"
 
     // ============================================================
     // ConfigStore 键
@@ -159,5 +162,17 @@ object Constant {
             MOBILE_M3 -> "移动办公M3"
             else -> packageName
         }
+    }
+
+    private var cachedInstallId: String? = null
+    fun getInstallId(): String {
+        cachedInstallId?.let { return it }
+        var id = SaveKeyValues.loadString(INSTALL_ID_KEY, "")
+        if (id.isBlank()) {
+            id = UUID.randomUUID().toString()
+            SaveKeyValues.saveString(INSTALL_ID_KEY, id)
+        }
+        cachedInstallId = id
+        return id
     }
 }

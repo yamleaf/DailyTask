@@ -37,7 +37,7 @@ private fun DailyTaskBean.resolveExecutionSeconds(): Int {
             SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
 
         // 生成随机种子, 保证每天的随机时间是一致的
-        val key = "${LocalDate.now()}|$id|$time|$minuteRange"
+        val key = "${LocalDate.now()}|$id|$time|$minuteRange|${Constant.getInstallId()}"
         val seed = key.hashCode().toLong()
         val random = Random(seed)
 

@@ -61,7 +61,7 @@ object StatusReporter {
             SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
         val resetHour =
             SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
-        val plans = TaskScheduler.loadTodayTaskPlans()
+        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
         val cal = computePunchCalendar(14, 14)
@@ -184,7 +184,7 @@ object StatusReporter {
         plannedTime: String,
         actualTime: String
     ): String {
-        val plans = TaskScheduler.loadTodayTaskPlans()
+        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
         return buildString {
@@ -203,7 +203,7 @@ object StatusReporter {
     }
 
     suspend fun buildTaskCompletedContent(): String {
-        val plans = TaskScheduler.loadTodayTaskPlans()
+        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val resetHour =
             SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         val autoRecycle =
@@ -569,10 +569,10 @@ object StatusReporter {
         val (cellBg, dayColor, markHtml) = when (kind) {
             // 成功/超时/计划：实心圆点 + 白色图标，色相强对比、色盲友好，不依赖颜色也能一眼区分
             DayKind.PUNCHED -> Triple("#ffffff", "#22c55e", dotMark("#22c55e", "✓"))
-            DayKind.TIMEOUT -> Triple("#ffffff", "#fa8c16", dotMark("#fa8c16", "☃"))
-            DayKind.SCHEDULED -> Triple("#ffffff", "#4f6ef7", dotMark("#4f6ef7", "●"))
-            DayKind.MISSED -> Triple("#f5f5f5", "#9aa0a6", dotMark("#9aa0a6", "✕"))
-            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#ef4444", dotMark("#ef4444", "✕"))
+            DayKind.TIMEOUT -> Triple("#ffffff", "#fa8c16", dotMark("#fa8c16", "☐"))
+            DayKind.SCHEDULED -> Triple("#ffffff", "#4f6ef7", dotMark("#4f6ef7", "❖"))
+            DayKind.MISSED -> Triple("#f5f5f5", "#9aa0a6", dotMark("#9aa0a6", "✗"))
+            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#ef4444", dotMark("#ef4444", "✗"))
             DayKind.MAKEUP -> Triple("#f9f0ff", "#722ed1", textMark("#722ed1", "班"))
             DayKind.HOLIDAY -> Triple("#e6f7ff", "#0ea5e9", textMark("#0ea5e9", "假"))
             DayKind.REST -> Triple("#e6f7f7", "#0e9b98", textMark("#0e9b98", "休"))
@@ -760,7 +760,7 @@ object StatusReporter {
         val channelType = SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
         val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
         val resetHour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
-        val plans = TaskScheduler.loadTodayTaskPlans()
+        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
         val cal = computePunchCalendar(14, 14)
@@ -897,7 +897,7 @@ object StatusReporter {
     suspend fun buildTaskExecutingContentHtml(
         index: Int, total: Int, plannedTime: String, actualTime: String
     ): String {
-        val plans = TaskScheduler.loadTodayTaskPlans()
+        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
 
@@ -950,7 +950,7 @@ object StatusReporter {
 
     @JvmStatic
     suspend fun buildTaskCompletedContentHtml(): String {
-        val plans = TaskScheduler.loadTodayTaskPlans()
+        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val resetHour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
 

@@ -55,11 +55,34 @@ class NotificationMonitorService : NotificationListenerService() {
         private val _events = MutableSharedFlow<MonitorEvent>(extraBufferCapacity = 2)
         val events = _events.asSharedFlow()
 
+        private val writeScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+        private var lastSuccessWriteMs = 0L
+
         /**
          * 发送事件
          */
         fun emitMonitorEvent(event: MonitorEvent) {
             _events.tryEmit(event)
+            if (event is MonitorEvent.ClockInSuccess) {
+                val now = System.currentTimeMillis()
+                if (now - lastSuccessWriteMs > 1500L) {
+                    lastSuccessWriteMs = now
+                    writeScope.launch {
+                        try {
+                            val ts = now.timestampToCompleteDate()
+                            DatabaseWrapper.insertNotice(NotificationBean().apply {
+                                packageName = Constant.getTargetApp()
+                                noticeTitle = "考勤打卡"
+                                noticeMessage = "考勤打卡成功 · $ts"
+                                postTime = ts
+                            })
+                        } catch (e: Exception) {
+                            Log.e("MonitorService", "Insert punch success notice failed", e)
+                        }
+                    }
+                }
+            }
         }
 
         private val _listenerState = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 1)

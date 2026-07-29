@@ -157,6 +157,8 @@ object TaskScheduler {
         var executedCount = 0
         var skippedCount = 0
 
+        persistScheduledTimes(schedule)
+
         for (task in schedule) {
             val now = System.currentTimeMillis()
 
@@ -577,7 +579,10 @@ object TaskScheduler {
      * 任务时刻晚于/等于重置点的仍属本轮周期，今天执行。未过重置点时全部按今天处理
      * （早于此刻的已过期跳过，晚于此刻的今天执行）。
      */
-    suspend fun loadTodayTaskPlans(date: LocalDate = LocalDate.now()): List<TaskPlanItem> {
+    suspend fun loadTodayTaskPlans(
+        date: LocalDate = LocalDate.now(),
+        usePersisted: Boolean = false
+    ): List<TaskPlanItem> {
         val allTasks = withContext(Dispatchers.IO) {
             DatabaseWrapper.loadAllTask()
         }
@@ -604,16 +609,31 @@ object TaskScheduler {
 
         val oneDayMillis = 24L * 3_600_000L
 
+        val scheduledMap = if (usePersisted) loadScheduledTimes() else emptyMap()
         return allTasks.map { task ->
-            val actualTime = task.resolveExecutionTime()
-            val timeParts = actualTime.split(":").map { it.toInt() }
-            var actualMillis = baseMillis +
-                    timeParts[0] * 3_600_000L +
-                    timeParts[1] * 60_000L +
-                    timeParts[2] * 1_000L
-            // 关键修正：过重置点后，任务时刻 < 重置点 → 属于下一轮周期 → 偏移 +1 天
-            if (isPastReset && timeParts[0] < resetHour) {
-                actualMillis += oneDayMillis
+            val persisted = scheduledMap[task.id]
+            val (actualTime, actualMillis) = if (persisted != null && isSameDay(persisted, date)) {
+                val cal = Calendar.getInstance().apply { timeInMillis = persisted }
+                val t = String.format(
+                    "%02d:%02d:%02d",
+                    cal.get(Calendar.HOUR_OF_DAY),
+                    cal.get(Calendar.MINUTE),
+                    cal.get(Calendar.SECOND)
+                )
+                t to persisted
+            } else {
+                // 兜底：未持久化或归属日不符（如刚过重置点、新轮次尚未排程），按原逻辑重算
+                val at = task.resolveExecutionTime()
+                val parts = at.split(":").map { it.toInt() }
+                var millis = baseMillis +
+                        parts[0] * 3_600_000L +
+                        parts[1] * 60_000L +
+                        parts[2] * 1_000L
+                // 关键修正：过重置点后，任务时刻 < 重置点 → 属于下一轮周期 → 偏移 +1 天
+                if (isPastReset && parts[0] < resetHour) {
+                    millis += oneDayMillis
+                }
+                at to millis
             }
             Triple(task, actualTime, actualMillis)
         }.sortedBy { it.third }
@@ -626,6 +646,33 @@ object TaskScheduler {
                     actualTimeMillis = actualMillis
                 )
             }
+    }
+
+    private fun persistScheduledTimes(schedule: List<ScheduledTask>) {
+        val raw = schedule.joinToString(",") { "${it.task.id}:${it.actualTimeMillis}" }
+        SaveKeyValues.saveString(Constant.SCHEDULED_EXEC_TIME_KEY, raw)
+    }
+
+    private fun loadScheduledTimes(): Map<Int, Long> {
+        val raw = SaveKeyValues.loadString(Constant.SCHEDULED_EXEC_TIME_KEY)
+        if (raw.isEmpty()) return emptyMap()
+        val map = mutableMapOf<Int, Long>()
+        raw.split(",").forEach { pair ->
+            val idx = pair.indexOf(':')
+            if (idx > 0) {
+                runCatching {
+                    val id = pair.substring(0, idx).toInt()
+                    val millis = pair.substring(idx + 1).toLong()
+                    map[id] = millis
+                }
+            }
+        }
+        return map
+    }
+
+    private fun isSameDay(millis: Long, date: LocalDate): Boolean {
+        val d = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+        return d == date
     }
 
     /**

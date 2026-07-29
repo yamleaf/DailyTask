@@ -485,21 +485,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             is MonitorEvent.ClockInSuccess -> {
                 TaskScheduler.notifyClockIn() // 通知 TaskScheduler：打卡成功，取消超时等待分支
                 backToMainActivity()
-                // 记录打卡成功到通知表，供状态查询日历"已打卡"判定 + "考勤记录"远程指令使用
-                // 原 Calendar 仅过滤 contains("考勤打卡")，但全工程无任何代码写入该关键字，导致"已打卡"永远 0 天
-                lifecycleScope.launch {
-                    try {
-                        val now = System.currentTimeMillis().timestampToCompleteDate()
-                        DatabaseWrapper.insertNotice(NotificationBean().apply {
-                            packageName = Constant.getTargetApp()
-                            noticeTitle = "考勤打卡"
-                            noticeMessage = "考勤打卡成功 · $now"
-                            postTime = now
-                        })
-                    } catch (e: Exception) {
-                        Log.e("MainActivity", "Insert punch notice failed", e)
-                    }
-                }
             }
 
             is MonitorEvent.StartTaskCommand -> {
