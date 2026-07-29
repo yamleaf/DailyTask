@@ -119,6 +119,16 @@
                 <action android:name="com.pengxh.daily.action.RESET_TASK" />
             </intent-filter>
         </receiver>
+
+        <!-- 覆盖安装后重建前台服务与闹钟，并触发通知监听重绑（更新后监听绑定会被系统解除） -->
+        <receiver
+            android:name=".service.PackageReplacedReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <queries>

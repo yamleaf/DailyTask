@@ -9,9 +9,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
+import android.content.ComponentName
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
+import android.service.notification.NotificationListenerService
 import com.pengxh.daily.app.utils.BatteryHistory
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
@@ -88,6 +90,17 @@ class ForegroundRunningService : Service() {
         isRunning = true
         // 注入协程作用域给 TaskScheduler
         TaskScheduler.attach(serviceScope)
+
+        // 防御性重绑通知监听：覆盖安装 / 进程被杀后由保活拉起时，部分 ROM 不会主动重绑
+        // NotificationListenerService，导致远程指令接收失效。进程已存活时主动请求一次重绑
+        // （监听已连接则系统忽略，无副作用）。
+        try {
+            NotificationListenerService.requestRebind(
+                ComponentName(this, NotificationMonitorService::class.java)
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         val name = "${resources.getString(R.string.app_name)}前台服务"
         val channel = NotificationChannel(
