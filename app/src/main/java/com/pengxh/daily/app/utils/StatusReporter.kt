@@ -19,8 +19,11 @@ import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
 import java.time.DayOfWeek
+
+import com.pengxh.daily.app.extensions.format
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -33,8 +36,11 @@ import java.util.Locale
  */
 object StatusReporter {
 
-    private val dateTimeFormat =
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+    private val dateTimeFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+    /** 线程安全地格式化当前时间（SimpleDateFormat 非线程安全，并发 format 会偶发异常/错乱时间戳） */
+    private fun Date.formatDateTime(): String =
+        dateTimeFormat.format(LocalDateTime.ofInstant(this.toInstant(), ZoneId.systemDefault()))
 
     /** 远程指令清单（邮件反馈 / 指令页共用） */
     val remoteCommands: List<Pair<String, String>> = listOf(
@@ -52,20 +58,34 @@ object StatusReporter {
         "DT#关闭转移" to "关闭通知转移"
     )
 
-    suspend fun buildStatusReport(context: Context, listenerConnected: Boolean): String {
+    /** 状态报告共性取数（纯文本版与 HTML 版共用），避免两份近乎镜像的取数逻辑分叉（P2-4） */
+    private data class StatusReportData(
+        val battery: Int,
+        val channelType: Int,
+        val autoRecycle: Boolean,
+        val resetHour: Int,
+        val plans: List<TaskScheduler.TaskPlanItem>,
+        val now: Long,
+        val pending: List<TaskScheduler.TaskPlanItem>,
+        val cal: PunchCalendarData
+    )
+
+    private suspend fun gatherStatusData(context: Context): StatusReportData {
         val batteryManager = context.getSystemService(BatteryManager::class.java)
         val battery = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        val channelType =
-            SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
-        val autoRecycle =
-            SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
-        val resetHour =
-            SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
+        val channelType = SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
+        val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+        val resetHour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
         val cal = computePunchCalendar(14, 14)
+        return StatusReportData(battery, channelType, autoRecycle, resetHour, plans, now, pending, cal)
+    }
 
+    suspend fun buildStatusReport(context: Context, listenerConnected: Boolean): String {
+        val d = gatherStatusData(context)
+        val batterySnap = readBatterySnapshot(context)
         return buildString {
             appendLine("====================")
             appendLine("  状态查询通知")
@@ -75,8 +95,8 @@ object StatusReporter {
             appendLine("· 任务调度：${TaskScheduler.describeRunningState()}")
             appendLine(
                 "· 每日循环：${
-                    if (autoRecycle) {
-                        "开启（每天 ${"%02d".format(resetHour)}:00 重置时自动启动）"
+                    if (d.autoRecycle) {
+                        "开启（每天 ${"%02d".format(d.resetHour)}:00 重置时自动启动）"
                     } else {
                         "关闭（重置时不自动启动）"
                     }
@@ -99,10 +119,10 @@ object StatusReporter {
                 }"
             )
             appendLine("· 距下次重置：${TaskScheduler.secondsUntilNextReset().formatTime()}")
-            appendLine("· 下次打卡：${nextPunchText(cal, plans, now, autoRecycle)}")
-            appendLine("· 最近打卡：${recentPunchText(cal)}")
+            appendLine("· 下次打卡：${nextPunchText(d.cal, d.plans, d.now, d.autoRecycle)}")
+            appendLine("· 最近打卡：${recentPunchText(d.cal)}")
             appendLine()
-            appendTaskPlanSection(plans, pending.size, now)
+            appendTaskPlanSection(d.plans, d.pending.size, d.now)
             appendLine()
             appendLine("【服务状态】")
             appendLine("· 前台服务：${if (ForegroundRunningService.isRunning) "运行中" else "未运行"}")
@@ -129,7 +149,7 @@ object StatusReporter {
             appendLine("· 结果来源：$resultSourceText")
             appendLine(
                 "· 消息渠道：${
-                    when (channelType) {
+                    when (d.channelType) {
                         0 -> "QQ邮箱"
                         1 -> "企业微信"
                         else -> "未配置"
@@ -138,39 +158,39 @@ object StatusReporter {
             )
             appendLine()
             appendLine("【近两周打卡日历】")
-            val punchedTotal = (cal.punched + cal.timeoutDates).count { !it.isAfter(cal.today) }
-            val scheduledPast = cal.scheduled.count { !it.isAfter(cal.today) }
+            val punchedTotal = (d.cal.punched + d.cal.timeoutDates).count { !it.isAfter(d.cal.today) }
+            val scheduledPast = d.cal.scheduled.count { !it.isAfter(d.cal.today) }
             val missed = (scheduledPast - punchedTotal).coerceAtLeast(0)
             appendLine("· 已打卡 $punchedTotal 天 · 计划 $scheduledPast 天 · 未计划 $missed 天")
-            appendLine("· 窗口内：节假日 ${cal.holidays.size} 天 · 休息日 ${cal.restDays.size} 天 · 调休补班 ${cal.makeupWorkdays.size} 天")
-            if (cal.holidays.isNotEmpty()) {
-                appendLine("· 节假日跳过：${cal.holidays.sorted().joinToString("、") { it.toString().substring(5) }}")
+            appendLine("· 窗口内：节假日 ${d.cal.holidays.size} 天 · 休息日 ${d.cal.restDays.size} 天 · 调休补班 ${d.cal.makeupWorkdays.size} 天")
+            if (d.cal.holidays.isNotEmpty()) {
+                appendLine("· 节假日跳过：${d.cal.holidays.sorted().joinToString("、") { it.toString().substring(5) }}")
             }
-            if (cal.makeupWorkdays.isNotEmpty()) {
-                appendLine("· 调休补班：${cal.makeupWorkdays.sorted().joinToString("、") { it.toString().substring(5) }}")
+            if (d.cal.makeupWorkdays.isNotEmpty()) {
+                appendLine("· 调休补班：${d.cal.makeupWorkdays.sorted().joinToString("、") { it.toString().substring(5) }}")
             }
-            val missedDates = cal.scheduled.filter { it.isBefore(cal.today) && it !in cal.punched && it !in cal.timeoutDates }.sorted()
+            val missedDates = d.cal.scheduled.filter { it.isBefore(d.cal.today) && it !in d.cal.punched && it !in d.cal.timeoutDates }.sorted()
             if (missedDates.isNotEmpty()) {
                 appendLine("· 未计划：${missedDates.joinToString("、") { it.toString().substring(5) }}")
             }
-            val futurePlanned = cal.scheduled.filter { !it.isBefore(cal.today) }.sorted().take(7)
+            val futurePlanned = d.cal.scheduled.filter { !it.isBefore(d.cal.today) }.sorted().take(7)
             if (futurePlanned.isNotEmpty()) {
                 appendLine("· 未来计划打卡：${futurePlanned.joinToString("、") { it.toString().substring(5) }}")
             }
-            appendLine("· 今日：${buildTodayTextNote(cal)}")
+            appendLine("· 今日：${buildTodayTextNote(d.cal)}")
             appendLine()
             appendLine("【设备信息】")
-            appendLine("· 当前时间：${dateTimeFormat.format(Date())}")
-            appendLine("· 当前电量：${if (battery >= 0) "$battery%" else "未知"}")
-            appendLine("· 充电状态：${chargingStatusText(context)}")
-            appendLine("· 电池电流：${batteryCurrentText(context)}")
-            appendLine("· 电池健康：${batteryHealthText(context)}")
+            appendLine("· 当前时间：${Date().formatDateTime()}")
+            appendLine("· 当前电量：${if (d.battery >= 0) "${d.battery}%" else "未知"}")
+            appendLine("· 充电状态：${batterySnap.chargingStatus}")
+            appendLine("· 电池电流：${batterySnap.currentText}")
+            appendLine("· 电池健康：${batterySnap.healthText}")
             appendLine("· 过去1小时掉电：${BatteryHistory.drainOver(context, 1)}")
             appendLine("· 过去6小时掉电：${BatteryHistory.drainOver(context, 6)}")
             appendLine("· 过去12小时掉电：${BatteryHistory.drainOver(context, 12)}")
             appendLine("· WiFi 状态：${wifiStatusText(context)}")
             appendLine("· 蓝牙状态：${bluetoothStatusText(context)}")
-            appendLine("· 手机温度：${batteryTemperatureText(context)}")
+            appendLine("· 手机温度：${batterySnap.temperatureText}")
             appendLine("· 系统版本：${androidVersionText()}")
             appendLine("· 版本号：${BuildConfig.VERSION_NAME}")
             appendLine()
@@ -342,8 +362,18 @@ object StatusReporter {
         return "<tr><td style=\"padding:4px 0;font-size:13px;color:#888;white-space:nowrap;vertical-align:top;\">$label</td><td style=\"padding:4px 0 4px 14px;font-size:13px;color:#333;word-break:break-all;\">$value</td></tr>"
     }
 
-    private fun htmlShell(title: String, body: String): String {
-        val ts = dateTimeFormat.format(Date())
+    /**
+     * 统一邮件 HTML 外壳（HTML 报告与轻量级通知共用，消除 htmlShell/centerShell 重复，P3-6）。
+     * compact=true 用于轻量级通知（居中图标卡片）：body padding 24px 20px 且底部圆角直接合并到 body 容器；
+     * compact=false 用于完整报告：body padding 20px 24px 16px，并用一条底部圆角白条收口。
+     */
+    private fun pageShell(title: String, body: String, compact: Boolean): String {
+        val ts = Date().formatDateTime()
+        val bodyStyle = if (compact) {
+            "background:#fff;padding:24px 20px;border-radius:0 0 12px 12px;"
+        } else {
+            "background:#fff;padding:20px 24px 16px;"
+        }
         return buildString {
             append("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,maximum-scale=1.0\"></head>")
             append("<body style=\"margin:0;padding:16px;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;\">")
@@ -356,13 +386,15 @@ object StatusReporter {
             append("<td style=\"color:rgba(255,255,255,0.65);font-size:12px;padding-top:4px;\">$ts</td>")
             append("</tr></table></div>")
             // Body
-            append("<div style=\"background:#fff;padding:20px 24px 16px;\">")
+            append("<div style=\"$bodyStyle\">")
             append(body)
             // Footer
             append("<div style=\"margin-top:24px;padding-top:12px;border-top:1px solid #f0f0f0;font-size:11px;color:#bbb;text-align:center;\">DailyTask v${BuildConfig.VERSION_NAME} · 自动发送</div>")
             append("</div>")
-            // Card bottom radius
-            append("<div style=\"height:8px;background:#fff;border-radius:0 0 12px 12px;margin-bottom:8px;\"></div>")
+            if (!compact) {
+                // Card bottom radius
+                append("<div style=\"height:8px;background:#fff;border-radius:0 0 12px 12px;margin-bottom:8px;\"></div>")
+            }
             append("</div></body></html>")
         }
     }
@@ -755,15 +787,8 @@ object StatusReporter {
 
     @JvmStatic
     suspend fun buildStatusReportHtml(context: Context, listenerConnected: Boolean): String {
-        val batteryManager = context.getSystemService(BatteryManager::class.java)
-        val battery = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        val channelType = SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
-        val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
-        val resetHour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
-        val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
-        val now = System.currentTimeMillis()
-        val pending = plans.filter { it.actualTimeMillis > now }
-        val cal = computePunchCalendar(14, 14)
+        val d = gatherStatusData(context)
+        val batterySnap = readBatterySnapshot(context)
 
         val body = buildString {
             // 概览卡片
@@ -785,22 +810,22 @@ object StatusReporter {
             append("</div>")
 
             // 电量
-            val batColor = when { battery < 0 -> "#999"; battery < 30 -> "#f5222d"; battery < 60 -> "#fa8c16"; else -> "#52c41a" }
+            val batColor = when { d.battery < 0 -> "#999"; d.battery < 30 -> "#f5222d"; d.battery < 60 -> "#fa8c16"; else -> "#52c41a" }
             append("<div style=\"flex:1;min-width:120px;background:#f9fafc;border-radius:8px;padding:10px 12px;text-align:center;\">")
             append("<div style=\"font-size:11px;color:#888;margin-bottom:4px;\">当前电量</div>")
-            append("<div style=\"font-size:20px;font-weight:700;color:$batColor;\">${if (battery >= 0) "$battery%" else "—"}</div>")
+            append("<div style=\"font-size:20px;font-weight:700;color:$batColor;\">${if (d.battery >= 0) "${d.battery}%" else "—"}</div>")
             append("</div>")
 
             // 消息渠道
             append("<div style=\"flex:1;min-width:120px;background:#f9fafc;border-radius:8px;padding:10px 12px;text-align:center;\">")
             append("<div style=\"font-size:11px;color:#888;margin-bottom:4px;\">消息渠道</div>")
-            append("<div style=\"font-size:13px;color:#333;font-weight:500;\">${if (channelType == 0) "QQ邮箱" else if (channelType == 1) "企业微信" else "未配置"}</div>")
+            append("<div style=\"font-size:13px;color:#333;font-weight:500;\">${if (d.channelType == 0) "QQ邮箱" else if (d.channelType == 1) "企业微信" else "未配置"}</div>")
             append("</div>")
             append("</div>")
 
             // 运行状态
-            val cycleText = if (autoRecycle) {
-                badge("开启", "ok") + " <span style=\"font-size:11px;color:#888;\">每天 ${"%02d".format(resetHour)}:00 自动启动</span>"
+            val cycleText = if (d.autoRecycle) {
+                badge("开启", "ok") + " <span style=\"font-size:11px;color:#888;\">每天 ${"%02d".format(d.resetHour)}:00 自动启动</span>"
             } else {
                 badge("关闭", "warn") + " <span style=\"font-size:11px;color:#888;\">需手动启动</span>"
             }
@@ -819,8 +844,8 @@ object StatusReporter {
                 row("任务调度", "$runBadge <span style=\"font-size:11px;color:#888;\">${if (runDetail.isNotEmpty()) runDetail else ""}</span>"),
                 row("每日循环", cycleText),
                 row("距下次重置", TaskScheduler.secondsUntilNextReset().formatTime()),
-                row("下次打卡", nextPunchText(cal, plans, now, autoRecycle)),
-                row("最近打卡", recentPunchText(cal)),
+                row("下次打卡", nextPunchText(d.cal, d.plans, d.now, d.autoRecycle)),
+                row("最近打卡", recentPunchText(d.cal)),
                 row("省电模式", powerSaveText),
                 row("跳过节假日", holidayText),
                 row("伪息屏增强", maskText),
@@ -830,13 +855,13 @@ object StatusReporter {
             // 今日任务
             val taskHeader = buildString {
                 append("📋 今日任务")
-                if (plans.isNotEmpty()) {
-                    append(" <span style=\"font-weight:400;font-size:12px;color:#888;\">共 ${plans.size} 个 · 待执行 ${pending.size} 个</span>")
+                if (d.plans.isNotEmpty()) {
+                    append(" <span style=\"font-weight:400;font-size:12px;color:#888;\">共 ${d.plans.size} 个 · 待执行 ${d.pending.size} 个</span>")
                 }
             }
             append("<div style=\"margin-bottom:14px;\">")
             append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">$taskHeader</div>")
-            append(taskPlanTable(plans, now))
+            append(taskPlanTable(d.plans, d.now))
             append("</div>")
 
             // 服务状态
@@ -864,22 +889,22 @@ object StatusReporter {
 
             // 设备信息
             append(section("📱 设备信息",
-                row("当前时间", dateTimeFormat.format(Date())),
-                row("充电状态", chargingStatusText(context)),
-                row("电池电流", batteryCurrentText(context)),
-                row("电池健康", batteryHealthText(context)),
+                row("当前时间", Date().formatDateTime()),
+                row("充电状态", batterySnap.chargingStatus),
+                row("电池电流", batterySnap.currentText),
+                row("电池健康", batterySnap.healthText),
                 row("过去1小时掉电", BatteryHistory.drainOver(context, 1)),
                 row("过去6小时掉电", BatteryHistory.drainOver(context, 6)),
                 row("过去12小时掉电", BatteryHistory.drainOver(context, 12)),
                 row("WiFi 状态", wifiStatusText(context)),
                 row("蓝牙状态", bluetoothStatusText(context)),
-                row("手机温度", batteryTemperatureText(context)),
+                row("手机温度", batterySnap.temperatureText),
                 row("系统版本", androidVersionText()),
                 row("版本号", BuildConfig.VERSION_NAME)
             ))
 
             // 打卡日历
-            append(punchCalendarHtml(cal))
+            append(punchCalendarHtml(d.cal))
 
             // 远程指令
             append(section("💬 远程指令",
@@ -890,7 +915,7 @@ object StatusReporter {
             append("</div>")
         }
 
-        return htmlShell("📊 状态查询通知", body)
+        return pageShell("📊 状态查询通知", body, compact = false)
     }
 
     @JvmStatic
@@ -945,7 +970,7 @@ object StatusReporter {
             ))
         }
 
-        return htmlShell("▶️ 任务执行通知", body)
+        return pageShell("▶️ 任务执行通知", body, compact = false)
     }
 
     @JvmStatic
@@ -979,7 +1004,7 @@ object StatusReporter {
             append("</div>")
         }
 
-        return htmlShell("✅ 任务状态通知", body)
+        return pageShell("✅ 任务状态通知", body, compact = false)
     }
 
     @JvmStatic
@@ -991,7 +1016,7 @@ object StatusReporter {
             append("<div style=\"font-size:13px;color:#888;\">任务已自动跳过</div>")
             append("</div>")
         }
-        return htmlShell("⏭️ 任务跳过通知", body)
+        return pageShell("⏭️ 任务跳过通知", body, compact = false)
     }
 
     @JvmStatic
@@ -1018,27 +1043,25 @@ object StatusReporter {
             append("<p style=\"margin:0;color:#888;font-size:11px;\">本次欠压区间仅提醒一次（充电回升到 30% 以上后重新计数）。</p>")
             append("</div>")
         }
-        return htmlShell("🔋 低电量提醒", body)
+        return pageShell("🔋 低电量提醒", body, compact = false)
     }
 
     // ======================== 轻量级通知 HTML ========================
 
-    /** 居中大图标 + 标题的轻量 shell */
-    private fun centerShell(title: String, body: String): String {
-        val ts = dateTimeFormat.format(Date())
-        return "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0,maximum-scale=1.0\"></head>" +
-                "<body style=\"margin:0;padding:16px;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;\">" +
-                "<div style=\"max-width:600px;margin:0 auto;\">" +
-                "<div style=\"background:linear-gradient(135deg,#4f6ef7,#6c5ce7);padding:22px 24px;border-radius:12px 12px 0 0;\">" +
-                "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\"><tr>" +
-                "<td style=\"color:#fff;font-size:19px;font-weight:700;\">$title</td>" +
-                "</tr><tr>" +
-                "<td style=\"color:rgba(255,255,255,0.65);font-size:12px;padding-top:4px;\">$ts</td>" +
-                "</tr></table></div>" +
-                "<div style=\"background:#fff;padding:24px 20px;border-radius:0 0 12px 12px;\">" +
-                body +
-                "<div style=\"margin-top:24px;padding-top:12px;border-top:1px solid #f0f0f0;font-size:11px;color:#bbb;text-align:center;\">DailyTask v${BuildConfig.VERSION_NAME} · 自动发送</div>" +
-                "</div></div></body></html>"
+    /**
+     * 轻量级通知的居中图标 + 标题 + 副标题卡片头（P3-6，消除 6+ 个 builder 的重复）。
+     * tip 为空时不渲染副标题行，保持与原单 div 结构一致。
+     */
+    private fun centerHeader(icon: String, color: String, label: String, tip: String? = null): String {
+        return buildString {
+            append("<div style=\"text-align:center;padding:12px 0;\">")
+            append("<div style=\"font-size:40px;margin-bottom:8px;\">$icon</div>")
+            append("<div style=\"font-size:16px;font-weight:600;color:$color;margin-bottom:4px;\">$label</div>")
+            if (!tip.isNullOrBlank()) {
+                append("<div style=\"font-size:13px;color:#888;\">$tip</div>")
+            }
+            append("</div>")
+        }
     }
 
     @JvmStatic
@@ -1050,16 +1073,12 @@ object StatusReporter {
         clockInTime: Long? = null
     ): String {
         val clockInText = if (clockInTime != null && clockInTime > 0L) {
-            SimpleDateFormat("HH:mm", Locale.CHINA).format(java.util.Date(clockInTime))
+            java.util.Date(clockInTime).format("HH:mm")
         } else {
             null
         }
         val body = buildString {
-            append("<div style=\"text-align:center;padding:12px 0;\">")
-            append("<div style=\"font-size:40px;margin-bottom:8px;\">✅</div>")
-            append("<div style=\"font-size:16px;font-weight:600;color:#52c41a;margin-bottom:4px;\">打卡成功</div>")
-            append("<div style=\"font-size:13px;color:#888;\">无障碍文本识别</div>")
-            append("</div>")
+            append(centerHeader("✅", "#52c41a", "打卡成功", "无障碍文本识别"))
             append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">应用来源</td><td style=\"font-size:12px;color:#333;text-align:right;\">$appName</td></tr>")
             if (clockInText != null) {
@@ -1072,22 +1091,19 @@ object StatusReporter {
             }
             append("</table>")
         }
-        return centerShell("✅ 打卡结果通知", body)
+        return pageShell("✅ 打卡结果通知", body, compact = true)
     }
 
     @JvmStatic
     fun buildClockInResultHtml(title: String, notice: String): String {
         val battery = batteryCap()
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">✅</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:#52c41a;margin-bottom:4px;\">打卡成功</div>" +
-                "</div>" +
+        val body = centerHeader("✅", "#52c41a", "打卡成功") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;\">${title.ifBlank { "—" }}</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;\">${notice}</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
-        return centerShell("✅ 打卡结果通知", body)
+        return pageShell("✅ 打卡结果通知", body, compact = true)
     }
 
     @JvmStatic
@@ -1097,52 +1113,39 @@ object StatusReporter {
         content: String,
         time: String
     ): String {
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">📨</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:#1677ff;margin-bottom:4px;\">通知转移</div>" +
-                "<div style=\"font-size:13px;color:#888;\">${appName} 的通知已转发到本机</div>" +
-                "</div>" +
+        val body = centerHeader("📨", "#1677ff", "通知转移", "${appName} 的通知已转发到本机") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">来源应用</td><td style=\"font-size:12px;color:#333;text-align:right;\">$appName</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${title.ifBlank { "—" }}</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;vertical-align:top;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${content.ifBlank { "—" }}</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">接收时间</td><td style=\"font-size:12px;color:#333;text-align:right;\">$time</td></tr>" +
                 "</table>"
-        return centerShell("📨 通知转移 · $appName", body)
+        return pageShell("📨 通知转移 · $appName", body, compact = true)
     }
 
     @JvmStatic
     fun buildStopTaskHtml(): String {
         val battery = batteryCap()
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">⏹️</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:#fa8c16;margin-bottom:4px;\">任务调度已停止</div>" +
-                "<div style=\"font-size:13px;color:#888;\">请及时在下次任务前重新启动</div>" +
-                "</div>" +
+        val body = centerHeader("⏹️", "#fa8c16", "任务调度已停止", "请及时在下次任务前重新启动") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
-        return centerShell("⏹️ 任务停止通知", body)
+        return pageShell("⏹️ 任务停止通知", body, compact = true)
     }
 
     @JvmStatic
     fun buildCycleStatusHtml(enabled: Boolean): String {
-        val (icon, color, label, tip) = if (enabled) {
-            arrayOf("🔄", "#52c41a", "每日循环已开启", "每天重置时将自动启动调度")
-        } else {
-            arrayOf("⏸️", "#fa8c16", "每日循环已关闭", "需手动或远程启动调度")
-        }
+        val icon = if (enabled) "🔄" else "⏸️"
+        val color = if (enabled) "#52c41a" else "#fa8c16"
+        val label = if (enabled) "每日循环已开启" else "每日循环已关闭"
+        val tip = if (enabled) "每天重置时将自动启动调度" else "需手动或远程启动调度"
         val battery = batteryCap()
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">$icon</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:$color;margin-bottom:4px;\">$label</div>" +
-                "<div style=\"font-size:13px;color:#888;\">$tip</div>" +
-                "</div>" +
+        val body = centerHeader(icon, color, label, tip) +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">当前状态</td><td style=\"font-size:12px;color:#333;text-align:right;\">${if (enabled) "自动运行" else "手动控制"}</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
-        return centerShell("${if (enabled) "🔄" else "⏸️"} 循环状态通知", body)
+        return pageShell("${if (enabled) "🔄" else "⏸️"} 循环状态通知", body, compact = true)
     }
 
     /**
@@ -1151,18 +1154,13 @@ object StatusReporter {
      */
     @JvmStatic
     fun buildTransferStatusHtml(enabled: Boolean, warning: String?): String {
-        val (icon, color, label, tip) = if (enabled) {
-            arrayOf("📨", "#1677ff", "通知转移已开启", "目标打卡应用通知将经现有渠道转发到目标手机")
-        } else {
-            arrayOf("🔕", "#fa8c16", "通知转移已关闭", "不再转发打卡应用通知")
-        }
+        val icon = if (enabled) "📨" else "🔕"
+        val color = if (enabled) "#1677ff" else "#fa8c16"
+        val label = if (enabled) "通知转移已开启" else "通知转移已关闭"
+        val tip = if (enabled) "目标打卡应用通知将经现有渠道转发到目标手机" else "不再转发打卡应用通知"
         val battery = batteryCap()
         val body = buildString {
-            append("<div style=\"text-align:center;padding:12px 0;\">")
-            append("<div style=\"font-size:40px;margin-bottom:8px;\">$icon</div>")
-            append("<div style=\"font-size:16px;font-weight:600;color:$color;margin-bottom:4px;\">$label</div>")
-            append("<div style=\"font-size:13px;color:#888;\">$tip</div>")
-            append("</div>")
+            append(centerHeader(icon, color, label, tip))
             append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">当前状态</td><td style=\"font-size:12px;color:#333;text-align:right;\">${if (enabled) "转发中" else "已停用"}</td></tr>")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>")
@@ -1171,7 +1169,7 @@ object StatusReporter {
                 append("<div style=\"margin-top:10px;padding:8px 10px;background:#fff7e6;border:1px solid #ffd591;border-radius:6px;font-size:12px;color:#ad6800;line-height:1.4;\">⚠️ $warning</div>")
             }
         }
-        return centerShell("${if (enabled) "📨" else "🔕"} 通知转移状态通知", body)
+        return pageShell("${if (enabled) "📨" else "🔕"} 通知转移状态通知", body, compact = true)
     }
 
     @JvmStatic
@@ -1202,75 +1200,83 @@ object StatusReporter {
         val body = "<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">" +
                 "📋 今日打卡记录 <span style=\"font-weight:400;font-size:12px;color:#888;\">共 ${lines.size} 条</span>" +
                 "</div>" + tableBody
-        return centerShell("📋 考勤记录", body)
+        return pageShell("📋 考勤记录", body, compact = true)
     }
 
     @JvmStatic
     fun buildScreenshotResultHtml(success: Boolean, detail: String): String {
         val (icon, color, label) = if (success) {
-            arrayOf("📸", "#52c41a", "截图成功")
+            Triple("📸", "#52c41a", "截图成功")
         } else {
-            arrayOf("❌", "#cf1322", "截图失败")
+            Triple("❌", "#cf1322", "截图失败")
         }
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">$icon</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:$color;margin-bottom:4px;\">$label</div>" +
-                "<div style=\"font-size:13px;color:#888;\">$detail</div>" +
-                "</div>"
-        return centerShell("📸 截屏通知", body)
+        val body = centerHeader(icon, color, label, detail)
+        return pageShell("📸 截屏通知", body, compact = true)
     }
 
     @JvmStatic
     fun buildTimeoutAlertHtml(alertTitle: String, detail: String): String {
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">⚠️</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:#cf1322;margin-bottom:4px;\">$alertTitle</div>" +
-                "<div style=\"font-size:13px;color:#888;\">$detail</div>" +
-                "</div>"
-        return centerShell("⚠️ 超时提醒", body)
+        val body = centerHeader("⚠️", "#cf1322", alertTitle, detail)
+        return pageShell("⚠️ 超时提醒", body, compact = true)
     }
 
     @JvmStatic
     fun buildMemoryAlertHtml(): String {
         val battery = batteryCap()
-        val body = "<div style=\"text-align:center;padding:12px 0;\">" +
-                "<div style=\"font-size:40px;margin-bottom:8px;\">💾</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:#cf1322;margin-bottom:4px;\">内存使用已超过 90%</div>" +
-                "<div style=\"font-size:13px;color:#888;\">请关注设备运行情况，必要时重启释放内存</div>" +
-                "</div>" +
+        val body = centerHeader("💾", "#cf1322", "内存使用已超过 90%", "请关注设备运行情况，必要时重启释放内存") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
-        return centerShell("💾 内存预警", body)
+        return pageShell("💾 内存预警", body, compact = true)
     }
 
     // ======================== 设备状态辅助 ========================
 
-    /** 充电状态：充电中 / 已充满 / 未充电 */
-    private fun chargingStatusText(context: Context): String {
+    /** 一次性读取电池状态快照，避免重复注册粘性广播（P2-5） */
+    private data class BatterySnapshot(
+        val chargingStatus: String,
+        val currentText: String,
+        val healthText: String,
+        val temperatureText: String
+    )
+
+    private fun readBatterySnapshot(context: Context): BatterySnapshot {
         return try {
             val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val mgr = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
             val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-            when (status) {
+            val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+            val health = intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1
+            val microAmp = mgr?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Int.MIN_VALUE
+            val chargingStatus = when (status) {
                 BatteryManager.BATTERY_STATUS_CHARGING -> "充电中"
                 BatteryManager.BATTERY_STATUS_FULL -> "已充满"
                 BatteryManager.BATTERY_STATUS_DISCHARGING -> "未充电（放电中）"
                 BatteryManager.BATTERY_STATUS_NOT_CHARGING -> "未充电"
                 else -> "未知"
             }
+            val temperatureText = if (temp > 0) String.format(Locale.CHINA, "%.1f℃", temp / 10.0) else "未知"
+            val healthText = when (health) {
+                BatteryManager.BATTERY_HEALTH_GOOD -> "良好"
+                BatteryManager.BATTERY_HEALTH_OVERHEAT -> "过热"
+                BatteryManager.BATTERY_HEALTH_DEAD -> "已损坏"
+                BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "过压"
+                BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "故障"
+                BatteryManager.BATTERY_HEALTH_COLD -> "过冷"
+                else -> "未知"
+            }
+            val currentText = if (microAmp == Int.MIN_VALUE) "未知" else {
+                val milliAmp = Math.abs(microAmp) / 1000.0
+                // CURRENT_NOW 符号各厂商约定相反，充放电方向以系统 EXTRA_STATUS 为准
+                if (status == BatteryManager.BATTERY_STATUS_CHARGING) {
+                    "充电 +${"%.0f".format(milliAmp)} mA"
+                } else {
+                    "放电 -${"%.0f".format(milliAmp)} mA"
+                }
+            }
+            BatterySnapshot(chargingStatus, currentText, healthText, temperatureText)
         } catch (_: Exception) {
-            "未知"
-        }
-    }
-
-    /** 电池温度（℃），来自系统电池广播 */
-    private fun batteryTemperatureText(context: Context): String {
-        return try {
-            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val temp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
-            if (temp > 0) String.format(Locale.CHINA, "%.1f℃", temp / 10.0) else "未知"
-        } catch (_: Exception) {
-            "未知"
+            BatterySnapshot("未知", "未知", "未知", "未知")
         }
     }
 
@@ -1306,44 +1312,6 @@ object StatusReporter {
         return "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
     }
 
-    /** 电池瞬时电流（mA）；方向以系统充电状态为准，避免厂商 CURRENT_NOW 符号约定不一致导致误判 */
-    private fun batteryCurrentText(context: Context): String {
-        return try {
-            val mgr = context.getSystemService(android.content.Context.BATTERY_SERVICE) as? BatteryManager
-            val microAmp = mgr?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: Int.MIN_VALUE
-            if (microAmp == Int.MIN_VALUE) "未知"
-            else {
-                val milliAmp = Math.abs(microAmp) / 1000.0
-                // CURRENT_NOW 的符号各厂商约定相反，不可靠；充放电方向以系统 EXTRA_STATUS 为准
-                val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-                val charging = status == BatteryManager.BATTERY_STATUS_CHARGING
-                if (charging) "充电 +${"%.0f".format(milliAmp)} mA"
-                else "放电 -${"%.0f".format(milliAmp)} mA"
-            }
-        } catch (_: Exception) {
-            "未知"
-        }
-    }
-
-    /** 电池健康状态，来自系统电池广播 */
-    private fun batteryHealthText(context: Context): String {
-        return try {
-            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            when (intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1) {
-                BatteryManager.BATTERY_HEALTH_GOOD -> "良好"
-                BatteryManager.BATTERY_HEALTH_OVERHEAT -> "过热"
-                BatteryManager.BATTERY_HEALTH_DEAD -> "已损坏"
-                BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "过压"
-                BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "故障"
-                BatteryManager.BATTERY_HEALTH_COLD -> "过冷"
-                else -> "未知"
-            }
-        } catch (_: Exception) {
-            "未知"
-        }
-    }
-
     /** 快捷获取电量字符串 */
     private fun batteryCap(): String {
         return try {
@@ -1369,7 +1337,7 @@ object StatusReporter {
             append("</div>")
             append("</div>")
         }
-        return htmlShell("👆 远程打卡通知", body)
+        return pageShell("👆 远程打卡通知", body, compact = false)
     }
 
     /** 测试邮件（HTML 版，供「邮箱测试」按钮发送，确保渲染美观） */
@@ -1380,6 +1348,6 @@ object StatusReporter {
                 "<div style=\"font-size:16px;font-weight:600;color:#4f6ef7;margin-bottom:4px;\">邮件通道测试</div>" +
                 "<div style=\"font-size:13px;color:#888;line-height:1.7;\">这是一封测试邮件，不必关注。<br>若你能看到此卡片样式，说明 HTML 邮件发送正常。</div>" +
                 "</div>"
-        return htmlShell("📧 邮箱测试", body)
+        return pageShell("📧 邮箱测试", body, compact = false)
     }
 }

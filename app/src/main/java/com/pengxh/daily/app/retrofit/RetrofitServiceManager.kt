@@ -44,10 +44,8 @@ object RetrofitServiceManager {
 
         val imageBytes = file.readBytes()
 
-        // 计算 Base64
         val base64 = Base64.getEncoder().encodeToString(imageBytes)
 
-        // 计算文件的MD5
         val md5Hash = MessageDigest.getInstance("MD5").digest(imageBytes)
         val md5 = md5Hash.joinToString("") { "%02x".format(it) }
 

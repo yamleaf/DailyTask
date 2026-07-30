@@ -27,17 +27,14 @@ class MaskViewController(
     private var clockAnimationRunnable: Runnable? = null
 
     fun showMaskView() {
-        // 隐藏悬浮窗
         FloatingWindowController.hide()
 
-        // 隐藏系统栏
         insetsController.apply {
             hide(WindowInsetsCompat.Type.statusBars())
             hide(WindowInsetsCompat.Type.navigationBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
-        // 显示蒙层
         binding.maskView.visibility = View.VISIBLE
         currentAnimation?.cancel()
         currentAnimation = ScaleAnimation(1.0f, 1.0f, 0.0f, 1.0f).apply {
@@ -45,40 +42,32 @@ class MaskViewController(
         }
         binding.maskView.startAnimation(currentAnimation)
 
-        // 关闭屏幕亮度
         activity.window.setScreenBrightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF)
 
-        // 隐藏任务界面
         binding.rootView.visibility = View.GONE
 
-        // 启动时钟动画
         startClockAnimation()
         MaskOverlayHelper.show(activity)
         onMaskVisibilityChanged?.invoke(true)
     }
 
     fun hideMaskView() {
-        // 显示悬浮窗
         FloatingWindowController.show()
 
-        // 停止时钟动画
         stopClockAnimation()
 
-        // 恢复系统栏
         insetsController.apply {
             show(WindowInsetsCompat.Type.statusBars())
             show(WindowInsetsCompat.Type.navigationBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
         }
 
-        // 隐藏蒙层
         currentAnimation?.cancel()
         currentAnimation = ScaleAnimation(1.0f, 1.0f, 1.0f, 0.0f).apply {
             duration = 500
         }
         binding.maskView.startAnimation(currentAnimation)
 
-        // 恢复屏幕亮度
         activity.window.setScreenBrightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
 
         binding.maskView.visibility = View.GONE

@@ -51,16 +51,13 @@ class GestureController(
                 return false
             }
 
-            // 计算垂直滑动距离
             val deltaY = calculateDeltaY(e1, e2)
 
-            // 处理从上向下滑动手势（显示蒙层）
             if (isSwipeDown(deltaY, e1, e2)) {
                 handleShowMask()
                 return true
             }
 
-            // 处理从下向上滑动手势（隐藏蒙层）
             if (isSwipeUp(deltaY, e1, e2)) {
                 handleHideMask()
                 return true

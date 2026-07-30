@@ -157,7 +157,6 @@ object ChinaHolidayManager {
             parseJsonToMemory(root)
         }
 
-        // 写入缓存
         val cacheObj = JsonObject().apply {
             addProperty("year", LocalDate.now().year)
             add("holidays", root.get("holidays"))

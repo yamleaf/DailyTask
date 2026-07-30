@@ -38,7 +38,7 @@ object LogFileManager {
                 rotateLogFiles(logDir)
             }
         } catch (e: IOException) {
-            e.printStackTrace()
+            Log.e(kTag, "日志文件操作异常", e)
         }
     }
 
@@ -50,7 +50,6 @@ object LogFileManager {
                 Files.createDirectories(directory)
             }
 
-            // 获取并按时间戳排序日志文件
             val logFiles = Files.list(directory).use { stream ->
                 stream.filter { path ->
                     val name = path.fileName.toString()
@@ -67,17 +66,15 @@ object LogFileManager {
                 Files.deleteIfExists(logFiles.first())
             }
 
-            // 生成新日志文件名
             val newTimestamp = System.currentTimeMillis()
             val newLogFile = directory.resolve("app_runtime_log_$newTimestamp.txt")
 
             // 重命名当前日志文件
             Files.move(currentLogFile, newLogFile)
 
-            // 创建新的空日志文件
             Files.createFile(currentLogFile)
         } catch (e: IOException) {
-            e.printStackTrace()
+            Log.e(kTag, "日志文件操作异常", e)
         } finally {
             fileLock.unlock()
         }
@@ -103,7 +100,7 @@ object LogFileManager {
                 val str = "$time [${level.char}] ${log}${System.lineSeparator()}"
                 Files.write(currentLogFile, str.toByteArray(), StandardOpenOption.APPEND)
             } catch (e: IOException) {
-                e.printStackTrace()
+                Log.e(kTag, "日志文件操作异常", e)
             } finally {
                 fileLock.unlock()
             }
@@ -142,7 +139,7 @@ object LogFileManager {
             val start = (filtered.size - maxLines).coerceAtLeast(0)
             filtered.subList(start, filtered.size).joinToString(System.lineSeparator())
         } catch (e: IOException) {
-            e.printStackTrace()
+            Log.e(kTag, "日志文件操作异常", e)
             ""
         }
     }

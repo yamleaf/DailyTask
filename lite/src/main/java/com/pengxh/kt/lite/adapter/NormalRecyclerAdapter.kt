@@ -95,7 +95,7 @@ abstract class NormalRecyclerAdapter<T>(
                     }
                     result.dispatchUpdatesTo(this@NormalRecyclerAdapter)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(kTag, "refresh diff failed", e)
                     // 回退到全量刷新
                     synchronized(dataRows) {
                         dataRows.clear()

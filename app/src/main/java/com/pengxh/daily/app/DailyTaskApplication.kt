@@ -1,5 +1,7 @@
 package com.pengxh.daily.app
 
+import android.util.Log
+
 import android.app.Activity
 import android.app.Application
 import android.app.Application.ActivityLifecycleCallbacks
@@ -56,19 +58,20 @@ class DailyTaskApplication : Application() {
         EmailManager.initialize(this)
         LogFileManager.initLogFile(this)
 
-        // 初始化配置文件
         val dir = File(this.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "")
         val file = File(dir.toString() + File.separator + "DailyTaskConfig.json")
         if (!file.exists()) {
             try {
                 file.createNewFile()
             } catch (e: IOException) {
-                e.printStackTrace()
+                Log.e(javaClass.simpleName, "创建配置文件失败", e)
             }
         }
         ConfigStore.init(file.absolutePath)
 
-        dataBase = databaseBuilder(this, DailyTaskDataBase::class.java, "DailyTask.db").build()
+        dataBase = databaseBuilder(this, DailyTaskDataBase::class.java, "DailyTask.db")
+            .fallbackToDestructiveMigration(true)
+            .build()
 
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) {

@@ -41,9 +41,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import com.pengxh.daily.app.BuildConfig
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
+
+import com.pengxh.daily.app.extensions.format
 
 class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
@@ -69,7 +69,6 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                 when (val result = taskDataManager.importTasks(json)) {
                     is TaskDataManager.ImportResult.Success -> {
                         withContext(Dispatchers.Main) {
-                            // 刷新界面开关显示
                             binding.skipHolidaySwitch.isChecked =
                                 SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
                             binding.randomTimeSwitch.isChecked =
@@ -130,7 +129,6 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             binding.minuteRangeLayout.visibility = View.GONE
         }
 
-        // 通知转移开关已移至设置页“通知监听”下方
     }
 
     override fun initEvent() {
@@ -290,7 +288,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                     "导出失败：外部存储不可用".show(context)
                     return@launch
                 }
-                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA).format(Date())
+                val timeStamp = Date().format("yyyyMMdd_HHmmss")
                 val file = File(dir, "dailytask_config_$timeStamp.json")
                 runCatching { file.writeText(json) }.onFailure {
                     "导出失败：${it.message}".show(context)
@@ -390,7 +388,6 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
     private fun setTaskResetTime(hour: Int) {
         SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, hour)
-        // 通知 Service 更新倒计时显示
         ForegroundRunningService.emitResetTaskTime()
         // 通知调度器：重置时间已修改，立即按新时间重算每日等待（下一分钟级生效，不重启任务）
         TaskScheduler.notifyResetTimeChanged()

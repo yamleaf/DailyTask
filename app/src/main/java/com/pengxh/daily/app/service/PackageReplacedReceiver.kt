@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.service
 
+import android.util.Log
+
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -24,7 +26,7 @@ class PackageReplacedReceiver : BroadcastReceiver() {
                     Intent(context, ForegroundRunningService::class.java)
                 )
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(javaClass.simpleName, "覆盖安装后启动前台服务失败", e)
             }
         }
 

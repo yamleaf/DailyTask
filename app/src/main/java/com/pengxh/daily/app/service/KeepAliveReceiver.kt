@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.service
 
+import android.util.Log
+
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -142,7 +144,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 try {
                     context.startForegroundService(serviceIntent)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
                 }
                 // 立即安排明天的重置闹钟，避免今天任务结束后循环不再设置
                 scheduleResetAlarm(context)
@@ -154,7 +156,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
         try {
             context.startForegroundService(Intent(context, ForegroundRunningService::class.java))
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
         }
     }
 }

@@ -40,7 +40,6 @@ fun File.deleteFile() {
                 f.deleteFile()
             }
         }
-        // 删除空目录
         delete()
     } else if (exists()) {
         delete()

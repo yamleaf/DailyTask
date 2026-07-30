@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.service
 
+import android.util.Log
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -32,8 +34,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
 import java.util.Calendar
+
+import com.pengxh.daily.app.extensions.format
 import java.util.Date
 import java.util.Locale
 
@@ -99,7 +102,7 @@ class ForegroundRunningService : Service() {
                 ComponentName(this, NotificationMonitorService::class.java)
             )
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(javaClass.simpleName, "ForegroundRunningService 操作异常", e)
         }
 
         val name = "${resources.getString(R.string.app_name)}前台服务"
@@ -163,7 +166,6 @@ class ForegroundRunningService : Service() {
         // 立即更新一次倒计时显示
         updateResetTimeView()
 
-        // 检查电量
         checkLowBattery()
         // 立即记录一笔电池采样（之后由每分钟 TIME_TICK 续记）
         BatteryHistory.recordSample(this)
@@ -223,7 +225,6 @@ class ForegroundRunningService : Service() {
         val currentMinute = calendar.get(Calendar.MINUTE)
         val currentSecond = calendar.get(Calendar.SECOND)
 
-        // 设置今天的计划时间
         val todayTargetMillis = calendar.clone() as Calendar
         todayTargetMillis.set(Calendar.HOUR_OF_DAY, hour)
         todayTargetMillis.set(Calendar.MINUTE, 0)
@@ -285,7 +286,7 @@ class ForegroundRunningService : Service() {
             return
         }
 
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
+        val today = Date().format("yyyy-MM-dd")
         val lastResetDate = SaveKeyValues.loadString(Constant.LAST_RESET_DATE_KEY, "")
 
         // 今天已重置，跳过
@@ -337,7 +338,7 @@ class ForegroundRunningService : Service() {
         try {
             unregisterReceiver(systemBroadcastReceiver)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(javaClass.simpleName, "ForegroundRunningService 操作异常", e)
         }
 
         // 还原通知文本

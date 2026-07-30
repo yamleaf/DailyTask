@@ -42,7 +42,6 @@ class GalleryScaleHelper : RecyclerView.OnScrollListener() {
 
             val layoutManager = recyclerView.layoutManager ?: return
 
-            // 更新当前项位置
             currentItemPos = (currentItemOffset / cardWidth).coerceIn(0, itemCount - 1)
             val offset = currentItemOffset - currentItemPos * cardWidth
             val percent = minOf(maxOf(abs(offset).toFloat() / cardWidth, 0.0001f), 1.0f)

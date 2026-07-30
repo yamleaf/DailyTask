@@ -208,7 +208,6 @@ object TaskScheduler {
 
             updateCountdownWithNotification(delayMs) { remaining ->
                 val seconds = (remaining / 1000).toInt()
-                // 更新通知栏
                 ForegroundRunningService.emitNotificationText("${seconds.formatTime()}后执行第${task.displayIndex}个任务")
             }
 
@@ -337,7 +336,6 @@ object TaskScheduler {
                 }
             }
 
-            // 恢复伪息屏蒙层
             if (maskWasShowing) {
                 LogFileManager.writeLog("定时任务结束，恢复伪息屏蒙层")
                 withContext(Dispatchers.Main) {

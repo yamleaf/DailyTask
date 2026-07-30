@@ -2,8 +2,11 @@ package com.pengxh.kt.lite.utils
 
 import android.app.Activity
 import android.app.ProgressDialog
+import android.util.Log
 
 object LoadingDialog {
+    private const val kTag = "LoadingDialog"
+
     private var loadingDialog: ProgressDialog? = null
 
     /**
@@ -22,7 +25,7 @@ object LoadingDialog {
                     show()
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(kTag, "show loading dialog failed", e)
             }
         }
     }
@@ -45,7 +48,7 @@ object LoadingDialog {
                     show()
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(kTag, "show loading dialog failed", e)
             }
         }
     }

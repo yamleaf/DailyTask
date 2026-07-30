@@ -10,10 +10,14 @@ import java.time.LocalDate
 import java.util.Locale
 import java.util.Random
 
+private const val MAX_SECONDS_OF_DAY = 86399 // 一天最大秒数（23:59:59）
+
 fun DailyTaskBean.convertToTimeEntity(): TimeEntity {
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
-    val date = dateFormat.parse("${LocalDate.now()} ${this.time}")!!
-    return TimeEntity.target(date)
+    val parsed = runCatching {
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
+            .parse("${LocalDate.now()} ${this.time}")
+    }.getOrNull() ?: return TimeEntity.target(java.util.Date())
+    return TimeEntity.target(parsed)
 }
 
 fun DailyTaskBean.resolveExecutionTime(): String {
@@ -45,9 +49,9 @@ private fun DailyTaskBean.resolveExecutionSeconds(): Int {
         val seedSeconds = random.nextInt(60)
         totalSeconds += seedMinute * 60 + seedSeconds
 
-        // 确保不超过当天23:59:59（86399秒）
-        totalSeconds = minOf(totalSeconds, 86399) // 第一次边界检查
+        // 确保不超过当天23:59:59
+        totalSeconds = minOf(totalSeconds, MAX_SECONDS_OF_DAY) // 第一次边界检查
     }
 
-    return totalSeconds.coerceIn(0, 86399) // 第二次边界检查
+    return totalSeconds.coerceIn(0, MAX_SECONDS_OF_DAY) // 第二次边界检查
 }

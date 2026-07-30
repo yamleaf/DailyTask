@@ -130,11 +130,11 @@ class TcpClient(private val listener: OnStateChangedListener) {
                     })
                 }.sync()
                 channelFuture.channel().closeFuture().sync()
-            } catch (e: InterruptedException) {
-                e.printStackTrace()
-            } catch (e: Exception) {
-                e.printStackTrace()
-                reconnect()
+        } catch (e: InterruptedException) {
+            Log.e(kTag, "connect interrupted", e)
+        } catch (e: Exception) {
+            Log.e(kTag, "connect failed", e)
+            reconnect()
             }
         }
     }

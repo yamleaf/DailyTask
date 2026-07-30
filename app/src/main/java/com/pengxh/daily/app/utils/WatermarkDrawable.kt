@@ -40,7 +40,6 @@ class WatermarkDrawable(private val context: Context, private val watermark: Str
                 val offset = if (rowIndex % 2 == 0) 0f else textWidth / 3
                 var x = -diagonal + offset
 
-                // 绘制这一行的水印
                 val horizontalSpacing = diagonal * 0.5f
                 repeat(3) {
                     canvas.drawText(watermark, x, y, paint)

@@ -1,4 +1,4 @@
-name: Build Alpha（个人优化版本）
+name: Build Alpha（AI优化版本）
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build APK (alpha 自动版本)
+    name: Build APK(alpha自动版本)
     runs-on: ubuntu-latest
 
     # alpha 构建：注入环境变量，build.gradle 据此生成

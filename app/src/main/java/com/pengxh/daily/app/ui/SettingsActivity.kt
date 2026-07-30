@@ -406,6 +406,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             }
         }
 
+        // 通知转移开关已移至设置页“通知监听”下方
         // 通知转移：复用现有消息渠道（企业微信/邮箱）转发目标打卡应用通知到目标手机。
         // 开启时按当前渠道校验配置是否齐全。
         binding.transferSwitch.setOnCheckedChangeListener { _, isChecked ->
@@ -1087,7 +1088,6 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.accessibilityFeedbackDivider.visibility = View.GONE
         }
 
-        // 更新结果来源显示文字
         updateResultSourceView()
 
         syncingSwitchState = true
@@ -1136,7 +1136,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     PackageManager.DONT_KILL_APP
                 )
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(kTag, "启用组件失败", e)
             }
         }
     }

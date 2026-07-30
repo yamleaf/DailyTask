@@ -9,9 +9,7 @@ import java.util.UUID
  * @date: 2019/12/29 12:42
  */
 object Constant {
-    // ============================================================
     // SharedPreferences 键
-    // ============================================================
     const val RESET_TIME_KEY = "RESET_TIME_KEY" // 任务重置时间点(Int)
     const val SCHEDULED_EXEC_TIME_KEY = "SCHEDULED_EXEC_TIME_KEY"
     const val STAY_OVERTIME_KEY = "STAY_OVERTIME_KEY" // 打卡停留在目标APP的时间(Int)
@@ -57,36 +55,26 @@ object Constant {
     const val LOW_BATTERY_NOTIFIED_KEY = "LOW_BATTERY_NOTIFIED_KEY"
     const val INSTALL_ID_KEY = "INSTALL_ID_KEY"
 
-    // ============================================================
     // ConfigStore 键
-    // ============================================================
     const val EMAIL_CONFIG_KEY = "emailConfig" // 邮箱配置
 
-    // ============================================================
     // 目标应用
-    // ============================================================
     const val DING_DING = "com.alibaba.android.rimet" // 钉钉
     const val WEWORK = "com.tencent.wework" // 企业微信
     const val FEI_SHU = "com.ss.android.lark" // 飞书
     const val MOBILE_M3 = "com.seeyon.cmp" // 移动办公M3
 
-    // ============================================================
     // 消息指令
-    // ============================================================
     const val COMMAND_PREFIX = "DT#" // 远程指令前缀，避免日常对话误触发
     const val WECHAT = "com.tencent.mm" // 微信
     const val QQ = "com.tencent.mobileqq" // QQ
     const val TIM = "com.tencent.tim" // TIM
     const val ZFB = "com.eg.android.AlipayGphone" // 支付宝
 
-    // ============================================================
     // webhook
-    // ============================================================
     const val WX_WEB_HOOK_URL = "https://qyapi.weixin.qq.com"
 
-    // ============================================================
     // 其他默认值
-    // ============================================================
     const val DEFAULT_INDEX = -1
     const val DEFAULT_RESET_HOUR = 0
     const val DEFAULT_TIME_RANGE = 5

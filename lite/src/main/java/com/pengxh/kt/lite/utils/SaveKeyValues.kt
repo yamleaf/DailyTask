@@ -3,8 +3,11 @@ package com.pengxh.kt.lite.utils
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import android.util.Log
 
 object SaveKeyValues {
+    private const val kTag = "SaveKeyValues"
+
     private lateinit var sp: SharedPreferences
 
     fun initialize(context: Context) {
@@ -41,7 +44,7 @@ object SaveKeyValues {
         try {
             sp.edit { putString(key, value) }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 
@@ -51,7 +54,7 @@ object SaveKeyValues {
         try {
             sp.edit { putInt(key, value) }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 
@@ -61,7 +64,7 @@ object SaveKeyValues {
         try {
             sp.edit { putLong(key, value) }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 
@@ -71,7 +74,7 @@ object SaveKeyValues {
         try {
             sp.edit { putFloat(key, value) }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 
@@ -81,7 +84,7 @@ object SaveKeyValues {
         try {
             sp.edit { putBoolean(key, value) }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 
@@ -140,7 +143,7 @@ object SaveKeyValues {
         try {
             sp.edit { remove(key) }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 
@@ -152,7 +155,7 @@ object SaveKeyValues {
         try {
             sp.edit { clear() }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "SaveKeyValues operation failed", e)
         }
     }
 

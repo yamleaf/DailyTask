@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.utils
 
+import android.util.Log
+
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.BatteryManager
@@ -12,9 +14,9 @@ import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
+
+import com.pengxh.daily.app.extensions.format
 
 /**
  * 一键诊断：收集应用版本、设备、权限、配置、电量与最近运行日志，供问题排查导出。
@@ -59,7 +61,7 @@ object DiagnosticReporter {
             appendLine("==================== DailyTask 诊断日志 ====================")
             appendLine()
             appendLine("【基础信息】")
-            appendLine("· 生成时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(Date())}")
+            appendLine("· 生成时间：${Date().format("yyyy-MM-dd HH:mm:ss")}")
             appendLine("· 应用版本：${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
             appendLine("· 包名：${context.packageName}")
             appendLine()
@@ -102,7 +104,7 @@ object DiagnosticReporter {
             file.writeText(buildReport(context))
             file
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(javaClass.simpleName, "生成诊断报告失败", e)
             null
         }
     }

@@ -24,14 +24,12 @@ fun Drawable.toBlurBitmap(context: Context, radius: Float): Bitmap {
     val originalBitmap = toBitmap()
     if (originalBitmap.isRecycled) throw IllegalStateException("Bitmap is already recycled")
 
-    // 计算图片缩小后的长宽
     val width = (originalBitmap.width * BITMAP_SCALE).roundToInt()
     val height = (originalBitmap.height * BITMAP_SCALE).roundToInt()
     val inputBitmap = originalBitmap.scale(width, height, false)
 
     val outputBitmap = inputBitmap.copy(inputBitmap.config ?: Bitmap.Config.ARGB_8888, true)
 
-    // 初始化 RenderScript
     val rs = RenderScript.create(context)
     val blurScript = ScriptIntrinsicBlur.create(rs, Element.U8_4(rs))
 
@@ -44,7 +42,6 @@ fun Drawable.toBlurBitmap(context: Context, radius: Float): Bitmap {
 
     tmpOut.copyTo(outputBitmap)
 
-    // 释放资源
     tmpIn.destroy()
     tmpOut.destroy()
     blurScript.destroy()

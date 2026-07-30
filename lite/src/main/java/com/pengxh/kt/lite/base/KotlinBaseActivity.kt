@@ -23,7 +23,6 @@ abstract class KotlinBaseActivity<VB : ViewBinding> : AppCompatActivity() {
             initOnCreate(savedInstanceState)
             initEvent()
         } catch (e: Exception) {
-            // 初始化失败，安全退出
             finish()
             throw e
         }

@@ -195,7 +195,7 @@ object MessageDispatcher {
                 val response = RetrofitServiceManager.sendMessage(fullContent)
                 handleWechatResponse(response, onSuccess, onFailure)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(kTag, "消息发送异常", e)
                 if (onSuccess != null || onFailure != null) {
                     withContext(Dispatchers.Main) {
                         onFailure?.invoke(e.message ?: "未知错误")
@@ -215,7 +215,7 @@ object MessageDispatcher {
                 val response = RetrofitServiceManager.sendImageMessage(imagePath)
                 handleWechatResponse(response, onSuccess, onFailure)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(kTag, "消息发送异常", e)
                 if (onSuccess != null || onFailure != null) {
                     withContext(Dispatchers.Main) {
                         onFailure?.invoke(e.message ?: "未知错误")

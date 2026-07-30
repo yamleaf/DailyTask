@@ -7,6 +7,9 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Base64
+import android.util.Log
+
+private const val kTag = "BitmapExt"
 
 /**
  * 保存图片，不压缩
@@ -18,7 +21,7 @@ fun Bitmap.saveImage(imagePath: String, quality: Int = 100) {
             compress(Bitmap.CompressFormat.JPEG, quality, fos)
         }
     } catch (e: IOException) {
-        e.printStackTrace()
+        Log.e(kTag, "saveImage failed", e)
     }
 }
 
@@ -34,7 +37,6 @@ fun Bitmap.rotateImage(angle: Float): Bitmap {
 
     val matrix = Matrix()
     matrix.postRotate(rotatedAngle)
-    // 创建新的图片
     return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
 }
 
@@ -56,7 +58,7 @@ fun Bitmap.toBase64(): String {
         outputStream.close()
         return Base64.getEncoder().encodeToString(bitmapBytes)
     } catch (e: IOException) {
-        e.printStackTrace()
+        Log.e(kTag, "toBase64 failed", e)
     }
     return ""
 }

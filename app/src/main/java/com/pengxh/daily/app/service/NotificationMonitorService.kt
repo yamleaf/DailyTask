@@ -581,7 +581,6 @@ class NotificationMonitorService : NotificationListenerService() {
                                         }
                                     }
                                 } finally {
-                                    // 恢复伪息屏蒙层
                                     if (maskWasShowing) {
                                         LogFileManager.writeLog("远程打卡结束，恢复伪息屏蒙层")
                                         withContext(Dispatchers.Main) {

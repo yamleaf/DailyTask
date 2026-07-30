@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+
+import com.pengxh.daily.app.extensions.acquireWakeLock
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
@@ -40,12 +42,14 @@ object MaskOverlayHelper {
 
     private fun acquireKeepAwake(context: Context) {
         if (keepAwakeWakeLock?.isHeld == true) return
-        val pm = context.getSystemService(PowerManager::class.java) ?: return
-        keepAwakeWakeLock = pm.newWakeLock(
-            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "DailyTask:MaskPseudo"
-        ).apply { acquire() }
-        LogFileManager.writeLog("伪息屏：已持有 SCREEN_DIM_WAKE_LOCK（微亮不锁屏）")
+        keepAwakeWakeLock = context.acquireWakeLock(
+            PowerManager.SCREEN_DIM_WAKE_LOCK,
+            "DailyTask:MaskPseudo",
+            extraFlags = PowerManager.ACQUIRE_CAUSES_WAKEUP
+        )
+        if (keepAwakeWakeLock != null) {
+            LogFileManager.writeLog("伪息屏：已持有 SCREEN_DIM_WAKE_LOCK（微亮不锁屏）")
+        }
     }
 
     private fun releaseKeepAwake(context: Context) {

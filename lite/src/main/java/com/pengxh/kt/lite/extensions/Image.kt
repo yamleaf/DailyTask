@@ -7,7 +7,9 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import android.media.Image
 import java.io.ByteArrayOutputStream
+import android.util.Log
 
+private const val kTag = "ImageExt"
 
 /**
  * CameraX 原始预览Image数据（imageProxy.format == ImageFormat.YUV_420_888）转Bitmap
@@ -21,7 +23,7 @@ fun Image.toBitmap(format: Int): Bitmap? {
         return try {
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, null)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "toBitmap jpeg failed", e)
             null
         }
     } else if (format == ImageFormat.YUV_420_888) {
@@ -55,7 +57,7 @@ fun Image.toBitmap(format: Int): Bitmap? {
         return try {
             BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "toBitmap yuv failed", e)
             null
         }
     }

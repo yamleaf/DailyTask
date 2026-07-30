@@ -46,7 +46,6 @@ abstract class SingleChoiceAdapter<T>(
                 val oldItem = selectedItem
                 selectedItem = item
 
-                // 刷新旧选中的 item（如果还在列表中）
                 oldItem?.let { old ->
                     val oldPosition = dataRows.indexOf(old)
                     if (oldPosition != -1) {
@@ -54,7 +53,6 @@ abstract class SingleChoiceAdapter<T>(
                     }
                 }
 
-                // 刷新新选中的 item
                 notifyItemChanged(position)
 
                 itemCheckedListener?.onItemChecked(position, item)

@@ -8,6 +8,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+
+import com.pengxh.daily.app.extensions.acquireWakeLock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -281,15 +283,12 @@ object IdlePseudoMaskController {
 
     private fun wakeScreen(context: Context) {
         try {
-            val powerManager = context.getSystemService(PowerManager::class.java) ?: return
-            @Suppress("DEPRECATION")
-            val wakeLock = powerManager.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                        PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                        PowerManager.ON_AFTER_RELEASE,
-                "DailyTask:IdlePseudoMask"
+            context.acquireWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                "DailyTask:IdlePseudoMask",
+                WAKE_LOCK_MS,
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
             )
-            wakeLock.acquire(WAKE_LOCK_MS)
         } catch (e: Exception) {
             LogFileManager.writeLog("wakeScreen 失败: ${e.message}")
         }

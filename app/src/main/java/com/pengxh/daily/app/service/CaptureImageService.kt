@@ -44,9 +44,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
+
+import com.pengxh.daily.app.extensions.format
 import kotlin.coroutines.resume
 
 class CaptureImageService : Service(), CoroutineScope by MainScope() {
@@ -108,7 +108,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
             setVibrate(null)
         }
     }
-    private val dateTimeFormat by lazy { SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA) }
     private val mpr by lazy { getSystemService(MediaProjectionManager::class.java) }
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
@@ -327,7 +326,7 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                     captureRetryCount = 0
                 }
 
-                val imagePath = "${createImageFileDir()}/${dateTimeFormat.format(Date())}.png"
+                val imagePath = "${createImageFileDir()}/${Date().format("yyyyMMdd_HHmmss")}.png"
                 finalBitmap.saveImage(imagePath)
                 LogFileManager.writeLog("截屏成功: $imagePath")
                 emitCaptureResult(imagePath)

@@ -11,6 +11,9 @@ import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
+import android.util.Log
+
+private const val kTag = "StringExt"
 
 /**
  * 手动换行
@@ -50,7 +53,7 @@ fun String.dateToTimestamp(): Long {
         val date = dateFormat.parse(this)
         return date?.time ?: 0
     } catch (e: ParseException) {
-        e.printStackTrace()
+        Log.e(kTag, "dateToTimestamp parse failed", e)
     }
     return 0
 }
@@ -132,7 +135,7 @@ fun String.writeToFile(file: File) {
         writer.flush()
         writer.close()
     } catch (e: IOException) {
-        e.printStackTrace()
+        Log.e(kTag, "writeToFile failed", e)
     }
 }
 

@@ -33,10 +33,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
-import java.util.Locale
+
+import com.pengxh.daily.app.extensions.acquireWakeLock
+import com.pengxh.daily.app.extensions.format
 import java.util.concurrent.Executors
 
 /**
@@ -129,7 +130,6 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val dateTimeFormat by lazy { SimpleDateFormat("yyyyMMdd_HHmmss", Locale.CHINA) }
 
     @Volatile
     private var activeWakeLock: PowerManager.WakeLock? = null
@@ -185,6 +185,12 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         instance = null
         textDetectionActive = false
         textDetected = false
+        // 收尾：取消轮询协程、关闭后台线程池，避免服务断开后协程/线程泄漏
+        stopActiveScan()
+        serviceScope.coroutineContext[Job]?.cancel()
+        executor.shutdown()
+        // 兜底：若截图过程中服务断开导致蒙层停留隐藏态，强制恢复伪息屏
+        MaskOverlayHelper.restoreAfterScreenshot(this)
         Log.d(TAG, "无障碍服务已断开")
         return super.onUnbind(intent)
     }
@@ -213,14 +219,12 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         // 屏幕关闭时先 WakeLock 强制点亮，否则 takeScreenshot 会截到息屏/AOD 黑屏
         if (!isScreenOn && powerManager != null) {
             try {
-                @Suppress("DEPRECATION")
-                val wakeLock = powerManager.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                            PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                            PowerManager.ON_AFTER_RELEASE,
-                    "DailyTask:ScreenshotWakeLock"
+                val wakeLock = acquireWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                    "DailyTask:ScreenshotWakeLock",
+                    10_000L,
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
                 )
-                wakeLock.acquire(10_000L)
                 activeWakeLock = wakeLock
                 Log.d(TAG, "屏幕关闭，已请求 WakeLock 点亮")
                 LogFileManager.writeLog("屏幕关闭，已请求 WakeLock 点亮")
@@ -267,8 +271,8 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                             return
                         }
 
+                        val imagePath = "${createImageFileDir()}/${Date().format("yyyyMMdd_HHmmss")}.png"
                         // 保存全屏截图（不再裁剪中间区域）
-                        val imagePath = "${createImageFileDir()}/${dateTimeFormat.format(Date())}.png"
                         softwareBitmap.saveImage(imagePath)
                         softwareBitmap.recycle()
 
@@ -312,9 +316,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         }
     }
 
-    // ============================================================
     // 文本读取：监听无障碍事件，自动判断打卡结果
-    // ============================================================
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // 前台任务切换时重置伪息屏倒计时（不依赖文本检测开关）

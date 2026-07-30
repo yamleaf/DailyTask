@@ -74,19 +74,16 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
 import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
+
+import com.pengxh.daily.app.extensions.format
 
 class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     private val kTag = "MainActivity"
     private val context by lazy { this }
-    private val dateTimeFormat by lazy {
-        SimpleDateFormat("yyyy年MM月dd日 HH:mm:ss EEEE", Locale.CHINA)
-    }
-    private val dateFormat by lazy { SimpleDateFormat("yyyy-MM-dd", Locale.CHINA) }
     private val marginOffset by lazy { 16.dp2px(this) }
     private val permissionContract by lazy { ActivityResultContracts.StartActivityForResult() }
     private val taskDataManager by lazy { TaskDataManager() }
@@ -142,7 +139,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             if (maskViewController.isMaskVisible()) {
                 return
             }
-            val currentTime = dateTimeFormat.format(Date())
+            val currentTime = Date().format("yyyy年MM月dd日 HH:mm:ss EEEE")
             val parts = currentTime.split(" ")
             val now = LocalDate.now()
             val flag = when {
@@ -184,7 +181,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             insets
         }
 
-        // 显示时间
         mainHandler.post(timeUpdateRunnable)
 
         binding.toolbar.setOnMenuItemClickListener { menuItem ->
@@ -232,7 +228,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.contentView.background = WatermarkDrawable(this, DailyTask.getWatermarkText())
 
-        // 加载任务列表
         lifecycleScope.launch {
             taskBeans = withContext(Dispatchers.IO) {
                 DatabaseWrapper.loadAllTask()
@@ -257,7 +252,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             )
         }
 
-        // 显示悬浮窗
         if (Settings.canDrawOverlays(this)) {
             Intent(this, FloatingWindowService::class.java).apply { startService(this) }
         } else {
@@ -269,9 +263,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 前台服务（保活 + 托管 TaskScheduler 协程作用域 + 每日重置）
         Intent(this, ForegroundRunningService::class.java).apply { startForegroundService(this) }
 
-        // ================================================================
         // 每个 lifecycleScope.launch 都是独立的协程，互斥，不能为了省事把协程合并，否则只会执行第一个协程的业务，其他的业务被挂起
-        // ================================================================
 
         // 订阅每日重置时间倒计时
         lifecycleScope.launch {
@@ -473,9 +465,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         maskViewController.destroy()
     }
 
-    // ================================================================
     // NotificationMonitorService 状态观察 → UI 更新
-    // ================================================================
 
     /**
      * 根据 MonitorEvent 驱动 UI 变化
@@ -567,9 +557,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
     }
 
-    // ================================================================
     // 用户交互
-    // ================================================================
 
     /**
      * 列表项单击
@@ -646,7 +634,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                         }
                     }
                 } catch (e: IndexOutOfBoundsException) {
-                    e.printStackTrace()
+                    Log.e(kTag, "刷新任务列表越界", e)
                 }
             }.setNegativeButton("取消", null).show()
     }
@@ -767,9 +755,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         mainHandler.removeCallbacks(idleMaskRunnable)
     }
 
-    // ================================================================
     // 辅助方法
-    // ================================================================
 
     private fun doStopTask() {
         if (!TaskScheduler.isRunning()) return
@@ -799,7 +785,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
      * */
     private fun checkMissedReset() {
         val lastResetDate = SaveKeyValues.loadString(Constant.LAST_RESET_DATE_KEY, "")
-        val today = dateFormat.format(Date())
+        val today = Date().format("yyyy-MM-dd")
 
         // 今天已重置，跳过（防止重复执行）
         if (lastResetDate == today) {

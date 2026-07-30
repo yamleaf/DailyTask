@@ -119,7 +119,6 @@ class WaveProgressView @JvmOverloads constructor(
         radius = (w.coerceAtMost(h) / 2f) - DEFAULT_BORDER_WIDTH
         waveLength = w * 1.5f  // 波长为视图宽度的1.5倍
 
-        // 初始化圆形裁剪路径
         circlePath.reset()
         circlePath.addCircle(centerX, centerY, radius, Path.Direction.CW)
 
@@ -141,18 +140,14 @@ class WaveProgressView @JvmOverloads constructor(
             drawWave(canvas)
         }
 
-        // 绘制圆形边框
         canvas.drawCircle(centerX, centerY, radius, circlePaint)
 
-        // 绘制进度文字
         drawProgressText(canvas)
     }
 
     private fun drawWave(canvas: Canvas) {
-        // 绘制第二条波浪（底层，相位不同）
         drawWavePath(canvas, wavePaint2, waveOffset + Math.PI.toFloat() / 4)
 
-        // 绘制第一条波浪（上层）
         drawWavePath(canvas, wavePaint, waveOffset)
     }
 
@@ -180,7 +175,6 @@ class WaveProgressView @JvmOverloads constructor(
             val nextX = x + segmentWidth
             val nextY = waterLevel - waveAmplitude * getSinValue(nextX, offset)
 
-            // 计算控制点（使用线段中点）
             val controlX = x + segmentWidth / 2
             val controlY = waterLevel - waveAmplitude * getSinValue(controlX, offset)
 

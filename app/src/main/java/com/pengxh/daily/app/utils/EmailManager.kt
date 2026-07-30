@@ -2,6 +2,8 @@ package com.pengxh.daily.app.utils
 
 import android.content.Context
 import android.os.PowerManager
+
+import com.pengxh.daily.app.extensions.acquireWakeLock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -155,10 +157,12 @@ object EmailManager {
     ) {
         scope.launch {
             // 灭屏/Doze 下 SMTP 可能被挂起，发信期间持有 CPU WakeLock
-            val wakeLock = appContext?.getSystemService(PowerManager::class.java)
-                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DailyTask:SendEmail")
+            val wakeLock = appContext?.acquireWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "DailyTask:SendEmail",
+                60_000L
+            )
             try {
-                wakeLock?.acquire(60_000L)
                 Transport.send(message)
                 LogFileManager.writeLog("邮件发送成功: ${message.subject}")
                 withContext(Dispatchers.Main) {

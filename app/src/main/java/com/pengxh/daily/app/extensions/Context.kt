@@ -32,10 +32,10 @@ fun Context.isApplicationExist(packageName: String): Boolean {
             packageManager.getPackageInfo(packageName, 0)
         }
         true
-    } catch (e: PackageManager.NameNotFoundException) {
-        e.printStackTrace()
-        false
-    }
+        } catch (e: PackageManager.NameNotFoundException) {
+            Log.e(javaClass.simpleName, "查询已安装应用失败", e)
+            false
+        }
 }
 
 /**
@@ -52,7 +52,6 @@ fun Context.openApplication(onOpened: (() -> Unit)? = null) {
         return
     }
 
-    // 跳转目标应用
     val intent = Intent(Intent.ACTION_MAIN, null).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

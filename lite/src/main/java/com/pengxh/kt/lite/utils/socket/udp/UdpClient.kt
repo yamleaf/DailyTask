@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.net.InetSocketAddress
+import android.util.Log
 
 class UdpClient(private val listener: OnDataReceivedListener) {
 
@@ -68,7 +69,7 @@ class UdpClient(private val listener: OnDataReceivedListener) {
                 }.sync()
                 channelFuture.channel().closeFuture().sync()
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(kTag, "bind udp failed", e)
                 release()
             }
         }

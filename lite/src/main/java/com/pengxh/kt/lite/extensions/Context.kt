@@ -11,11 +11,14 @@ import android.os.Environment
 import android.view.WindowInsets
 import android.view.WindowManager
 import com.pengxh.kt.lite.utils.LiteKitConstant
+import android.util.Log
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private const val kTag = "ContextExt"
 
 /**
  * 判断是否有网络连接
@@ -40,7 +43,7 @@ fun Context.isApplicationExist(packageName: String): Boolean {
         }
         true
     } catch (e: PackageManager.NameNotFoundException) {
-        e.printStackTrace()
+        Log.e(kTag, "check application exist failed", e)
         false
     }
 }
@@ -84,7 +87,7 @@ fun Context.readAssetsFile(fileName: String?): String {
             }
         }
     } catch (e: IOException) {
-        e.printStackTrace()
+        Log.e(kTag, "read assets file failed", e)
         ""
     }
 }
@@ -126,7 +129,7 @@ fun Context.getStatusBarHeight(): Int {
                 0
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(kTag, "get status bar height failed", e)
             return 0
         }
     }
@@ -148,7 +151,7 @@ fun Context.createLogFile(): File {
         try {
             logFile.createNewFile()
         } catch (e: IOException) {
-            e.printStackTrace()
+            Log.e(kTag, "create log file failed", e)
         }
     }
     return logFile
@@ -167,7 +170,7 @@ fun Context.createAudioFile(): File {
         try {
             audioFile.createNewFile()
         } catch (e: IOException) {
-            e.printStackTrace()
+            Log.e(kTag, "create audio file failed", e)
         }
     }
     return audioFile

@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.utils
 
+import android.util.Log
+
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonSyntaxException
@@ -21,7 +23,6 @@ class TaskDataManager() {
             val type = object : TypeToken<ExportDataModel>() {}.type
             val config = gson.fromJson<ExportDataModel>(json, type)
 
-            // 保存相关配置
             saveConfiguration(config)
 
             // 解密并自动填充邮箱授权码（导出时以 AES 加密写入文件，避免明文/脱敏泄露）
@@ -33,7 +34,6 @@ class TaskDataManager() {
                 }
             }
 
-            // 导入任务
             val importedTasks = mutableListOf<DailyTaskBean>()
             for (task in config.tasks.orEmpty()) {
                 val taskTime = task.time
@@ -49,16 +49,15 @@ class TaskDataManager() {
 
             ImportResult.Success(importedTasks.size)
         } catch (e: JsonSyntaxException) {
-            e.printStackTrace()
+            Log.e(javaClass.simpleName, "导入任务异常", e)
             ImportResult.Error("导入失败，请确认导入的是正确的任务数据")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(javaClass.simpleName, "导入任务异常", e)
             ImportResult.Error("导入失败：${e.message}")
         }
     }
 
     private fun saveConfiguration(config: ExportDataModel) {
-        //
         SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, config.resetTime.coerceIn(0, 23))
         SaveKeyValues.saveInt(
             Constant.STAY_OVERTIME_KEY,
@@ -84,7 +83,6 @@ class TaskDataManager() {
             SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
         }
 
-        //
         SaveKeyValues.saveString(
             Constant.REMOTE_COMMAND_KEY,
             config.remoteCommand?.takeIf { it.isNotBlank() } ?: "打卡"
@@ -106,7 +104,6 @@ class TaskDataManager() {
             )
         SaveKeyValues.saveString(Constant.CUSTOM_WORKDAYS_KEY, workdays)
 
-        //
         SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, config.isDetectGesture)
         SaveKeyValues.saveBoolean(Constant.BACK_TO_HOME_KEY, config.isBackToHome)
         SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, config.isAutoRecycle)
@@ -115,7 +112,6 @@ class TaskDataManager() {
         SaveKeyValues.saveBoolean(Constant.POWER_SAVE_MODE_KEY, config.isSavePower)
         AppRuntimeConfig.refreshFromStore()
 
-        //
         val email = config.emailConfig
         val outbox = email?.first
         val authCode = email?.second
