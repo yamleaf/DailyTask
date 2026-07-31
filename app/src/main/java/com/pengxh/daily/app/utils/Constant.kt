@@ -39,6 +39,8 @@ object Constant {
     const val FORCE_PSEUDO_MASK_KEY = "FORCE_PSEUDO_MASK_KEY" // Boolean
     /** 强制伪息屏：离开 App 多少秒后进入伪息屏（Int，秒，默认 60，范围 10~3600） */
     const val IDLE_PSEUDO_MASK_TIMEOUT_KEY = "IDLE_PSEUDO_MASK_TIMEOUT_KEY" // Int
+    /** 伪息屏：关闭时钟显示（Boolean，默认 false=显示时钟）。开启后伪息屏只显示黑屏，更省电 */
+    const val PSEUDO_MASK_NO_CLOCK_KEY = "PSEUDO_MASK_NO_CLOCK_KEY" // Boolean
 
     /** 后台保活：开机自启 + 进程被杀后由精确闹钟兜底重启前台服务(Boolean) */
     const val BACKGROUND_KEEP_ALIVE_KEY = "BACKGROUND_KEEP_ALIVE_KEY"

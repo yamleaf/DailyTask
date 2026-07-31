@@ -9,6 +9,8 @@ import android.os.Looper
 import android.os.PowerManager
 
 import com.pengxh.daily.app.extensions.acquireWakeLock
+import com.pengxh.daily.app.utils.Constant
+import com.pengxh.kt.lite.utils.SaveKeyValues
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
@@ -81,14 +83,19 @@ object MaskOverlayHelper {
                     typeface = ResourcesCompat.getFont(appCtx, R.font.ds_digital)
                 }
             }
-            frame.addView(
-                clock,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.CENTER
+            // 伪息屏隐藏时钟：开启后只显示黑屏，不添加时钟视图（省电）
+            if (!SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)) {
+                frame.addView(
+                    clock,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER
+                    )
                 )
-            )
+            } else {
+                LogFileManager.writeLog("伪息屏：已隐藏时钟（仅黑屏）")
+            }
 
             // 注：蒙层本身不加 FLAG_KEEP_SCREEN_ON（避免全亮整夜耗电）。
             // 但为满足「保持解锁（微亮）」需求，蒙层显示期间额外持有 SCREEN_DIM_WAKE_LOCK：

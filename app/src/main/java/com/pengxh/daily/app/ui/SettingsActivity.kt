@@ -612,6 +612,15 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             }
         }
 
+        // 伪息屏隐藏时钟：开启后伪息屏只显示黑屏，不显示时钟（省电）
+        binding.pseudoMaskNoClockSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (syncingSwitchState) {
+                return@setOnCheckedChangeListener
+            }
+            SaveKeyValues.saveBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, isChecked)
+            LogFileManager.writeLog("伪息屏隐藏时钟：${if (isChecked) "开启" else "关闭"}")
+        }
+
         // 强制伪息屏延时（秒）：离开本软件超过该秒数进入伪息屏（10~3600，默认 60）
         // 折叠为可点击行，点击弹出对话框设置，避免内联输入框占用空间
         val delaySec = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
@@ -1111,6 +1120,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 .coerceIn(10, 3600)
             binding.pseudoMaskDelayValueText.text =
                 getString(R.string.settings_pseudo_mask_delay_value, delaySec)
+            binding.pseudoMaskNoClockSwitch.isChecked =
+                SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
             binding.keepAliveSwitch.isChecked =
                 SaveKeyValues.loadBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, true)
             binding.transferSwitch.isChecked =
