@@ -51,8 +51,10 @@ import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.DiagnosticReporter
+import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.EmailSecureConfig
+import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.ProjectionEvent
@@ -1027,6 +1029,12 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         } else {
             binding.channelView.text = "未配置"
             binding.channelView.setTextColor(R.color.red.convertColor(this))
+        }
+
+        // 从配置导入页返回后，目标应用可能已被导入修改，同步刷新其图标（仅导入成功后触发一次）
+        if (ConfigImportSignal.pendingSettingsRefresh) {
+            ConfigImportSignal.pendingSettingsRefresh = false
+            applyTargetAppIcon()
         }
 
         // 同步通知服务 UI

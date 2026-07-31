@@ -69,12 +69,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                 when (val result = taskDataManager.importTasks(json)) {
                     is TaskDataManager.ImportResult.Success -> {
                         withContext(Dispatchers.Main) {
-                            binding.skipHolidaySwitch.isChecked =
-                                SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
-                            binding.randomTimeSwitch.isChecked =
-                                SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
-                            binding.autoTaskSwitch.isChecked =
-                                SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+                            reloadSettingsUI()
                             "配置导入成功（含邮箱授权码自动填充）".show(context)
                         }
                     }
@@ -103,6 +98,14 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
     }
 
     override fun initOnCreate(savedInstanceState: Bundle?) {
+        reloadSettingsUI()
+    }
+
+    /**
+     * 从 SP 重新加载并刷新所有设置项 UI。导入配置成功后调用，
+     * 确保界面实时反映导入结果（否则用户会误以为“导入不生效”）。
+     */
+    private fun reloadSettingsUI() {
         val hour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         binding.resetTimeView.text = "每天${hour}点"
 

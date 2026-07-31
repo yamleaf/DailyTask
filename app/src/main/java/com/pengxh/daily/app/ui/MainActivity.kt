@@ -52,6 +52,7 @@ import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.MonitorEvent
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.utils.StatusReporter
+import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.TaskDataManager
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.utils.TipsEvent
@@ -115,6 +116,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     private var taskBeans = mutableListOf<DailyTaskBean>()
+    /** 任务列表是否已做过首次加载（避免每次 onResume 都无谓查询 DB） */
+    private var taskListLoaded = false
     /** 电池优化引导对话框是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
     private var batteryOptimizationPrompted = false
     private val dailyTaskAdapter by lazy {
@@ -228,29 +231,14 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         binding.contentView.background = WatermarkDrawable(this, DailyTask.getWatermarkText())
 
-        lifecycleScope.launch {
-            taskBeans = withContext(Dispatchers.IO) {
-                DatabaseWrapper.loadAllTask()
-            }
-
-            Log.d(kTag, "initOnCreate: ${taskBeans.toJson()}")
-
-            if (taskBeans.isEmpty()) {
-                binding.recyclerView.visibility = View.GONE
-                binding.emptyView.visibility = View.VISIBLE
-            } else {
-                binding.recyclerView.visibility = View.VISIBLE
-                binding.emptyView.visibility = View.GONE
-            }
-
-            binding.recyclerView.adapter = dailyTaskAdapter
-            dailyTaskAdapter.refresh(taskBeans)
-            binding.recyclerView.addItemDecoration(
-                RecyclerViewItemBorder(
-                    marginOffset, marginOffset shr 1, marginOffset, marginOffset shr 1
-                )
+        // 任务列表适配器与分隔线只需初始化一次；数据加载放到 onResume
+        // （从配置页导入配置/任务后返回、或其它进程修改 DB 时，需刷新主界面列表）
+        binding.recyclerView.adapter = dailyTaskAdapter
+        binding.recyclerView.addItemDecoration(
+            RecyclerViewItemBorder(
+                marginOffset, marginOffset shr 1, marginOffset, marginOffset shr 1
             )
-        }
+        )
 
         if (Settings.canDrawOverlays(this)) {
             Intent(this, FloatingWindowService::class.java).apply { startService(this) }
@@ -388,6 +376,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     override fun onResume() {
         super.onResume()
+        // 首次进入（含首次启动）必须加载一次任务列表；
+        // 配置导入成功后也需刷新一次。其余 onResume 不再无谓查询 DB。
+        if (ConfigImportSignal.pendingMainActivityRefresh || !taskListLoaded) {
+            ConfigImportSignal.pendingMainActivityRefresh = false
+            taskListLoaded = true
+            refreshTaskListFromDb()
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         IdlePseudoMaskController.onAppForegrounded(this)
         applyMaskCommandFromIntent(intent)
@@ -637,6 +632,27 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                     Log.e(kTag, "刷新任务列表越界", e)
                 }
             }.setNegativeButton("取消", null).show()
+    }
+
+    /**
+     * 从数据库重新加载任务列表并刷新主界面。
+     * onResume 每次回到前台都会调用，覆盖从配置页导入配置/任务后返回、
+     * 或其它进程（如导入任务对话框）修改了数据库但主界面内存列表未同步的场景。
+     */
+    private fun refreshTaskListFromDb() {
+        lifecycleScope.launch {
+            taskBeans = withContext(Dispatchers.IO) {
+                DatabaseWrapper.loadAllTask()
+            }
+            if (taskBeans.isEmpty()) {
+                binding.recyclerView.visibility = View.GONE
+                binding.emptyView.visibility = View.VISIBLE
+            } else {
+                binding.recyclerView.visibility = View.VISIBLE
+                binding.emptyView.visibility = View.GONE
+            }
+            dailyTaskAdapter.refresh(taskBeans)
+        }
     }
 
     private fun createTask() {

@@ -11,6 +11,18 @@ import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.kt.lite.utils.SaveKeyValues
 
+/**
+ * 配置导入成功的页面刷新信号（事件驱动）。
+ * 导入成功时置位，相关页面在 onResume 中消费一次后即清除，
+ * 避免每次 onResume 都做无谓的 DB 查询 / 图标加载，性能更优。
+ * 主界面与设置页各持一份标志：二者在导入页（TaskConfigActivity）之下都可能入栈，
+ * 用独立标志可避免任一方先消费导致另一方漏刷。
+ */
+object ConfigImportSignal {
+    var pendingMainActivityRefresh = false
+    var pendingSettingsRefresh = false
+}
+
 class TaskDataManager() {
 
     private val gson by lazy { Gson() }
@@ -47,6 +59,9 @@ class TaskDataManager() {
                 }
             }
 
+            // 标记相关页面需刷新（事件驱动，onResume 消费一次），避免每次 resume 都查库
+            ConfigImportSignal.pendingMainActivityRefresh = true
+            ConfigImportSignal.pendingSettingsRefresh = true
             ImportResult.Success(importedTasks.size)
         } catch (e: JsonSyntaxException) {
             Log.e(javaClass.simpleName, "导入任务异常", e)
