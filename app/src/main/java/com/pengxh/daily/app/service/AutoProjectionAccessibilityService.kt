@@ -15,6 +15,7 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
@@ -475,6 +476,9 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         for (kw in keywords) {
             val nodes = runCatching { root.findAccessibilityNodeInfosByText(kw) }.getOrNull() ?: continue
             for (n in nodes) {
+                if (BuildConfig.DEBUG) {
+                    logNodeTree("定向扫描命中[$kw]", n)
+                }
                 n.text?.let { sb.append(it).append(" ") }
                 n.contentDescription?.let { sb.append(it).append(" ") }
                 // 向上收集祖先文本，保留时间/分组上下文
@@ -487,6 +491,33 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             }
         }
         return sb.toString()
+    }
+
+    /**
+     * DEBUG only：将节点及其祖先信息写入 app_run 日志，便于根据其它 App 的
+     * 无障碍节点结构适配打卡时间/成功文本的提取逻辑。Release 构建不执行任何写入。
+     */
+    private fun logNodeTree(tag: String, node: AccessibilityNodeInfo) {
+        if (!BuildConfig.DEBUG) return
+        val sb = StringBuilder()
+        sb.append("[$tag]")
+        var depth = 0
+        var current: AccessibilityNodeInfo? = node
+        while (current != null && depth < 4) {
+            val indent = "  ".repeat(depth)
+            val bounds = android.graphics.Rect().apply { current.getBoundsInScreen(this) }
+            sb.append("\n${indent}depth=$depth class=${current.className}")
+            sb.append(" text='${current.text?.toString()?.replace("'", "\\'") ?: ""}'")
+            sb.append(" desc='${current.contentDescription?.toString()?.replace("'", "\\'") ?: ""}'")
+            sb.append(" id=${current.viewIdResourceName ?: "null"}")
+            sb.append(" bounds=${bounds}")
+            sb.append(" clickable=${current.isClickable} focusable=${current.isFocusable}")
+            current = runCatching { current.parent }.getOrNull()
+            depth++
+        }
+        val line = sb.toString()
+        Log.d(TAG, line)
+        LogFileManager.writeLog(line)
     }
 
     /**
@@ -659,6 +690,9 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             if (child == node) continue
             val t = child.text?.toString() ?: continue
             val match = timePattern.find(t) ?: continue
+            if (BuildConfig.DEBUG) {
+                logNodeTree("兄弟节点时间戳[$t]", child)
+            }
             val (h, m) = match.destructured
             runCatching {
                 Calendar.getInstance().apply {
