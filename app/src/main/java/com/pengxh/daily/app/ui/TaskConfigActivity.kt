@@ -15,6 +15,7 @@ import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
 import com.pengxh.daily.app.utils.ConfigCipher
 import com.pengxh.daily.app.utils.TaskDataManager
 import com.pengxh.daily.app.model.ExportDataModel
+import com.pengxh.daily.app.model.EmailConfigData
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
@@ -269,7 +270,11 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                 val inbox = if (obj.has("inbox")) obj.get("inbox").asString else ""
                 if (outbox.isNotBlank() && inbox.isNotBlank()) {
                     val rawAuth = EmailSecureConfig.loadAuthCode()
-                    exportData.emailConfig = Triple(outbox, "", inbox)
+                    exportData.emailConfig = EmailConfigData().apply {
+                        first = outbox
+                        second = ""
+                        third = inbox
+                    }
                     exportData.emailAuthEncrypted =
                         if (rawAuth.isNotBlank()) ConfigCipher.encrypt(rawAuth) else ""
                 }

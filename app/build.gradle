@@ -58,6 +58,9 @@ android {
             abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
         }
 
+        // 仅保留中文资源（values/ 与 values-zh），剔除依赖库自带的多语言字符串，缩减体积
+        resConfigs "zh"
+
         externalNativeBuild {
             cmake {
                 cppFlags "-std=c++14"
@@ -85,7 +88,8 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles 'proguard-rules.pro'
             signingConfig signingConfigs.release
         }

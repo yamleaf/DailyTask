@@ -14,7 +14,7 @@
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+-keepattributes SourceFile,LineNumberTable
 
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
@@ -23,8 +23,9 @@
 # ============================================================================
 # DailyTask 混淆（R8）保护规则
 # ----------------------------------------------------------------------------
-# 说明：当前 app/build.gradle 的 release 仍 minifyEnabled=false，本文件只是
-# 「提前准备好」规则。启用混淆前，务必在真机做完整回归（见文件末尾清单）。
+# 说明：release 已 minifyEnabled=true，本文件规则已生效。混淆后堆栈保留行号，
+# 可用 build/outputs/mapping/release/mapping.txt 做 retrace 还原。启用后务必
+# 在真机做完整回归（见文件末尾清单）。
 #
 # 代码分析结果（已排查混淆敏感点）：
 #   1) 反射：app 模块未使用 Class.forName / getMethod / getDeclaredMethod
@@ -62,11 +63,42 @@
 -keep class com.pengxh.daily.app.sqlite.dao.** { *; }
 -keep class com.pengxh.daily.app.sqlite.DailyTaskDataBase { *; }
 
+# ---- 2.5) JNI native 方法：含 native 方法的类，其「类名」与「native 方法名」都必须
+#           保留，否则 R8 重命名后，app 自带 .so 中的 JNI 符号
+#           （Java_<原包名>_<原类名>_<原方法名>）无法匹配，运行期抛
+#           UnsatisfiedLinkError 导致启动闪退。
+#           例：com.pengxh.daily.app.utils.DailyTask.getWatermarkText() 被混淆成 r2.o.a()
+#           即触发此问题。keepclasseswithmembers 同时保留类名与成员名。
+#           注意：不能用 keepclasseswithmembernames（那只保留成员名，类名仍会被混淆）。 ----
+-keepclasseswithmembers class com.pengxh.** {
+    native <methods>;
+}
+
 # ---- 3) Gson 按类型（含泛型）反序列化的模型：保留类名 + 全部字段（字段即 JSON key） ----
 -keep class com.pengxh.daily.app.model.ExportDataModel { *; }
 -keep class com.pengxh.daily.app.model.QuestionAnAnswerModel { *; }
+# EmailConfigData 承载邮箱配置（发件箱/授权码/收件箱），字段名即 JSON key，
+# 必须保留；早期用 kotlin.Triple 导致混淆后 first/second/third 被改名、Gson 无法回填、
+# 混淆版导入邮箱配置全部丢失（见 mapping.txt）。
+-keep class com.pengxh.daily.app.model.EmailConfigData { *; }
 # DailyTaskBean 兼作 Room 实体与 Gson 导出模型，字段名需稳定
 -keep class com.pengxh.daily.app.sqlite.bean.DailyTaskBean { *; }
+
+# ---- 3.5) JavaMail / activation（混淆版邮件发送必需）----
+# SMTP/IMAP 等传输实现类（com.sun.mail.smtp.SMTPTransport / SMTPSSLTransport 等）
+# 仅由 javax.mail 通过 META-INF/services + 反射发现，R8 树摇会将其当作“不可达”删除，
+# 导致 Transport.send() 运行时抛出 NoSuchProviderException / 邮件发送失败。
+# 本 app 用 smtp.qq.com:465（SSL）→ 依赖 SMTPSSLTransport，必须保留整个实现包。
+# 同时保留 META-INF/services 资源（R8 默认不删，此处显式保留更稳）。
+-keep class com.sun.mail.** { *; }
+# SMTPTransport 的嵌套认证类（LOGIN/PLAIN 认证会实例化）。
+# 注意：不能用 com.sun.mail.**$*（** 贪婪会吞掉 $，匹配失败），必须显式写出外层类名。
+-keep class com.sun.mail.smtp.SMTPTransport$* { *; }
+-keep class com.sun.mail.util.** { *; }
+-keep class com.sun.activation.** { *; }
+-keep class javax.mail.** { *; }
+-keep class javax.activation.** { *; }
+# 注：META-INF/services（JavaMail 的 Provider 发现文件）R8 默认不截断，无需额外 -keepresources。
 
 # ---- 4) 保留注解与泛型签名（Room / Gson 反射与 TypeToken 需要） ----
 -keepattributes *Annotation*

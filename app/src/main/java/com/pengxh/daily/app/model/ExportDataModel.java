@@ -4,8 +4,6 @@ import com.pengxh.daily.app.sqlite.bean.DailyTaskBean;
 
 import java.util.List;
 
-import kotlin.Triple;
-
 /**
  * 导出数据模型
  */
@@ -29,7 +27,7 @@ public class ExportDataModel {
     private boolean skipHoliday; // 跳过节假日
     private boolean savePower; // 省电模式
 
-    private Triple<String, String, String> emailConfig; // 邮箱配置<发件箱、授权码、收件箱>
+    private EmailConfigData emailConfig; // 邮箱配置<发件箱、授权码、收件箱>
     /** 加密（可逆）的邮箱授权码：导出时以 AES 加密写入文件，导入时解密后自动填充，
      *  避免在配置文件中以明文/脱敏形式泄露授权码。密钥内置于应用，仅供配置随文件迁移使用。 */
     private String emailAuthEncrypted;
@@ -164,11 +162,11 @@ public class ExportDataModel {
         this.savePower = savePower;
     }
 
-    public Triple<String, String, String> getEmailConfig() {
+    public EmailConfigData getEmailConfig() {
         return emailConfig;
     }
 
-    public void setEmailConfig(Triple<String, String, String> emailConfig) {
+    public void setEmailConfig(EmailConfigData emailConfig) {
         this.emailConfig = emailConfig;
     }
 
