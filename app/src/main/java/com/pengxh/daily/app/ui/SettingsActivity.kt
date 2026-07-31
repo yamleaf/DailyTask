@@ -303,7 +303,6 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                                 binding.accessibilityFeedbackLayout.visibility = View.VISIBLE
                                 binding.accessibilityFeedbackDivider.visibility = View.VISIBLE
                                 updateAccessibilityFeedbackView()
-                                "部分打卡软件可能会检测无障碍开关，开启后请先验证打卡功能是否正常".show(context)
                             }
                         }
                     }
@@ -374,9 +373,11 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 updateResultSourceView()
                 "截屏服务已关闭".show(this)
             } else {
-                // 当前未开启 → 拉起 MediaProjection 授权
+                // 当前未开启 → 先弹窗提醒，确认后再拉起 MediaProjection 授权
                 binding.captureSwitch.isChecked = false
-                projectionLauncher.launch(mpr.createScreenCaptureIntent())
+                showCaptureEnableWarning {
+                    projectionLauncher.launch(mpr.createScreenCaptureIntent())
+                }
             }
         }
 
@@ -387,7 +388,13 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             val systemEnabled = AutoProjectionAccessibilityService.isEnabled(this)
             // 撤销 Switch 自带的状态翻转，避免返回前视觉抖动
             binding.accessibilitySwitch.isChecked = systemEnabled
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            if (!systemEnabled) {
+                // 即将开启无障碍服务：先弹窗提醒用户开启后手动验证打卡是否正常
+                showAccessibilityEnableWarning()
+            } else {
+                // 已开启 → 前往系统设置关闭（无需提醒）
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
         }
 
         binding.commandLayout.setOnClickListener {
@@ -1016,6 +1023,36 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             .setPositiveButton("前往设置") { _, _ ->
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
+            .setCancelable(false)
+            .show()
+    }
+
+    /**
+     * 开启无障碍服务前的提醒：部分打卡应用会检测无障碍开关，
+     * 开启后需手动验证打卡是否正常，异常则关闭。确认后跳转系统设置开启。
+     */
+    private fun showAccessibilityEnableWarning() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.settings_accessibility_enable_warning_title)
+            .setMessage(R.string.settings_accessibility_enable_warning_msg)
+            .setNegativeButton("取消") { _, _ -> }
+            .setPositiveButton("前往开启") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setCancelable(false)
+            .show()
+    }
+
+    /**
+     * 开启截屏服务前的提醒：截屏依赖系统屏幕录制授权，开启后部分安全类应用可能受限，
+     * 需手动验证打卡是否正常，异常则关闭。确认后执行 [onConfirm]（拉起 MediaProjection 授权）。
+     */
+    private fun showCaptureEnableWarning(onConfirm: () -> Unit) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.settings_capture_enable_warning_title)
+            .setMessage(R.string.settings_capture_enable_warning_msg)
+            .setNegativeButton("取消") { _, _ -> }
+            .setPositiveButton("继续开启") { _, _ -> onConfirm() }
             .setCancelable(false)
             .show()
     }
