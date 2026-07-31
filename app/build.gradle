@@ -170,4 +170,7 @@ dependencies {
     //网络请求和接口封装
     implementation 'com.squareup.retrofit2:retrofit:3.0.0'
     implementation 'com.squareup.okhttp3:okhttp:5.4.0'
+    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+    // 绑定二维码生成（ZXing core，仅编解码，无 Android 视图依赖）
+    implementation 'com.google.zxing:core:3.4.1'
 }

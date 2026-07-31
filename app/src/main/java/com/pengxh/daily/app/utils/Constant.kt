@@ -47,6 +47,23 @@ object Constant {
     /** 后台保活：开机自启 + 进程被杀后由精确闹钟兜底重启前台服务(Boolean) */
     const val BACKGROUND_KEEP_ALIVE_KEY = "BACKGROUND_KEEP_ALIVE_KEY"
 
+    // ===== 远程控制 MQTT 配置（被控端持久化；解绑时【不】清除，下次绑定无需重输）=====
+    const val MQTT_BROKER_KEY = "MQTT_BROKER_KEY"       // EMQX broker 地址(含端口)，如 xxx.emqx.com:8883
+    const val MQTT_USER_KEY = "MQTT_USER_KEY"           // 被控端 DEV 账户（设备自用，【不】进二维码）
+    const val MQTT_PASS_KEY = "MQTT_PASS_KEY"           // 被控端 DEV 账户密码
+    const val DEVICE_ID_KEY = "DEVICE_ID_KEY"           // 8 位设备 ID
+    /** 控制端 CTL 账户用户名：默认由 App 生成（ctl-{deviceId}），可在「控制端凭证(ctl)」改为自定义；进绑定二维码；需在 EMQX 建同名受限账户 */
+    const val MQTT_CTL_USER_KEY = "MQTT_CTL_USER_KEY"
+    /** 控制端 CTL 账户密码：默认由 App 随机生成，可在「控制端凭证(ctl)」改为自定义；进绑定二维码；需在 EMQX 建同名受限账户 */
+    const val MQTT_CTL_PASS_KEY = "MQTT_CTL_PASS_KEY"
+
+    // ===== 绑定态（解绑时清除；不含上面的 MQTT 配置）=====
+    const val IS_BOUND_KEY = "IS_BOUND_KEY"                       // 是否已与控制端完成配对
+    const val MQTT_SESSION_SECRET_KEY = "MQTT_SESSION_SECRET_KEY" // 配对后 HKDF 派生的会话密钥，运行时报文验签
+    const val MQTT_PAIRING_TOKEN_KEY = "MQTT_PAIRING_TOKEN_KEY"   // 配对令牌（单次 / 60s），进二维码
+    const val MQTT_PAIRING_EXPIRY_KEY = "MQTT_PAIRING_EXPIRY_KEY" // 配对令牌过期时间戳(ms)
+
+
     // Intent extra：远程息屏/亮屏（1=息屏，0=亮屏）
     const val EXTRA_MASK_COMMAND = "EXTRA_MASK_COMMAND"
 

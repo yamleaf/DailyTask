@@ -401,6 +401,10 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             navigatePageTo<CommandActivity>()
         }
 
+        binding.remoteControlLayout.setOnClickListener {
+            navigatePageTo<RemoteControlActivity>()
+        }
+
         binding.keepAliveSwitch.setOnClickListener {
             val on = binding.keepAliveSwitch.isChecked
             SaveKeyValues.saveBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, on)

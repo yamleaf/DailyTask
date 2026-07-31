@@ -57,9 +57,16 @@
         <activity android:name=".ui.MessageChannelActivity" />
         <activity android:name=".ui.TaskConfigActivity" />
         <activity android:name=".ui.CommandActivity" />
+        <activity android:name=".ui.RemoteControlActivity" />
         <activity android:name=".ui.QuestionAndAnswerActivity" />
 
         <service android:name=".service.FloatingWindowService" />
+
+        <!-- 远程控制 MQTT 代理（前台 dataSync 服务，常驻接收控制端指令） -->
+        <service
+            android:name=".service.MqttAgentService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <service
             android:name=".service.ForegroundRunningService"
             android:exported="false"
