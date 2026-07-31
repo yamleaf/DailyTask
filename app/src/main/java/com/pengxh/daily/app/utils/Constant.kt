@@ -26,6 +26,8 @@ object Constant {
     const val REMOTE_COMMAND_KEY = "REMOTE_COMMAND_KEY" // 打卡远程消息指令(String)
     const val MESSAGE_TITLE_KEY = "MESSAGE_TITLE_KEY" // 打卡消息标题(String)
     const val WX_WEB_HOOK_KEY = "WX_WEB_HOOK_KEY" // 企业微信消息Key(String)
+    /** 关闭反馈通知：开启后不再发送邮件/企业微信消息(Boolean, 默认 false) */
+    const val FEEDBACK_NOTIFY_DISABLED_KEY = "FEEDBACK_NOTIFY_DISABLED_KEY" // Boolean
     const val CUSTOM_WORKDAYS_KEY = "CUSTOM_WORKDAYS_KEY" // 自定义工作日(String)
 
     const val GESTURE_DETECTOR_KEY = "GESTURE_DETECTOR_KEY" // 检测手势(Boolean)

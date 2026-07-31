@@ -52,6 +52,11 @@ object MessageDispatcher {
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null
     ) {
+        if (SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)) {
+            Log.d(kTag, "反馈通知已关闭，跳过消息发送: $title")
+            return
+        }
+
         if (!force && shouldSkipDuplicate(title, content)) {
             Log.d(kTag, "跳过短时间内重复消息: $title")
             return
@@ -113,6 +118,11 @@ object MessageDispatcher {
         onSuccess: (() -> Unit)? = null,
         onFailure: ((String) -> Unit)? = null
     ) {
+        if (SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)) {
+            Log.d(kTag, "反馈通知已关闭，跳过附件消息发送: $title")
+            return
+        }
+
         if (!force && shouldSkipDuplicate(title, content)) {
             Log.d(kTag, "跳过短时间内重复附件消息: $title")
             return
