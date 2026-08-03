@@ -8,6 +8,7 @@ import android.app.Application.ActivityLifecycleCallbacks
 import android.os.Bundle
 import android.os.Environment
 import androidx.room.Room.databaseBuilder
+import com.google.android.material.color.DynamicColors
 import com.pengxh.daily.app.sqlite.DailyTaskDataBase
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
@@ -51,6 +52,8 @@ class DailyTaskApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // C1：Android 12+ 启用 Material You 动态配色；低版本回退到 themes.xml 中的靛蓝主色
+        DynamicColors.applyToActivitiesIfAvailable(this)
         initApplication(this)
         SaveKeyValues.initialize(this)
         AppRuntimeConfig.refreshFromStore()

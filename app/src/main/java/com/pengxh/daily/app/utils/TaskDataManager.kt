@@ -1,5 +1,7 @@
 package com.pengxh.daily.app.utils
 
+import android.content.Context
+import android.content.Intent
 import android.util.Log
 
 import com.google.gson.Gson
@@ -17,10 +19,23 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
  * 避免每次 onResume 都做无谓的 DB 查询 / 图标加载，性能更优。
  * 主界面与设置页各持一份标志：二者在导入页（TaskConfigActivity）之下都可能入栈，
  * 用独立标志可避免任一方先消费导致另一方漏刷。
+ *
+ * 远程控制端修改设置 / 任务后，同样需要刷新被控端前台界面：
+ * [notifyRemoteChanged] 在置位两份标志的同时发送应用内广播，
+ * 让正处于前台的主界面 / 设置页即时刷新（无需二次进入）。
  */
 object ConfigImportSignal {
     var pendingMainActivityRefresh = false
     var pendingSettingsRefresh = false
+
+    /** 远程配置/任务变更广播（仅本应用内接收，不对外暴露） */
+    const val ACTION_REMOTE_CONFIG_CHANGED = "com.pengxh.daily.action.REMOTE_CONFIG_CHANGED"
+
+    fun notifyRemoteChanged(context: Context) {
+        pendingMainActivityRefresh = true
+        pendingSettingsRefresh = true
+        context.sendBroadcast(Intent(ACTION_REMOTE_CONFIG_CHANGED))
+    }
 }
 
 class TaskDataManager() {

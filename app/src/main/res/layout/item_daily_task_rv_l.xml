@@ -40,7 +40,7 @@
                     android:layout_height="wrap_content"
                     android:text="08:00"
                     android:textColor="@color/black"
-                    android:textSize="30sp"
+                    android:textSize="@dimen/sp_30"
                     android:textStyle="bold" />
             </LinearLayout>
 
@@ -48,7 +48,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="#F5F5F5"
+                app:cardBackgroundColor="@color/surface_variant"
                 app:cardCornerRadius="@dimen/dp_16"
                 app:strokeColor="@color/lib_hint_color"
                 app:strokeWidth="2dp">
@@ -104,7 +104,7 @@
                     android:layout_height="wrap_content"
                     android:text="--:--:--"
                     android:textColor="@color/black"
-                    android:textSize="30sp"
+                    android:textSize="@dimen/sp_30"
                     android:textStyle="bold" />
             </LinearLayout>
         </LinearLayout>

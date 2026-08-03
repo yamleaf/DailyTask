@@ -40,14 +40,12 @@
         android:maxHeight="320dp"
         android:scrollbars="none" />
 
-    <com.google.android.material.textview.MaterialTextView
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/btnCancel"
+        style="@style/Widget.Material3.Button.OutlinedButton"
         android:layout_width="match_parent"
         android:layout_height="@dimen/dp_48"
         android:layout_marginTop="@dimen/dp_16"
-        android:background="@drawable/bg_button_theme_outline_24"
-        android:gravity="center"
         android:text="@android:string/cancel"
-        android:textColor="@color/theme_color"
         android:textSize="@dimen/sp_16" />
 </LinearLayout>

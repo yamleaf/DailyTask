@@ -1,5 +1,6 @@
 package com.pengxh.daily.app.service
 
+import com.pengxh.daily.app.R
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.Service
@@ -12,6 +13,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import androidx.appcompat.view.ContextThemeWrapper
 import com.pengxh.daily.app.databinding.WindowFloatingBinding
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.Constant
@@ -49,7 +51,9 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
 
     override fun onCreate() {
         super.onCreate()
-        binding = WindowFloatingBinding.inflate(LayoutInflater.from(this))
+        // 浮动窗口由 Service 上下文 inflate；Service 不会自动套用 App 的 Material 主题，
+        // 必须用 ContextThemeWrapper 显式包一层 Theme.DailyTask，否则 MaterialCardView/MaterialTextView 会 inflate 崩溃。
+        binding = WindowFloatingBinding.inflate(LayoutInflater.from(ContextThemeWrapper(this, R.style.Theme_DailyTask)))
         floatViewParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,

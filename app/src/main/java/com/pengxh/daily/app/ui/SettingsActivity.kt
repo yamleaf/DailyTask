@@ -2,6 +2,8 @@ package com.pengxh.daily.app.ui
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.media.projection.MediaProjectionManager
@@ -31,6 +33,7 @@ import android.view.ViewGroup
 import android.content.pm.ResolveInfo
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
@@ -97,6 +100,16 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
     private val projectionContract by lazy { ActivityResultContracts.StartActivityForResult() }
     private val mpr by lazy { getSystemService(MediaProjectionManager::class.java) }
     private var syncingSwitchState = false
+    /** 远程控制端修改设置后，前台设置页即时刷新开关与数值（无需二次进入） */
+    private val remoteConfigReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED) {
+                ConfigImportSignal.pendingSettingsRefresh = false
+                syncSettingsUiFromStore()
+                applyTargetAppIcon()
+            }
+        }
+    }
 
     override fun initViewBinding(): ActivitySettingsBinding {
         return ActivitySettingsBinding.inflate(layoutInflater)
@@ -1063,6 +1076,12 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
     override fun onResume() {
         super.onResume()
+        // 注册远程配置变更广播：控制端改设置后，前台设置页即时刷新
+        ContextCompat.registerReceiver(
+            this, remoteConfigReceiver,
+            IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         if (Settings.canDrawOverlays(this)) {
             binding.floatingSwitch.isChecked = true
             binding.floatingTipsView.visibility = View.GONE
@@ -1148,6 +1167,16 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
 
         updateResultSourceView()
 
+        syncSettingsUiFromStore()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        runCatching { unregisterReceiver(remoteConfigReceiver) }
+    }
+
+    /** 从持久化存储同步所有开关与数值到 UI（远程变更广播 / onResume 复用，避免二次进入才刷新） */
+    private fun syncSettingsUiFromStore() {
         syncingSwitchState = true
         try {
             binding.gestureDetectSwitch.isChecked =

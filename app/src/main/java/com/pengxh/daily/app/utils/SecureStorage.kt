@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.pengxh.daily.app.DailyTaskApplication
+import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.google.gson.JsonObject
 
 /**
@@ -103,4 +104,72 @@ object EmailSecureConfig {
 
     /** 是否为脱敏掩码（导入时跳过，避免覆盖真实授权码） */
     fun isMasked(code: String): Boolean = code.contains('*')
+}
+
+/**
+ * MQTT 敏感信息加密存储与迁移（A5）：
+ * - DEV 账户密码、配对派生的会话密钥 sessionSecret 仅存于 Keystore 加密的 EncryptedSharedPreferences。
+ * - 读取时优先加密存储；首次从无加密 SaveKeyValues 迁移，并清除明文残留，避免泄露。
+ * - 配置导入（写明文 SaveKeyValues）也能被回读迁移兜底，不会因迁移而丢失。
+ */
+object MqttSecureConfig {
+    private const val PASS_KEY = "mqtt_dev_pass"
+    private const val SESSION_KEY = "mqtt_session_secret"
+
+    fun loadPass(): String {
+        val secured = SecurePrefs.getString(PASS_KEY)
+        if (secured.isNotBlank()) return secured
+        val legacy = SaveKeyValues.loadString(Constant.MQTT_PASS_KEY, "")
+        if (legacy.isNotBlank()) {
+            SecurePrefs.putString(PASS_KEY, legacy)
+            SaveKeyValues.removeKey(Constant.MQTT_PASS_KEY) // 清除明文残留
+        }
+        return legacy
+    }
+
+    fun savePass(pass: String) {
+        SecurePrefs.putString(PASS_KEY, pass)
+        SaveKeyValues.removeKey(Constant.MQTT_PASS_KEY)
+    }
+
+    fun loadSession(): String {
+        val secured = SecurePrefs.getString(SESSION_KEY)
+        if (secured.isNotBlank()) return secured
+        val legacy = SaveKeyValues.loadString(Constant.MQTT_SESSION_SECRET_KEY, "")
+        if (legacy.isNotBlank()) {
+            SecurePrefs.putString(SESSION_KEY, legacy)
+            SaveKeyValues.removeKey(Constant.MQTT_SESSION_SECRET_KEY)
+        }
+        return legacy
+    }
+
+    fun saveSession(session: String) {
+        SecurePrefs.putString(SESSION_KEY, session)
+        SaveKeyValues.removeKey(Constant.MQTT_SESSION_SECRET_KEY) // 无论清空与否都移除明文残留
+    }
+}
+
+/**
+ * Serverless API AppSecret 加密存储与迁移（需求⑤）：
+ * - AppSecret 仅存于 Keystore 加密的 EncryptedSharedPreferences，与 MQTT 密码加密保持一致。
+ * - 读取时优先加密存储；首次从无加密 SaveKeyValues 迁移，并清除明文残留，避免泄露。
+ */
+object ServerlessApiSecureConfig {
+    private const val SECRET_KEY = "serverless_api_app_secret"
+
+    fun loadSecret(): String {
+        val secured = SecurePrefs.getString(SECRET_KEY)
+        if (secured.isNotBlank()) return secured
+        val legacy = SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_APP_SECRET_KEY, "")
+        if (legacy.isNotBlank()) {
+            SecurePrefs.putString(SECRET_KEY, legacy)
+            SaveKeyValues.removeKey(Constant.MQTT_SERVERLESS_API_APP_SECRET_KEY)
+        }
+        return legacy
+    }
+
+    fun saveSecret(secret: String) {
+        SecurePrefs.putString(SECRET_KEY, secret)
+        SaveKeyValues.removeKey(Constant.MQTT_SERVERLESS_API_APP_SECRET_KEY)
+    }
 }

@@ -56,6 +56,17 @@ object Constant {
     const val MQTT_CTL_USER_KEY = "MQTT_CTL_USER_KEY"
     /** 控制端 CTL 账户密码：默认由 App 随机生成，可在「控制端凭证(ctl)」改为自定义；进绑定二维码；需在 EMQX 建同名受限账户 */
     const val MQTT_CTL_PASS_KEY = "MQTT_CTL_PASS_KEY"
+    /** 远程控制服务总开关：默认关闭；开启且账号配置有效才连接 MQTT，关闭则完全停止服务（断开连接、撤销前台通知、零耗电） */
+    const val MQTT_ENABLED_KEY = "MQTT_ENABLED_KEY"
+
+    // ===== EMQX Serverless API 配置（被控端专用；用于 HTTP 方式管理/测试部署）=====
+    const val MQTT_SERVERLESS_API_URL_KEY = "MQTT_SERVERLESS_API_URL_KEY" // 如 https://xxx.emqxsl.com/api/v5
+    const val MQTT_SERVERLESS_API_APP_ID_KEY = "MQTT_SERVERLESS_API_APP_ID_KEY"
+    const val MQTT_SERVERLESS_API_APP_SECRET_KEY = "MQTT_SERVERLESS_API_APP_SECRET_KEY"
+
+    // ===== 临时公共 MQTT（EMQX 官方免费公共 broker，仅临时测试用）=====
+    const val PUBLIC_MQTT_BROKER = "broker.emqx.io:1883"
+    const val MQTT_USE_PUBLIC_KEY = "MQTT_USE_PUBLIC_KEY" // Boolean：当前是否使用临时公共 MQTT 配置
 
     // ===== 绑定态（解绑时清除；不含上面的 MQTT 配置）=====
     const val IS_BOUND_KEY = "IS_BOUND_KEY"                       // 是否已与控制端完成配对

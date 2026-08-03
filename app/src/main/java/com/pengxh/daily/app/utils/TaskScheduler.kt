@@ -690,6 +690,12 @@ object TaskScheduler {
         return !shouldSkipDay(date)
     }
 
+    /**
+     * 今天是否为「跳过日」：已开启「跳过节假日」且今天为法定节假日 / 调休补班外的休息日 / 自定义休息日。
+     * 供状态药丸、状态查询邮件等统一判断，避免节假日/休息日仍显示「待执行」。
+     */
+    fun isTodaySkipped(): Boolean = shouldSkipDay(LocalDate.now())
+
     fun secondsUntilNextReset(): Int {
         val resetHour = SaveKeyValues.loadInt(
             Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR
@@ -726,6 +732,8 @@ object TaskScheduler {
         val actualTimeMillis: Long
     ) {
         fun statusLabel(nowMillis: Long = System.currentTimeMillis()): String {
+            // 跳过日（节假日/休息日且开启跳过）下，今日任务统一标记为已跳过
+            if (TaskScheduler.isTodaySkipped()) return "已跳过"
             return if (actualTimeMillis > nowMillis) "待执行" else "已过点"
         }
     }

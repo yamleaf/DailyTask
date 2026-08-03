@@ -1,6 +1,8 @@
 package com.pengxh.daily.app.ui
 
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -16,6 +18,7 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -120,6 +123,15 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private var taskListLoaded = false
     /** 电池优化引导对话框是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
     private var batteryOptimizationPrompted = false
+    /** 远程控制端修改设置/任务后，前台主界面即时刷新任务列表（无需二次进入） */
+    private val remoteConfigReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action == ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED) {
+                ConfigImportSignal.pendingMainActivityRefresh = false
+                refreshTaskListFromDb()
+            }
+        }
+    }
     private val dailyTaskAdapter by lazy {
         DailyTaskAdapter(taskBeans).apply {
             setOnItemClickListener(object : DailyTaskAdapter.OnItemClickListener {
@@ -376,6 +388,12 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     override fun onResume() {
         super.onResume()
+        // 注册远程配置变更广播：控制端改设置/任务后，前台主界面即时刷新
+        ContextCompat.registerReceiver(
+            this, remoteConfigReceiver,
+            IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         // 首次进入（含首次启动）必须加载一次任务列表；
         // 配置导入成功后也需刷新一次。其余 onResume 不再无谓查询 DB。
         if (ConfigImportSignal.pendingMainActivityRefresh || !taskListLoaded) {
@@ -399,6 +417,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun onPause() {
+        runCatching { unregisterReceiver(remoteConfigReceiver) }
         stopIdleMaskTimer()
         IdlePseudoMaskController.onAppBackgrounded(this)
         super.onPause()

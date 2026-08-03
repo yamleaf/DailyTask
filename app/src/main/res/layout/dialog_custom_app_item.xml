@@ -12,7 +12,7 @@
         android:id="@+id/appIcon"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:background="#F1F1F1"
+        android:background="@color/surface_variant"
         app:shapeAppearance="@style/RoundedStyle" />
 
     <LinearLayout
@@ -38,11 +38,11 @@
             android:layout_marginTop="@dimen/dp_4"
             android:ellipsize="middle"
             android:singleLine="true"
-            android:textColor="#888888"
+            android:textColor="@color/on_surface_variant"
             android:textSize="@dimen/sp_10" />
     </LinearLayout>
 
-    <TextView
+    <com.google.android.material.textview.MaterialTextView
         android:id="@+id/btnRemove"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -50,6 +50,6 @@
         android:paddingHorizontal="@dimen/dp_8"
         android:paddingVertical="@dimen/dp_4"
         android:text="@string/settings_custom_app_remove"
-        android:textColor="@color/red"
+        android:textColor="@color/md_error"
         android:textSize="@dimen/sp_14" />
 </LinearLayout>

@@ -10,7 +10,7 @@
         android:id="@+id/handleView"
         android:layout_width="@dimen/dp_32"
         android:layout_height="4dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="@dimen/dp_12"
         android:layout_marginBottom="@dimen/dp_16"
         app:cardBackgroundColor="?attr/colorOutline"
         app:cardCornerRadius="2dp"

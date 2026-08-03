@@ -1,11 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="theme_color">#3399FF</color>
+    <!-- 主色：靛蓝（方案 C1 决策：#3399FF → #4F6EFF） -->
+    <color name="theme_color">#4F6EFF</color>
+    <color name="md_primary">#4F6EFF</color>
+    <color name="md_onPrimary">#FFFFFF</color>
+    <color name="md_primaryContainer">#E0E4FF</color>
+    <color name="md_onPrimaryContainer">#06164D</color>
+    <color name="md_secondary">#5A5D78</color>
+    <color name="md_onSecondary">#FFFFFF</color>
+    <color name="md_secondaryContainer">#E0E1F9</color>
+    <color name="md_onSecondaryContainer">#171A2C</color>
+    <color name="md_tertiary">#2E7D5B</color>
+    <color name="md_onTertiary">#FFFFFF</color>
+    <color name="md_tertiaryContainer">#B7F1D8</color>
+    <color name="md_onTertiaryContainer">#002116</color>
+    <color name="md_error">#BA1A1A</color>
+    <color name="md_onError">#FFFFFF</color>
+    <color name="md_errorContainer">#FFDAD6</color>
+    <color name="md_onErrorContainer">#410002</color>
+    <color name="md_success">#2E9E63</color>
+    <color name="md_onSuccess">#FFFFFF</color>
+    <color name="md_surface">#FBF8FF</color>
+    <color name="md_onSurface">#1B1B23</color>
+    <color name="md_surfaceVariant">#E4E1EC</color>
+    <color name="md_onSurfaceVariant">#46464F</color>
+    <color name="md_outline">#767680</color>
+    <color name="md_outlineVariant">#C7C5D0</color>
+    <color name="white_70">#B3FFFFFF</color>
+
+    <!-- 方案 C1/C2 令牌别名：布局按方案命名（无 md_ 前缀）映射到上面 M3 语义色 -->
+    <color name="surface">@color/md_surface</color>
+    <color name="on_surface">@color/md_onSurface</color>
+    <color name="surface_variant">@color/md_surfaceVariant</color>
+    <color name="on_surface_variant">@color/md_onSurfaceVariant</color>
+    <color name="outline">@color/md_outline</color>
+    <color name="outline_variant">@color/md_outlineVariant</color>
+    <color name="primary_container">@color/md_primaryContainer</color>
+    <color name="on_primary_container">@color/md_onPrimaryContainer</color>
+
+    <!-- 历史保留色（代码仍直接引用，勿删） -->
     <color name="ios_green">#4DDC64</color>
     <color name="back_ground_color">#F1F1F1</color>
     <color name="text_hint_color">#CCCCCC</color>
     <color name="text_default_color">#424242</color>
-
     <color name="black">#000000</color>
     <color name="white">#FFFFFF</color>
     <color name="red">#FF0000</color>

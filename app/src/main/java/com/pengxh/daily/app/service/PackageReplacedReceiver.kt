@@ -30,6 +30,17 @@ class PackageReplacedReceiver : BroadcastReceiver() {
             }
         }
 
+        // 覆盖安装后同时拉起 MQTT 代理服务：否则开关开启且配置有效时，远程控制会在更新后
+        // 静默失效（收不到指令、不回 ack）直到用户再次手动进入「远程控制」页。
+        // 仅当总开关开启时启动；initMqtt 内部会对 broker 为空等无效配置安全 no-op。
+        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
+            try {
+                context.startForegroundService(Intent(context, MqttAgentService::class.java))
+            } catch (e: Exception) {
+                Log.e(javaClass.simpleName, "覆盖安装后启动 MQTT 代理服务失败", e)
+            }
+        }
+
         // 重建保活心跳闹钟与每日重置闹钟（更新后旧闹钟已被系统清除，需幂等重建）
         KeepAliveReceiver.schedule(context)
         KeepAliveReceiver.scheduleResetAlarm(context)

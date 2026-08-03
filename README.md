@@ -38,8 +38,14 @@
 - 软件按「现状」提供，作者不对使用过程中产生的任何后果承担责任。
 - 商业使用或授权事宜，请联系作者另行协商。
 
-> 由于存在倒卖行为，GitHub 不再提供预编译安装包。有编译能力者可自行从源码构建；
+> 由于存在倒卖行为，GitHub 不再提供**正式版**预编译安装包。有编译能力者可自行从源码构建；
 > 否则请加入 QQ 群获取安装包。
+>
+> **Alpha 测试版下载**：推送至 `alpha` 分支后，GitHub Actions 会自动构建，可在
+> [Actions](https://github.com/yamleaf/DailyTask/actions) 的工件（Artifacts）页面或
+> [Releases](https://github.com/yamleaf/DailyTask/releases) 的 `DailyTask Alpha Build`
+> （预发布）中下载 debug/release APK。Alpha 版仅用于体验与测试，不保证稳定性，
+> 正式版请以 QQ 群安装包为准。
 
 ### 隐私与权限说明
 

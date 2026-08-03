@@ -352,6 +352,7 @@ object StatusReporter {
             "warn" -> "#fff7e6" to "#d46b08"
             "err" -> "#fff2f0" to "#cf1322"
             "info" -> "#e6f7ff" to "#096dd9"
+            "skip" -> "#f0f0f0" to "#8c8c8c"
             else -> "#f5f5f5" to "#595959"
         }
         return "<span style=\"display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:$bg;color:$fg;font-weight:500;\">$text</span>"
@@ -434,6 +435,7 @@ object StatusReporter {
                     when {
                         it.contains("完成") || it.contains("执行") -> it to "ok"
                         it.contains("待执行") -> it to "info"
+                        it.contains("跳过") -> it to "skip"
                         else -> it to "warn"
                     }
                 }
