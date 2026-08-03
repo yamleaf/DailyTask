@@ -9,8 +9,6 @@ jobs:
   build:
     name: Build APK(alpha自动版本)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     # alpha 构建：注入环境变量，build.gradle 据此生成
     # versionName = alpha-<编译时间 yyyyMMddHHmm>-<git短哈希>
@@ -63,21 +61,3 @@ jobs:
         with:
           name: dailyTask_alpha_release
           path: app/build/outputs/apk/release/*.apk
-
-      - name: Publish GitHub Release（手动触发时附 APK）
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: alpha-${{ github.run_number }}-${{ github.sha }}
-          name: DailyTask Alpha Build #${{ github.run_number }}
-          body: |
-            由 GitHub Actions 自动构建的 alpha 版本。
-
-            - 分支：${{ github.ref_name }}
-            - 提交：${{ github.sha }}
-            - 说明：本版本用于体验与测试，正式版请关注 Release 标签。
-          files: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
-          draft: false
-          prerelease: true
