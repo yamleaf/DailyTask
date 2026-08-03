@@ -104,6 +104,17 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
 
         binding.qrRow.setOnClickListener { generateAndShowQR() }
         binding.unbindRow.setOnClickListener { forceUnbind() }
+        // 关于：控制端下载地址（GitHub Actions 发布页）
+        binding.downloadRow.setOnClickListener {
+            val url = "https://github.com/yamleaf/DailyController/actions"
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (_: Exception) {
+                url.show(this)
+            }
+        }
+        // 预热配置引导 WebView，使首次打开几乎无感
+        prewarmGuideWebView()
         binding.btnGoQr.setOnClickListener { generateAndShowQR() }
         binding.btnRetryNow.setOnClickListener { MqttAgentService.reconnectNow() }
         binding.mqttSwitch.setOnCheckedChangeListener { _, isChecked -> onMqttSwitchChanged(isChecked) }
@@ -205,39 +216,106 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         updateHeroUI()
     }
 
+    /**
+     * 需求 4：原「MQTT 状态」更名为「连接信息」，内容与控制端「连接信息」卡片保持一致：
+     * 上半部分为连接标识（Broker / 设备ID / 客户端ID / 配对状态 / 最近连接），下半部分为消息统计。
+     */
     private fun updateQuotaUI() {
         val stats = MqttQuota.get(this)
         binding.quotaValue.text = "已用 ${stats.total}"
         binding.quotaProgress.visibility = View.GONE
 
         binding.quotaDetailsLayout.removeAllViews()
-        val rows = listOf(
+
+        val deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "")
+        val broker = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "").ifBlank { "未设置" }
+        val lastConn = if (lastConnectedMs > 0) {
+            java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.CHINA)
+                .format(java.util.Date(lastConnectedMs))
+        } else "—"
+
+        listOf(
+            "连接质量" to computeConnQuality(),
+            "Broker" to broker,
+            "设备ID" to deviceId.ifBlank { "—" },
+            "客户端ID" to if (deviceId.isBlank()) "—" else "dev-$deviceId",
+            "配对状态" to if (MqttAgentService.isBound()) "已配对" else "未配对",
+            "最近连接" to lastConn
+        ).forEach { (label, value) -> addQuotaRow(label, value) }
+
+        addQuotaSubHeader("消息统计")
+
+        listOf(
             "已累计连接" to MqttQuota.formatDuration(stats.totalConnectedMs),
             "本次连接" to MqttQuota.formatDuration(stats.sessionConnectedMs),
             "已发送消息" to "${stats.sent} 条",
             "已接收消息" to "${stats.received} 条",
             "消息总计" to "${stats.total} 条"
-        )
-        rows.forEach { (label, value) ->
-            val row = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                setPadding(0, resources.getDimensionPixelSize(R.dimen.dp_4), 0, resources.getDimensionPixelSize(R.dimen.dp_4))
-            }
-            val labelTv = TextView(this).apply {
-                text = label
-                setTextColor(resources.getColor(R.color.text_default_color, theme))
-                textSize = 13f
-                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val valueTv = TextView(this).apply {
-                text = value
-                setTextColor(resources.getColor(R.color.text_hint_color, theme))
-                textSize = 13f
-            }
-            row.addView(labelTv)
-            row.addView(valueTv)
-            binding.quotaDetailsLayout.addView(row)
+        ).forEach { (label, value) -> addQuotaRow(label, value) }
+    }
+
+    /**
+     * 连接质量：由连接状态 + 最近心跳新鲜度推导的定性评估（不做端到端 RTT 探测，避免额外网络开销）。
+     * 断线=未连接；在线且心跳很新=优；随心跳变旧逐级降为 良/一般/弱。
+     */
+    private fun computeConnQuality(): String {
+        if (!MqttAgentService.isConnected()) return "未连接"
+        if (lastConnectedMs <= 0L) return "已连接"
+        val sec = (System.currentTimeMillis() - lastConnectedMs) / 1000
+        return when {
+            sec < 30 -> "优"
+            sec < 120 -> "良"
+            sec < 300 -> "一般"
+            else -> "弱"
         }
+    }
+
+    private fun addQuotaRow(label: String, value: String) {
+        val pad = resources.getDimensionPixelSize(R.dimen.dp_4)
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            setPadding(0, pad, 0, pad)
+        }
+        val labelTv = TextView(this).apply {
+            text = label
+            setTextColor(resources.getColor(R.color.text_default_color, theme))
+            textSize = 13f
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            )
+        }
+        val valueTv = TextView(this).apply {
+            text = value
+            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            textSize = 13f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        }
+        row.addView(labelTv)
+        row.addView(valueTv)
+        binding.quotaDetailsLayout.addView(row)
+    }
+
+    private fun addQuotaSubHeader(title: String) {
+        val divider = View(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                resources.getDimensionPixelSize(R.dimen.dividerLine)
+            ).apply { topMargin = resources.getDimensionPixelSize(R.dimen.dp_8) }
+            setBackgroundColor(resources.getColor(R.color.outline_variant, theme))
+        }
+        val header = TextView(this).apply {
+            text = title
+            setTextColor(resources.getColor(R.color.text_default_color, theme))
+            textSize = 13f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = resources.getDimensionPixelSize(R.dimen.dp_8) }
+        }
+        binding.quotaDetailsLayout.addView(divider)
+        binding.quotaDetailsLayout.addView(header)
     }
 
     private fun updateStatusUI(connected: Boolean) {
@@ -364,12 +442,13 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
             .setNegativeButton("取消")
             .setOnDialogButtonClickListener(object : AlertInputDialog.OnDialogButtonClickListener {
                 override fun onConfirmClick(value: String) {
+                    val saved = if (key == Constant.MQTT_BROKER_KEY) normalizeBrokerHost(value) else value
                     when (key) {
-                        Constant.MQTT_PASS_KEY -> MqttSecureConfig.savePass(value) // 加密存储并清除明文残留
-                        Constant.MQTT_SERVERLESS_API_APP_SECRET_KEY -> ServerlessApiSecureConfig.saveSecret(value)
-                        else -> SaveKeyValues.saveString(key, value)
+                        Constant.MQTT_PASS_KEY -> MqttSecureConfig.savePass(saved) // 加密存储并清除明文残留
+                        Constant.MQTT_SERVERLESS_API_APP_SECRET_KEY -> ServerlessApiSecureConfig.saveSecret(saved)
+                        else -> SaveKeyValues.saveString(key, saved)
                     }
-                    valueView.text = if (isPassword) "已设置" else value.ifBlank { "未设置" }
+                    valueView.text = if (isPassword) "已设置" else saved.ifBlank { "未设置" }
                     "已保存".show(this@RemoteControlActivity)
                     if (key == Constant.MQTT_BROKER_KEY) restartMqttService()
                 }
@@ -380,6 +459,29 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
     }
 
     /** 测试 EMQX Serverless API 连接：调用 GET /clients 验证 AppID/AppSecret 与 API 地址 */
+    /** 规范化 MQTT 服务器地址：若只填了主机名未带端口，自动补全 :1883（仅当无 scheme 且无冒号时） */
+    /**
+     * 需求 6：Broker 地址只填域名/IP 时自动补默认端口。
+     * - `broker.emqx.io`            → `broker.emqx.io:1883`
+     * - `tcp://broker.emqx.io`      → `tcp://broker.emqx.io:1883`
+     * - `ssl://broker.emqx.io`      → `ssl://broker.emqx.io:8883`（TLS 默认端口）
+     * - 已带端口 / IPv6 字面量（含 `[]`）保持原样
+     */
+    private fun normalizeBrokerHost(raw: String): String {
+        var v = raw.trim().trimEnd('/')
+        if (v.isEmpty()) return v
+        val schemeIdx = v.indexOf("://")
+        val scheme = if (schemeIdx > 0) v.substring(0, schemeIdx + 3) else ""
+        val hostPart = if (schemeIdx > 0) v.substring(schemeIdx + 3) else v
+        if (hostPart.isBlank()) return v
+        // IPv6 字面量必须写成 [::1]:1883，这里不做猜测
+        if (hostPart.startsWith("[")) return v
+        if (hostPart.contains(":")) return v
+        val defaultPort = if (scheme.startsWith("ssl") || scheme.startsWith("wss") || scheme.startsWith("mqtts")) 8883 else 1883
+        v = "$scheme$hostPart:$defaultPort"
+        return v
+    }
+
     private fun testApiConnection() {
         val baseUrl = SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_URL_KEY, "").trim()
         val appId = SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_APP_ID_KEY, "").trim()
@@ -974,11 +1076,49 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         warnCard.addView(warnTitle); warnCard.addView(warnBody)
         container.addView(warnCard)
 
+        // 长期使用建议：单独成卡，醒目提示自建 EMQX（点击直接跳转配置引导）
+        val gap3 = View(ctx).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dip(10)) }
+        container.addView(gap3)
+        val adviceCard = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.parseColor("#ecfdf5"))
+                cornerRadius = dip(12).toFloat()
+                setStroke(dip(1), Color.parseColor("#a7f3d0"))
+            }
+            setPadding(dip(14), dip(12), dip(14), dip(12))
+        }
+        val adviceTitle = TextView(ctx).apply {
+            text = "💡 长期使用建议"
+            setTextColor(Color.parseColor("#047857"))
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+        }
+        val adviceBody = TextView(ctx).apply {
+            text = "公共 broker 仅适合临时联调。长期使用建议自建 EMQX 服务器：稳定、私密、可控，且不受公共 broker 清理策略影响。"
+            setTextColor(Color.parseColor("#065f46"))
+            textSize = 12.5f
+            setLineSpacing(dip(4).toFloat(), 1f)
+            setPadding(0, dip(6), 0, dip(8))
+        }
+        val adviceBtn = TextView(ctx).apply {
+            text = "查看 MQTT 配置引导 →"
+            setTextColor(Color.parseColor("#047857"))
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            gravity = android.view.Gravity.END
+        }
+        adviceBtn.setOnClickListener { showConfigGuide() }
+        adviceCard.addView(adviceTitle); adviceCard.addView(adviceBody); adviceCard.addView(adviceBtn)
+        container.addView(adviceCard)
+
         scroll.addView(container)
         AlertDialog.Builder(ctx)
             .setTitle("临时公共 MQTT（测试用）")
             .setView(scroll)
             .setNegativeButton("取消", null)
+            // 需求 7：长期使用建议自建，给一个直达「MQTT 配置引导」的入口
+            .setNeutralButton("配置引导") { _, _ -> showConfigGuide() }
             .setPositiveButton("一键配置") { _, _ -> applyPublicMqttConfig() }
             .show()
     }
@@ -988,13 +1128,13 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         val deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "").ifBlank {
             UUID.randomUUID().toString().take(8).also { SaveKeyValues.saveString(Constant.DEVICE_ID_KEY, it) }
         }
-        // 公共 broker 匿名开放，随机账号即可；保证 DEV 用户与 CTL 凭证不冲突
+        // 公共 broker 匿名开放，账号按设备ID派生，保证每台被控端 DEV/CTL 账户与主题均唯一、互不冲突
         val bytes = ByteArray(16)
         SecureRandom().nextBytes(bytes)
-        val randomUser = "dev-" + bytes.joinToString("") { "%02x".format(it) }.take(8)
+        val randomUser = "dev-$deviceId"
         SaveKeyValues.saveString(Constant.MQTT_BROKER_KEY, Constant.PUBLIC_MQTT_BROKER)
         SaveKeyValues.saveString(Constant.MQTT_USER_KEY, randomUser)
-        MqttSecureConfig.savePass(UUID.randomUUID().toString())
+        MqttSecureConfig.savePass(bytes.joinToString("") { "%02x".format(it) })
         SaveKeyValues.saveBoolean(Constant.MQTT_USE_PUBLIC_KEY, true)
         // 设备ID若已默认生成则沿用；仅当用户从未生成过才顺手创建（避免改绑）
         if (SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "").isBlank()) {
@@ -1005,12 +1145,40 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         "已配置临时公共 MQTT，正在连接…（请及时生成二维码完成绑定）".show(this)
     }
 
-    /** MQTT 配置引导：用 WebView 渲染与 mqtt_guide_preview.html 同款的 HTML（卡片/代码块/表格/步骤胶囊） */
-    private fun showConfigGuide(onOk: (() -> Unit)? = null) {        val webView = WebView(this).apply {
-            settings.javaScriptEnabled = false
-            settings.defaultTextEncodingName = "utf-8"
-            loadDataWithBaseURL(null, buildGuideHtml(), "text/html; charset=utf-8", "utf-8", null)
+    /** MQTT 配置引导：复用单个 WebView 实例（避免每次打开都重新初始化 Chromium，解决「打开太卡」） */
+    private var guideWebView: WebView? = null
+    private var guideLoaded = false
+
+    /** 懒创建并复用 WebView；首次从 assets 加载一次 HTML，之后复用已渲染内容，秒开 */
+    private fun ensureGuideWebView(): WebView {
+        if (guideWebView == null) {
+            guideWebView = WebView(this).apply {
+                settings.javaScriptEnabled = false
+                settings.defaultTextEncodingName = "utf-8"
+                settings.domStorageEnabled = true
+                settings.loadsImagesAutomatically = false
+                settings.blockNetworkImage = true
+                settings.cacheMode = android.webkit.WebSettings.LOAD_CACHE_ELSE_NETWORK
+            }
         }
+        val wv = guideWebView!!
+        if (!guideLoaded) {
+            // 从 assets 文件加载（比 loadData 解析内联字符串更快，且可走磁盘缓存）
+            wv.loadUrl("file:///android_asset/mqtt_guide.html")
+            guideLoaded = true
+        }
+        (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+        return wv
+    }
+
+    /** 进入页面后空闲预热 WebView，使首次打开引导几乎无感 */
+    private fun prewarmGuideWebView() {
+        if (guideWebView == null) binding.root.postDelayed({ ensureGuideWebView() }, 1500)
+    }
+
+    /** MQTT 配置引导：用 WebView 渲染与 mqtt_guide_preview.html 同款的 HTML（卡片/代码块/表格/步骤胶囊） */
+    private fun showConfigGuide(onOk: (() -> Unit)? = null) {
+        val webView = ensureGuideWebView()
         val container = FrameLayout(this).apply {
             setPadding(8, 4, 8, 4)
             addView(
@@ -1035,132 +1203,15 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         }
     }
 
-    /** 生成引导 HTML（示例统一用 d7da9d15；与预览文件格式一致） */
-    private fun buildGuideHtml(): String {
-        return """
-            <!DOCTYPE html>
-            <html lang="zh-CN">
-            <head>
-            <meta charset="UTF-8"/>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-            <style>
-            :root{
-              --bg:#f4f6f8; --card:#ffffff; --ink:#1f2329; --sub:#5b6470;
-              --brand:#00a88a; --brand2:#3d5afe; --warn:#e8830c;
-              --code-bg:#eef1f4; --code-ink:#c0264a; --line:#e4e8ec;
-            }
-            *{box-sizing:border-box;}
-            a{color:var(--brand2);text-decoration:underline;}
-            body{margin:0;background:var(--bg);color:var(--ink);
-              font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-              line-height:1.7;padding:16px 10px 32px;}
-            .wrap{max-width:720px;margin:0 auto;}
-            .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
-              padding:16px 16px 18px;margin-bottom:14px;box-shadow:0 2px 10px rgba(0,0,0,0.04);}
-            h1{font-size:19px;margin:0 0 4px;}
-            .subtitle{color:var(--sub);font-size:13px;margin:0 0 12px;}
-            .concept{background:#fff7ed;border:1px solid #fed7aa;border-left:4px solid var(--warn);
-              border-radius:12px;padding:12px 14px;margin-bottom:4px;}
-            .concept b{color:#b45309;}
-            .step-title{display:inline-block;background:linear-gradient(135deg,var(--brand),var(--brand2));
-              color:#fff;font-weight:700;font-size:14px;padding:3px 12px;border-radius:999px;margin:14px 0 8px;}
-            ul{margin:6px 0 6px;padding-left:20px;}
-            li{margin:4px 0;}
-            code{background:var(--code-bg);color:var(--code-ink);
-              font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
-              font-size:13px;padding:1px 6px;border-radius:6px;border:1px solid #dde3e8;white-space:nowrap;}
-            .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-            table.acl{width:100%;border-collapse:collapse;margin:8px 0;font-size:12px;}
-            table.acl th,table.acl td{border:1px solid var(--line);padding:7px 9px;text-align:left;}
-            table.acl th{background:#f1f5f9;}
-            .allow{color:#15803d;font-weight:700;}
-            .deny{color:#b91c1c;font-weight:700;}
-            .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:6px;
-              background:#ecfdf5;color:#047857;margin-right:6px;}
-            .note{color:var(--sub);font-size:13px;}
-            .tip{background:#eff6ff;border:1px solid #bfdbfe;border-left:4px solid var(--brand2);
-              border-radius:12px;padding:12px 14px;}
-            </style>
-            </head>
-            <body>
-            <div class="wrap">
-
-              <div class="card">
-                <div class="concept">
-                  <b>【核心概念 · 先看这一行】</b><br/>
-                  本 App 用「设备ID」标识一台设备，所有 MQTT 主题都在 <code>dt/设备ID/</code> 之下。例如设备ID 为 <code>d7da9d15</code> 时，主题为 <code>dt/d7da9d15/</code>；你也可以自定义设备ID，例如 <code>88888888</code>，对应主题 <code>dt/88888888/</code>。<br/>
-                  「设备ID」允许自定义；注意：EMQX 里的账户名与主题前缀都要用这个设备ID，一旦变更就需同步修改，否则连不上。
-                </div>
-              </div>
-
-              <div class="card">
-                <span class="step-title">① 注册 EMQX Cloud（用电脑浏览器）</span>
-                <ul>
-                  <li>打开 <a href="https://www.emqx.com/">emqx.com</a> → 手机号注册并登录</li>
-                  <li>点「免费试用」→「云端」→ 新建 Serverless 部署（区域选离自己最近的，如 杭州；消费限额 0）</li>
-                  <li>等 1~2 分钟变绿「运行中」，记下「连接地址」与「端口 8883(TLS)」</li>
-                </ul>
-              </div>
-
-              <div class="card">
-                <span class="step-title">② 在 EMQX 建两个账户</span>
-                <p class="note">（左侧「访问控制」→「客户端认证」→ 新建）</p>
-                <ul>
-                  <li><span class="tag">被控端 DEV</span> 用户名（例：d7da9d15）和密码自设（任意）</li>
-                  <li><span class="tag">控制端 CTL</span> 用户名和密码可使用 App 默认生成的 <code>ctl-d7da9d15</code>，也可自定义（例：ctl-k20pro）</li>
-                </ul>
-              </div>
-
-              <div class="card">
-                <span class="step-title">③ 在 EMQX 配权限（ACL）</span>
-                <p class="note">（左侧「访问控制」→「客户端授权」→ 用户名 选项卡）</p>
-                <p>两个账户的用户名就是第②步定的：被控端 = <code>d7da9d15</code>，控制端 = <code>ctl-d7da9d15</code>；两者<b>只是用户名不同</b>，ACL 规则完全一样，各加 <b>1 条</b>即可：</p>
-                <div class="table-scroll">
-                  <table class="acl">
-                    <thead><tr><th>账户（用户名）</th><th>主题</th><th>操作</th><th>权限</th></tr></thead>
-                    <tbody>
-                      <tr><td><code>d7da9d15</code></td><td><code>dt/d7da9d15/#</code></td><td>发布&amp;订阅</td><td class="allow">允许</td></tr>
-                      <tr><td><code>ctl-d7da9d15</code></td><td><code>dt/d7da9d15/#</code></td><td>发布&amp;订阅</td><td class="allow">允许</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p class="note">主题按设备ID，不按账户名。例：设备ID=d7da9d15 时，被控端账户 d7da9d15 与控制端账户 ctl-d7da9d15 都允许 <code>dt/d7da9d15/#</code> 的发布&amp;订阅。</p>
-                <p><b>白名单兜底（用户名留空＝所有用户）</b></p>
-                <div class="table-scroll">
-                  <table class="acl">
-                    <thead><tr><th>账户（用户名）</th><th>主题</th><th>操作</th><th>权限</th></tr></thead>
-                    <tbody>
-                      <tr><td>（留空）</td><td><code>#</code></td><td>发布&amp;订阅</td><td class="deny">拒绝</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-                <p class="note">这条「所有用户 / # / 拒绝」开启白名单：此后只有上面明确允许的规则才放行，其余一律拒绝。</p>
-              </div>
-
-              <div class="card">
-                <span class="step-title">④ 回 App 填写并绑定</span>
-                <ul>
-                  <li>MQTT 服务器：填 EMQX 地址:8883（如 xxxx.emqxsl.com:8883）</li>
-                  <li>被控端用户名 / 密码：填第②步的 DEV 账户（即 d7da9d15 及其密码）</li>
-                  <li>控制端凭证(ctl)：点开，改成第②步的 CTL 账户（<code>ctl-d7da9d15</code>），或直接用默认生成值（只要 EMQX 里一致）</li>
-                  <li>点「生成绑定二维码」→ 用控制端 App 扫码 → 完成配对（会话密钥握手时派生，不进二维码）</li>
-                </ul>
-              </div>
-
-              <div class="card">
-                <div class="tip">
-                  <b>【提示】增加一台被控端设备</b><br/>
-                  可以直接使用 App 里的「设备ID」或自定义设备ID为 99999999（不要跟之前的重复），<br/>
-                  再为这个新的 99999999 及其 <code>ctl-99999999</code> 在 EMQX 重复 ② ③ ④ 即可，无需新建部署 EMQX 服务器。
-                </div>
-              </div>
-
-            </div>
-            </body>
-            </html>
-        """.trimIndent()
-    }
-
     override fun observeRequestState() {}
     override fun initEvent() {}
+
+    override fun onDestroy() {
+        super.onDestroy()
+        guideWebView?.apply {
+            (parent as? android.view.ViewGroup)?.removeView(this)
+            destroy()
+        }
+        guideWebView = null
+    }
 }

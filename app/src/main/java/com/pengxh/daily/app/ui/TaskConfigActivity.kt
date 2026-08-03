@@ -13,6 +13,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
 import com.pengxh.daily.app.utils.ConfigCipher
+import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.TaskDataManager
 import com.pengxh.daily.app.model.ExportDataModel
 import com.pengxh.daily.app.model.EmailConfigData
@@ -71,6 +72,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                     is TaskDataManager.ImportResult.Success -> {
                         withContext(Dispatchers.Main) {
                             reloadSettingsUI()
+                            ConfigImportSignal.notifyRemoteChanged(context)
                             "配置导入成功（含邮箱授权码自动填充）".show(context)
                         }
                     }
@@ -172,6 +174,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                     override fun onConfirmClick(value: String) {
                         SaveKeyValues.saveString(Constant.REMOTE_COMMAND_KEY, value)
                         binding.keyTextView.text = value
+                        ConfigImportSignal.notifyRemoteChanged(context)
                     }
 
                     override fun onCancelClick() {}
@@ -192,6 +195,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             } else {
                 binding.minuteRangeLayout.visibility = View.GONE
             }
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.autoTaskSwitch.setOnCheckedChangeListener { _, isChecked ->
@@ -201,10 +205,12 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             } else {
                 KeepAliveReceiver.cancelResetAlarm(this)
             }
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.skipHolidaySwitch.setOnCheckedChangeListener { _, isChecked ->
             SaveKeyValues.saveBoolean(Constant.SKIP_HOLIDAY_KEY, isChecked)
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.minuteRangeLayout.setOnClickListener {
@@ -352,6 +358,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                 val normalized = orderedDays.filter { it in selectedDays }.toSet()
                 CustomWorkdayManager.saveWorkdays(normalized)
                 updateCustomWorkdaySummary(normalized)
+                ConfigImportSignal.notifyRemoteChanged(context)
             }
             .show()
     }
@@ -401,6 +408,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         TaskScheduler.notifyResetTimeChanged()
         // 重新调度每日重置精确闹钟，使自定义重置点即时生效
         KeepAliveReceiver.scheduleResetAlarm(this, hour)
+        ConfigImportSignal.notifyRemoteChanged(context)
     }
 
     private fun setTimeByPosition(position: Int) {
@@ -436,6 +444,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         binding.timeoutTextView.text = "${time}s"
         SaveKeyValues.saveInt(Constant.STAY_OVERTIME_KEY, time)
         FloatingWindowController.setOvertime(time)
+        ConfigImportSignal.notifyRemoteChanged(context)
     }
 
     private fun updateRandomMinuteRange(value: Int) {
@@ -445,5 +454,6 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         }
         binding.minuteRangeView.text = "${value}分钟"
         SaveKeyValues.saveInt(Constant.TIME_RANGE_KEY, value)
+        ConfigImportSignal.notifyRemoteChanged(context)
     }
 }

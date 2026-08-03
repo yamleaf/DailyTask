@@ -17,6 +17,9 @@ import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
+import com.pengxh.daily.app.utils.ConfigStore
+import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -176,8 +179,9 @@ object RemoteSnapshot {
         return try {
             val today = LocalDate.now()
             val start = today.minusDays(14)
+            val windowEnd = today.plusDays(14) // 与状态查询邮件一致：近两周（含未来两周）
             val allTasks = DatabaseWrapper.loadAllTask()
-            val result = DatabaseWrapper.loadPunchResults(start, today.plusDays(1))
+            val result = DatabaseWrapper.loadPunchResults(start, windowEnd.plusDays(1))
             val successSet = result.successDates.filter { !it.isAfter(today) }.toSet()
             val timeoutSet = result.timeoutDates.filter { !it.isAfter(today) }.toSet()
             val scheduledSet = mutableSetOf<LocalDate>()
@@ -195,9 +199,10 @@ object RemoteSnapshot {
             o.addProperty("recentPunch", successSet.maxOrNull()?.toString() ?: "—")
             o.addProperty("today", todayStatus(today, allTasks, successSet, timeoutSet))
 
-            // 逐日状态（近 15 天：今天往前 14 天）
+            // 逐日状态（近两周 + 未来两周，共 29 天，与状态查询邮件窗口一致；
+            // 未来工作日标 scheduled、未来休息日标 rest，控制端据此渲染满周日历）
             var day = start
-            while (!day.isAfter(today)) {
+            while (!day.isAfter(windowEnd)) {
                 val status = when {
                     day in successSet -> "success"
                     day in timeoutSet -> "timeout"
@@ -280,8 +285,21 @@ object RemoteSnapshot {
             min = 0, max = 23, step = 1)
         add("tr", "随机范围", "int", SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, 5).coerceIn(0, 60),
             min = 0, max = 60, step = 1)
-        add("ot", "停留时长", "int", SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, 30).coerceIn(0, 120),
+        add("ot", "超时时间", "int", SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, 30).coerceIn(0, 120),
             min = 0, max = 120, step = 1)
+        // 消息渠道 + 远程控制开关（镜像到控制端，允许控制端查看与修改）
+        add("re", "远程控制服务", "bool", SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
+        add("mc", "消息渠道", "int", SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, 0).coerceIn(0, 1))
+        add("mt", "消息标题", "string", SaveKeyValues.loadString(Constant.MESSAGE_TITLE_KEY, "打卡结果通知"))
+        val emailObj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
+        add("em", "发件箱", "string", if (emailObj.has("outbox")) emailObj.get("outbox").asString else "")
+        add("ei", "收件箱", "string", if (emailObj.has("inbox")) emailObj.get("inbox").asString else "")
+        // 企业微信 Key / 邮箱授权码属敏感字段：快照只回传「是否已设置」掩码，
+        // 明文永不出网，仅在控制端「配置消息渠道」时由用户重新录入并下发
+        add("wk", "企业微信Key", "string",
+            if (SaveKeyValues.loadString(Constant.WX_WEB_HOOK_KEY, "").isBlank()) "" else "•".repeat(8))
+        add("ea", "邮箱授权码", "string",
+            if (EmailSecureConfig.loadAuthCode().isBlank()) "" else "•".repeat(8))
         return arr
     }
 
@@ -367,10 +385,15 @@ object RemoteSnapshot {
             val start = LocalDate.now().minusDays(14)
             val result = DatabaseWrapper.loadPunchResults(start, LocalDate.now().plusDays(1))
             val notices = DatabaseWrapper.loadCurrentDayNotice()
+            // 今日通知明细已覆盖的日期：跳过日期聚合项，避免「今日打卡」重复出现两条
+            val todayDetailed = notices.filter { it.noticeMessage.contains("考勤打卡") }
+                .map { it.postTime.take(10) }.toSet()
             val all = mutableListOf<Pair<String, String>>()
-            result.successDates.forEach { all.add(it.toString() to "成功") }
-            result.timeoutDates.forEach { all.add(it.toString() to "超时") }
-            // 补充今日通知详情
+            result.successDates.filter { it.toString() !in todayDetailed }
+                .forEach { all.add(it.toString() to "成功") }
+            result.timeoutDates.filter { it.toString() !in todayDetailed }
+                .forEach { all.add(it.toString() to "超时") }
+            // 补充今日通知详情（含时间，保留同一天多次打卡）
             notices.filter { it.noticeMessage.contains("考勤打卡") }
                 .forEach { notice ->
                     val date = notice.postTime.take(10)

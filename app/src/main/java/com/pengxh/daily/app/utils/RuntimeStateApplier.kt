@@ -4,6 +4,8 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.KeepAliveReceiver
@@ -11,6 +13,7 @@ import com.pengxh.daily.app.service.MqttAgentService
 import com.yample.mqttprotocol.MqttPacket
 import com.yample.mqttprotocol.PacketValue
 import com.yample.mqttprotocol.Protocol
+import com.yample.mqttprotocol.SecretBox
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +106,38 @@ object RuntimeStateApplier {
                     SaveKeyValues.saveInt(Constant.STAY_OVERTIME_KEY, v.coerceIn(0, 120))
                     true
                 }
+                Protocol.FIELD_MSG_CHANNEL -> {
+                    val v = (packet.v as? PacketValue.IntValue)?.i ?: 0
+                    SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, v.coerceIn(0, 1))
+                    true
+                }
+                Protocol.FIELD_MESSAGE_TITLE -> {
+                    val v = (packet.v as? PacketValue.StringValue)?.s ?: return@launch
+                    SaveKeyValues.saveString(Constant.MESSAGE_TITLE_KEY, v)
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_REMOTE_ENABLED -> {
+                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
+                    SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, v)
+                    // 开关变更后参照被控端主开关逻辑：开则校验账户并拉起 MQTT 前台服务，关则停止服务
+                    val app = DailyTaskApplication.get()
+                    if (v) {
+                        if (isMqttConfigValid(app)) app.startForegroundService(Intent(app, MqttAgentService::class.java))
+                    } else {
+                        // 延后停服：先让本条指令的 Ack 发出去，避免控制端一直等回执
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            app.stopService(Intent(app, MqttAgentService::class.java))
+                        }, 1500L)
+                    }
+                    ConfigImportSignal.notifyRemoteChanged(app)
+                    true
+                }
+                Protocol.FIELD_MSG_CONFIG -> {
+                    val json = (packet.v as? PacketValue.StringValue)?.s ?: return@launch
+                    applyMessageConfig(json)
+                    true
+                }
                 "ax", "cx" -> false // 权限类开关，拒绝执行
                 else -> false
             }
@@ -128,6 +163,57 @@ object RuntimeStateApplier {
             KeepAliveReceiver.schedule(app)
         } else {
             KeepAliveReceiver.cancel(app)
+        }
+    }
+
+    /** MQTT 账户是否完整（broker + 被控端用户名 + 被控端密码 均非空） */
+    private fun isMqttConfigValid(ctx: android.content.Context): Boolean =
+        SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "").isNotBlank() &&
+            SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "").isNotBlank() &&
+            MqttSecureConfig.loadPass().isNotBlank()
+
+    /**
+     * 消息渠道批量配置（控制端下发）：JSON {wxKey, emailOutbox, emailInbox, emailAuth, messageTitle}。
+     * 敏感字段（企业微信 Key / 邮箱授权码）只在此处由控制端录入后下发落地，快照中始终以掩码呈现。
+     */
+    private fun applyMessageConfig(payload: String) {
+        try {
+            // 需求 8：控制端用会话密钥做了 AES-GCM 信封加密，这里先解封（旧版明文报文原样兼容）
+            val session = SaveKeyValues.loadString(Constant.MQTT_SESSION_SECRET_KEY, "")
+            val json = SecretBox.open(session, payload)
+            val obj = JsonParser.parseString(json).asJsonObject
+            val app = DailyTaskApplication.get()
+            if (obj.has("wxKey")) {
+                val k = obj.get("wxKey").asString
+                if (k.isNotBlank()) SaveKeyValues.saveString(Constant.WX_WEB_HOOK_KEY, k)
+            }
+            if (obj.has("emailOutbox") || obj.has("emailInbox")) {
+                // 合并写入：只覆盖控制端本次下发的字段，保留本机既有的其他键值
+                val cache: JsonObject = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
+                if (obj.has("emailOutbox")) {
+                    val raw = obj.get("emailOutbox").asString.trim()
+                    if (raw.isNotBlank()) {
+                        // 与本机「消息渠道」页保持一致：纯 QQ 号自动补全 @qq.com
+                        val outbox = if (raw.contains("@")) raw else "$raw@qq.com"
+                        cache.addProperty("outbox", outbox)
+                    }
+                }
+                if (obj.has("emailInbox")) {
+                    val inbox = obj.get("emailInbox").asString.trim()
+                    if (inbox.isNotBlank()) cache.addProperty("inbox", inbox)
+                }
+                ConfigStore.get().save(Constant.EMAIL_CONFIG_KEY, cache)
+            }
+            if (obj.has("emailAuth")) {
+                val a = obj.get("emailAuth").asString
+                if (a.isNotBlank()) EmailSecureConfig.saveAuthCode(a)
+            }
+            if (obj.has("messageTitle")) {
+                val t = obj.get("messageTitle").asString
+                if (t.isNotBlank()) SaveKeyValues.saveString(Constant.MESSAGE_TITLE_KEY, t)
+            }
+            ConfigImportSignal.notifyRemoteChanged(app)
+        } catch (_: Exception) {
         }
     }
 }

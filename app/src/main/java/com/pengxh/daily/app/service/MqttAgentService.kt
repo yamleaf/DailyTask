@@ -583,6 +583,9 @@ class MqttAgentService : Service() {
         lastUnbindReason = "" // 重新配对成功，清除此前的解绑原因
 
         publishPairAccept()
+        // 配对成功后立即发布 online retained status，覆盖此前解绑时发布的 force_unbound/unbound，
+        // 否则控制端重连订阅 status 时仍会收到旧的 retained 解绑消息，误触发解绑流程。
+        scope.launch { publishStatus("online") }
         bindingStateListener?.invoke(true)
         updateNotification()
         "已与控制端完成配对".showToast()

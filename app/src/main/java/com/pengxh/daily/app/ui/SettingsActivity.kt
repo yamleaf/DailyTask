@@ -256,6 +256,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                         SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
                         applyTargetAppIcon()
                         updateResultSourceView()
+                        ConfigImportSignal.notifyRemoteChanged(context)
                     }
                 }).build().show()
         }
@@ -318,6 +319,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                                 updateAccessibilityFeedbackView()
                             }
                         }
+                        ConfigImportSignal.notifyRemoteChanged(context)
                     }
                 }).build().show()
         }
@@ -339,6 +341,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     override fun onActionItemClick(position: Int) {
                         SaveKeyValues.saveInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, position)
                         updateAccessibilityFeedbackView()
+                        ConfigImportSignal.notifyRemoteChanged(context)
                     }
                 }).build().show()
         }
@@ -384,6 +387,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 binding.captureTipsView.setTextColor(Color.RED)
                 binding.captureTipsView.visibility = View.VISIBLE
                 updateResultSourceView()
+                ConfigImportSignal.notifyRemoteChanged(context)
                 "截屏服务已关闭".show(this)
             } else {
                 // 当前未开启 → 先弹窗提醒，确认后再拉起 MediaProjection 授权
@@ -430,6 +434,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 KeepAliveReceiver.cancel(this)
                 "已关闭开机自启/后台保活".show(this)
             }
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         // 通知转移开关已移至设置页“通知监听”下方
@@ -462,6 +467,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     else -> "请先在设置中配置消息渠道（邮箱/企业微信）".show(this)
                 }
             }
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.openTestLayout.setOnClickListener {
@@ -546,6 +552,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 return@setOnCheckedChangeListener
             }
             SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, isChecked)
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.backToHomeSwitch.setOnCheckedChangeListener { _, isChecked ->
@@ -553,6 +560,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 return@setOnCheckedChangeListener
             }
             SaveKeyValues.saveBoolean(Constant.BACK_TO_HOME_KEY, isChecked)
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.powerSaveSwitch.setOnCheckedChangeListener { _, isChecked ->
@@ -560,6 +568,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 return@setOnCheckedChangeListener
             }
             AppRuntimeConfig.setPowerSaveMode(isChecked)
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         // 强制伪息屏 / 伪息屏增强 总开关：两者状态完全一致，双向同步
@@ -575,6 +584,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             binding.forcePseudoMaskSwitch.isChecked = checked
             binding.pseudoMaskGroupSwitch.isChecked = checked
             syncingSwitchState = false
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         binding.forcePseudoMaskSwitch.setOnCheckedChangeListener { _, isChecked ->
@@ -643,6 +653,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             }
             SaveKeyValues.saveBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, isChecked)
             LogFileManager.writeLog("伪息屏隐藏时钟：${if (isChecked) "开启" else "关闭"}")
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
 
         // 强制伪息屏延时（秒）：离开本软件超过该秒数进入伪息屏（10~3600，默认 60）
@@ -760,6 +771,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                 SaveKeyValues.saveInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, v)
                 binding.pseudoMaskDelayValueText.text =
                     getString(R.string.settings_pseudo_mask_delay_value, v)
+                ConfigImportSignal.notifyRemoteChanged(context)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -958,6 +970,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
         SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, Constant.CUSTOM_TARGET_INDEX)
         SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, pkg)
         applyTargetAppIcon()
+        ConfigImportSignal.notifyRemoteChanged(context)
         getString(R.string.settings_pick_app_added, resolveAppLabel(pkg)).show(this)
     }
 
@@ -973,6 +986,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
         }
         applyTargetAppIcon()
+        ConfigImportSignal.notifyRemoteChanged(context)
         customAppDialog?.dismiss()
         showCustomAppManagerDialog()
     }
@@ -1014,6 +1028,7 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
                     SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
                 }
                 applyTargetAppIcon()
+                ConfigImportSignal.notifyRemoteChanged(context)
                 "已保存自定义打卡应用".show(this)
             }
             .show()

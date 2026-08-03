@@ -6,6 +6,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.JsonObject
 import com.pengxh.daily.app.databinding.ActivityMessageChannelBinding
+import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
@@ -76,6 +77,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             SaveKeyValues.saveString(
                 Constant.WX_WEB_HOOK_KEY, binding.wxKeyView.text.toString()
             )
+            ConfigImportSignal.notifyRemoteChanged(context)
 
             MaterialAlertDialogBuilder(this)
                 .setTitle("测试消息")
@@ -131,6 +133,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             }
             ConfigStore.get().save(Constant.EMAIL_CONFIG_KEY, cacheObj)
             EmailSecureConfig.saveAuthCode(binding.emailSendCodeView.text.toString())
+            ConfigImportSignal.notifyRemoteChanged(context)
 
             sendTestEmail()
         }
@@ -140,6 +143,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             if (isChecked) {
                 "已开启关闭反馈通知，将不再发送邮件/企业微信消息".show(this)
             }
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
     }
 
@@ -161,6 +165,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                 )
 
                 SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, 1)
+                ConfigImportSignal.notifyRemoteChanged(context)
             },
             onFailure = {
                 if (isFinishing || isDestroyed) return@sendMessage
@@ -190,6 +195,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                         )
 
                         SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, 0)
+                        ConfigImportSignal.notifyRemoteChanged(context)
                     },
                     onFailure = {
                         LoadingDialog.dismiss()

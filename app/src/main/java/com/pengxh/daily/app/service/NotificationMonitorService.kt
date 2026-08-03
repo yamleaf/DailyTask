@@ -25,7 +25,10 @@ import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.MonitorEvent
+import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.ProjectionSession
+import com.pengxh.daily.app.DailyTaskApplication
+import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.extensions.show
@@ -385,6 +388,36 @@ class NotificationMonitorService : NotificationListenerService() {
                 MessageDispatcher.sendMessage(
                     "通知转移状态通知",
                     StatusReporter.buildTransferStatusHtml(false, null),
+                    force = true, appendMeta = false
+                )
+            }
+
+            command.contains("开启远程") -> {
+                LogFileManager.writeLog("收到开启远程指令")
+                SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, true)
+                val intent = Intent(this, MqttAgentService::class.java)
+                val valid = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "").isNotBlank()
+                        && SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "").isNotBlank()
+                        && MqttSecureConfig.loadPass().isNotBlank()
+                if (valid) {
+                    startForegroundService(intent)
+                    MessageDispatcher.sendMessage(
+                        "远程服务状态通知",
+                        "已开启本机远程控制服务（MQTT），控制端可重新连接。",
+                        force = true, appendMeta = false
+                    )
+                } else {
+                    "MQTT 未配置完整，无法开启远程".show(this)
+                }
+            }
+
+            command.contains("关闭远程") -> {
+                LogFileManager.writeLog("收到关闭远程指令")
+                SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, false)
+                stopService(Intent(this, MqttAgentService::class.java))
+                MessageDispatcher.sendMessage(
+                    "远程服务状态通知",
+                    "已关闭本机远程控制服务（MQTT）。",
                     force = true, appendMeta = false
                 )
             }

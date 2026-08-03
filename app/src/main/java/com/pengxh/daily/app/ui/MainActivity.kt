@@ -607,6 +607,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                     DatabaseWrapper.loadAllTask()
                 }
                 dailyTaskAdapter.refresh(taskBeans)
+                ConfigImportSignal.notifyRemoteChanged(context)
                 dialog.dismiss()
             }
         }
@@ -638,6 +639,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                             DatabaseWrapper.loadAllTask()
                         }
                         dailyTaskAdapter.refresh(taskBeans)
+
+                        ConfigImportSignal.notifyRemoteChanged(context)
 
                         if (taskBeans.isEmpty()) {
                             binding.recyclerView.visibility = View.GONE
@@ -710,6 +713,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                     DatabaseWrapper.loadAllTask()
                 }
                 dailyTaskAdapter.refresh(taskBeans)
+                ConfigImportSignal.notifyRemoteChanged(context)
                 dialog.dismiss()
             }
         }
@@ -740,6 +744,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                                     dailyTaskAdapter.refresh(taskBeans)
                                     binding.recyclerView.visibility = View.VISIBLE
                                     binding.emptyView.visibility = View.GONE
+                                    ConfigImportSignal.notifyRemoteChanged(context)
                                 }
                                 "任务导入成功".show(context)
                             }
