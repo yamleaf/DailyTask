@@ -83,8 +83,20 @@ object Constant {
     const val RESULT_SOURCE_KEY = "RESULT_SOURCE_KEY"
     /** 无障碍反馈模式：0=截屏反馈, 1=文本反馈 */
     const val ACCESSIBILITY_FEEDBACK_MODE_KEY = "ACCESSIBILITY_FEEDBACK_MODE_KEY"
-    /** 电量低于 30% 是否已提醒过（回升到 30% 以上后清零） */
+    /** 电量低于 30% 是否已提醒过（旧版单次提醒标记，已被三段式标记取代，保留以兼容旧数据） */
     const val LOW_BATTERY_NOTIFIED_KEY = "LOW_BATTERY_NOTIFIED_KEY"
+    /** 低电量告警阈值（%，默认 30，范围 10~80），经设置镜像链路贯通控制端 */
+    const val LOW_BATTERY_THRESHOLD_KEY = "LOW_BATTERY_THRESHOLD_KEY"
+    /** 三段式低电量告警已提醒标记：阈值→阈值-10→阈值-20 各触发一次，充电或阈值变更后清零 */
+    const val LOW_BATTERY_STAGE1_KEY = "LOW_BATTERY_STAGE1_KEY"
+    const val LOW_BATTERY_STAGE2_KEY = "LOW_BATTERY_STAGE2_KEY"
+    const val LOW_BATTERY_STAGE3_KEY = "LOW_BATTERY_STAGE3_KEY"
+    /** 「低电量→充电」取消通知已上报标记：本轮低电量周期已报过一次取消通知后置 true，
+     *  当电量再次跌破任一档阈值（重新进入低电量状态）时重置为 false，方允许下次充电再报一次 */
+    const val LOW_BATTERY_CHARGE_NOTIFIED_KEY = "LOW_BATTERY_CHARGE_NOTIFIED_KEY"
+    /** 「电量已充满」通知已上报标记：本轮充电周期达到 100% 已报过一次后置 true；
+     *  当设备拔出电源/电量回落（充电态结束）时重置为 false，方允许下次充满再报一次 */
+    const val BATTERY_FULL_NOTIFIED_KEY = "BATTERY_FULL_NOTIFIED_KEY"
     const val INSTALL_ID_KEY = "INSTALL_ID_KEY"
 
     // ConfigStore 键
@@ -111,6 +123,7 @@ object Constant {
     const val DEFAULT_RESET_HOUR = 0
     const val DEFAULT_TIME_RANGE = 5
     const val DEFAULT_OVER_TIME = 30
+    const val DEFAULT_LOW_BATTERY_THRESHOLD = 30
     const val CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID = 1001
     const val FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID = 1002
 

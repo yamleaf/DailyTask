@@ -138,6 +138,16 @@ object RuntimeStateApplier {
                     applyMessageConfig(json)
                     true
                 }
+                Protocol.FIELD_LOW_BATTERY_THRESHOLD -> {
+                    val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
+                    // 阈值范围 10~80%，变更后清零三段提醒标记，避免旧阈值下的已提醒状态污染新阈值
+                    SaveKeyValues.saveInt(Constant.LOW_BATTERY_THRESHOLD_KEY, v.coerceIn(10, 80))
+                    SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE1_KEY, false)
+                    SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE2_KEY, false)
+                    SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE3_KEY, false)
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
                 "ax", "cx" -> false // 权限类开关，拒绝执行
                 else -> false
             }

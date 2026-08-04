@@ -83,6 +83,8 @@ class ForegroundRunningService : Service() {
     }
 
     private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
+    /** 上一次检测时的充电状态，用于仅在「刚插入充电」的瞬间触发一次「开始充电」通知 */
+    private var wasCharging = false
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
@@ -166,6 +168,10 @@ class ForegroundRunningService : Service() {
         // 立即更新一次倒计时显示
         updateResetTimeView()
 
+        // 初始化充电状态基线，避免服务启动瞬间误触发「开始充电」通知
+        val initStatus = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
+        wasCharging = initStatus == BatteryManager.BATTERY_STATUS_CHARGING
+                || initStatus == BatteryManager.BATTERY_STATUS_FULL
         checkLowBattery()
         // 立即记录一笔电池采样（之后由每分钟 TIME_TICK 续记）
         BatteryHistory.recordSample(this)
@@ -249,28 +255,127 @@ class ForegroundRunningService : Service() {
         return delta.toInt()
     }
 
+    /**
+     * 低电量告警（分段 3 次 + 充电取消）：
+     * - 阈值 T（默认 30%，范围 10~80%，可在控制端镜像设置）由 [Constant.LOW_BATTERY_THRESHOLD_KEY] 读取。
+     * - 三档边界 T / T-10 / T-20，每档在电量首次跌破时各告警一次（直到充电或阈值变更清零）。
+     *   例 T=30：29%→第1档、19%→第2档、9%→第3档。
+     * - 手机「开始充电」的瞬间（充电状态由 false→true）：清零全部三段标记，下次放电重新计数；
+     *   仅当开始充电时电量仍低于阈值（即确实处于低电量告警状态）且「本轮低电量周期尚未报过」才发送一次
+     *   「开始充电，低电量告警取消」通知；充电抖动或第一段/第二段/第三段均不会重复上报。
+     *   只有当电量再次跌破阈值（重新进入低电量状态）时，才重置并允许下一次充电再报一次。
+     * - 告警同时走反馈渠道（邮件/企业微信）与控制端 MQTT 推送（控制端 App 打开且远程控制开启时可见）。
+     */
     private fun checkLowBattery() {
         val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        if (battery in 0 until 30) {
-            val alreadyNotified =
-                SaveKeyValues.loadBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, false)
-            if (alreadyNotified) return
+        val threshold = SaveKeyValues.loadInt(
+            Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
+        ).coerceIn(10, 80)
+        // 充电态：BATTERY_STATUS_CHARGING(插着且未充满) 或 BATTERY_STATUS_FULL(插着已充满)，均视为接入电源
+        val status = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS)
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING
+                || status == BatteryManager.BATTERY_STATUS_FULL
 
-            SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, true)
-            LogFileManager.writeLog("低电量提醒：当前 $battery%，发送通知邮件")
-            MessageDispatcher.sendMessage(
-                "低电量提醒",
-                StatusReporter.buildLowBatteryContentHtml(battery),
-                force = true,
-                appendMeta = false
-            )
-        } else if (battery >= 30) {
-            // 电量回升到 30% 及以上，允许下次再提醒
-            if (SaveKeyValues.loadBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, false)) {
-                SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_NOTIFIED_KEY, false)
-                LogFileManager.writeLog("电量已回升至 $battery%，重置低电量提醒标记")
+        // 1) 刚插入充电：清零三段标记（重新计数）；
+        //    仅当「充电前电量仍低于阈值」且「本轮低电量周期尚未报过取消通知」才发一次；
+        //    避免第一段/第二段/第三段各报一次、或充电抖动（断充瞬间再插电）导致的重复上报。
+        if (charging && !wasCharging) {
+            resetLowBatteryStages()
+            val chargeNotified = SaveKeyValues.loadBoolean(Constant.LOW_BATTERY_CHARGE_NOTIFIED_KEY, false)
+            if (battery < threshold) {
+                if (!chargeNotified) {
+                    LogFileManager.writeLog("设备开始充电：当前 ${battery}% < 阈值 ${threshold}%，发送低电量告警取消通知")
+                    MessageDispatcher.sendMessage(
+                        "电量开始充电",
+                        StatusReporter.buildChargingResumedContentHtml(battery),
+                        force = true,
+                        appendMeta = false
+                    )
+                    MqttAgentService.publishAlert(
+                        buildAlertJson("charging_resumed", battery, threshold, null)
+                    )
+                    SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_CHARGE_NOTIFIED_KEY, true)
+                } else {
+                    LogFileManager.writeLog("设备开始充电：当前 ${battery}% < 阈值 ${threshold}%，但本轮已报过取消通知，跳过重复上报")
+                }
+            } else {
+                LogFileManager.writeLog("设备开始充电：当前 ${battery}% 未低于阈值 ${threshold}%，不发送低电量告警取消通知")
             }
         }
+        wasCharging = charging
+
+        // 1.5) 电量已充满通知：充电态下电量到达 100%（status=FULL 或 capacity=100）时上报一次。
+        // 与「开始充电」取消通知同规则防重复：本轮充电周期已报过则跳过，直到充电态结束
+        // （拔出电源/电量回落，charging=false）才复位，允许下次充满再报一次。
+        if (charging) {
+            val isFull = status == BatteryManager.BATTERY_STATUS_FULL || battery >= 100
+            if (isFull) {
+                val fullNotified = SaveKeyValues.loadBoolean(Constant.BATTERY_FULL_NOTIFIED_KEY, false)
+                if (!fullNotified) {
+                    SaveKeyValues.saveBoolean(Constant.BATTERY_FULL_NOTIFIED_KEY, true)
+                    LogFileManager.writeLog("电量已充满：当前 ${battery}%，发送充满通知")
+                    MessageDispatcher.sendMessage(
+                        "电量已充满",
+                        StatusReporter.buildBatteryFullContentHtml(battery),
+                        force = true,
+                        appendMeta = false
+                    )
+                    MqttAgentService.publishAlert(
+                        buildAlertJson("battery_full", battery, threshold, null)
+                    )
+                } else {
+                    LogFileManager.writeLog("电量已充满：当前 ${battery}%，本轮已上报过，跳过重复上报")
+                }
+            }
+        } else {
+            // 未在充电：复位「已充满」标记，下次充满周期可再次上报
+            SaveKeyValues.saveBoolean(Constant.BATTERY_FULL_NOTIFIED_KEY, false)
+        }
+
+        // 充电中不处理低电量分段（避免插着电反复误报）
+        if (charging) return
+
+        // 2) 三段式低电量告警
+        val stageBounds = listOf(
+            Triple(Constant.LOW_BATTERY_STAGE1_KEY, threshold, 1),
+            Triple(Constant.LOW_BATTERY_STAGE2_KEY, threshold - 10, 2),
+            Triple(Constant.LOW_BATTERY_STAGE3_KEY, threshold - 20, 3)
+        )
+        for ((key, bound, stage) in stageBounds) {
+            if (battery < bound && !SaveKeyValues.loadBoolean(key, false)) {
+                SaveKeyValues.saveBoolean(key, true)
+                // 跌破任一档边界即说明当前电量低于阈值（重新进入低电量状态），
+                // 允许下次充电时再报一次取消通知（清零「已报」标记）
+                SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_CHARGE_NOTIFIED_KEY, false)
+                LogFileManager.writeLog("低电量提醒（第${stage}档，阈值<${bound}%）：当前 ${battery}%，发送通知")
+                MessageDispatcher.sendMessage(
+                    "低电量提醒（第${stage}档）",
+                    StatusReporter.buildLowBatteryContentHtml(battery, threshold, stage),
+                    force = true,
+                    appendMeta = false
+                )
+                MqttAgentService.publishAlert(
+                    buildAlertJson("low_battery", battery, threshold, stage)
+                )
+            }
+        }
+    }
+
+    /** 清零三段低电量告警标记 */
+    private fun resetLowBatteryStages() {
+        SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE1_KEY, false)
+        SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE2_KEY, false)
+        SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE3_KEY, false)
+    }
+
+    /** 构造低电量告警的 MQTT 推送 JSON（type: low_battery | charging_resumed | battery_full） */
+    private fun buildAlertJson(type: String, battery: Int, threshold: Int, stage: Int?): String {
+        return org.json.JSONObject().apply {
+            put("type", type)
+            put("battery", battery)
+            put("threshold", threshold)
+            if (stage != null) put("stage", stage)
+        }.toString()
     }
 
     /**

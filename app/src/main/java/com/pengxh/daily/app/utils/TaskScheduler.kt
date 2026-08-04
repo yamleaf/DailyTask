@@ -119,6 +119,9 @@ object TaskScheduler {
 
         _isRunning.value = true
         runningDetail = "初始化排程"
+        // 运行态变化会影响快照的 schedulerRunning：失效全量快照缓存，
+        // 否则控制端在 30s TTL 内查询会拿到「调度未运行」的旧缓存，把正确状态覆盖回去。
+        RemoteSnapshot.invalidateCache()
 
         val tempJob = currentScope.launch {
             while (isActive) {
@@ -142,6 +145,7 @@ object TaskScheduler {
         tempJob.invokeOnCompletion {
             _isRunning.value = false
             runningDetail = "空闲"
+            RemoteSnapshot.invalidateCache()
         }
         job = tempJob
     }
@@ -464,6 +468,7 @@ object TaskScheduler {
         job = null
         _isRunning.value = false
         runningDetail = "空闲"
+        RemoteSnapshot.invalidateCache()
         ForegroundRunningService.emitNotificationText("为保证程序正常运行，请勿移除此通知")
     }
 
@@ -481,6 +486,7 @@ object TaskScheduler {
         job = null
         _isRunning.value = false
         runningDetail = "空闲"
+        RemoteSnapshot.invalidateCache()
     }
 
     /**

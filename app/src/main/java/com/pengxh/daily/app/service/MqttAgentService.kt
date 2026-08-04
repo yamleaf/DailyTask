@@ -50,6 +50,16 @@ class MqttAgentService : Service() {
         private const val TAG = "MqttAgentService"
         private var instance: MqttAgentService? = null
 
+        /** 增量推送：状态变化时通知控制端刷新（打卡完成 / 任务启停）。publishPush 已做未配对/未连接守卫。 */
+        fun pushTaskIncrement() {
+            instance?.publishPush(setOf("tasks", "calendar", "statuses"))
+        }
+
+        /** 测量到 broker 的 RTT（ms），以 QoS1 PUBACK 到达时刻计时；未连接时回调 -1 */
+        fun measureRtt(callback: (Long) -> Unit) {
+            instance?.doMeasureRtt(callback) ?: callback(-1)
+        }
+
         fun isRunning(): Boolean = instance != null
         fun isConnected(): Boolean = instance?._connected ?: false
         fun isBound(): Boolean = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
@@ -72,6 +82,14 @@ class MqttAgentService : Service() {
         /** 由 RuntimeStateApplier 调用，回执远程指令执行结果 */
         fun publishAck(rid: String, result: String) {
             instance?.doPublishAck(rid, result)
+        }
+
+        /**
+         * 低电量分段告警 / 开始充电通知 → 经 MQTT 推送给控制端。
+         * 守卫在 publishAlertInternal 内（未连接 / 未配对不推送）。
+         */
+        fun publishAlert(json: String) {
+            instance?.publishAlertInternal(json)
         }
 
         /** 被控端主动强制解绑：仅清绑定态，保留 MQTT 配置 */
@@ -456,6 +474,11 @@ class MqttAgentService : Service() {
             doPublishAck(packet.rid, result)
             // 数据变更增量推送：让控制端本地缓存即时更新（不再依赖轮询）
             if (result == "SUCCESS") {
+                // 动作改变了运行/任务/日历/历史等状态 → 失效全量快照缓存。
+                // 若不失效，控制端收到 ACK 后触发的 forceRefreshSnapshot（走 buildJson、命中 30s TTL 缓存）
+                // 会返回动作执行前的旧快照，把刚由增量推送更新的正确状态覆盖回旧值 → 卡片蓝变灰。
+                // 只有 buildDelta（增量推送）实时无缓存；buildJson（全量查询）复用缓存，必须先失效。
+                RemoteSnapshot.invalidateCache()
                 when (action) {
                     Protocol.ACTION_PUNCH -> {
                         publishPush(setOf("statuses", "runtime"))
@@ -716,6 +739,28 @@ class MqttAgentService : Service() {
         }
     }
 
+    /**
+     * 测量到 broker 的往返时延：在 IO 协程中同步 publish 一条 QoS1 的 ping，
+     * 以 PUBACK 返回（publish 阻塞返回）时刻计时，近似 RTT。
+     * 注：本工程编译期可见的 MqttClient.publish 仅含同步重载（byte[]/MqttMessage），
+     * 异步 IMqttActionListener 重载不可见，故用 scope.launch(Dispatchers.IO) 包裹同步调用，
+     * 既拿到 PUBACK 时刻、又不阻塞主线程。
+     */
+    private fun doMeasureRtt(callback: (Long) -> Unit) {
+        val client = mqttClient ?: return callback(-1)
+        if (!client.isConnected) return callback(-1)
+        val topic = "${Protocol.TOPIC_PREFIX}/$deviceId/ping"
+        scope.launch {
+            try {
+                val sent = System.currentTimeMillis()
+                client.publish(topic, MqttMessage("{}".toByteArray()).apply { qos = 1 })
+                callback(System.currentTimeMillis() - sent)
+            } catch (e: Exception) {
+                callback(-1)
+            }
+        }
+    }
+
     private fun publishStatus(state: String) {
         mqttClient?.publish(
             topicStatus(),
@@ -804,6 +849,43 @@ class MqttAgentService : Service() {
     private fun topicPair() = "${Protocol.TOPIC_PREFIX}/$deviceId/pair"
     private fun topicPairAccept() = "${Protocol.TOPIC_PREFIX}/$deviceId/pair/accept"
     private fun topicPush() = "${Protocol.TOPIC_PREFIX}/$deviceId/push"
+
+    /**
+     * 一次性事件告警推送（dt/{id}/alert）：低电量分段告警、开始充电通知等。
+     * 与 publishPush 不同，这是「事件」而非「状态」，不进快照缓存，仅推一次。
+     * 仅在已配对（有会话密钥）且已连接时推送。
+     */
+    private fun publishAlertInternal(json: String) {
+        val client = mqttClient ?: return
+        if (!client.isConnected) return
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) return // 未配对不推送
+        scope.launch {
+            try {
+                val ts = System.currentTimeMillis()
+                val rid = UUID.randomUUID().toString()
+                val sign = MqttSigner.sign(session, deviceId, ts, rid, "alert", "s", json, Protocol.CMD_ALERT)
+                val packet = MqttPacket(
+                    c = Protocol.CMD_ALERT,
+                    f = "alert",
+                    v = PacketValue.StringValue(json),
+                    rid = rid,
+                    ts = ts,
+                    sign = sign
+                )
+                client.publish(
+                    topicAlert(),
+                    MqttMessage(gson.toJson(packet).toByteArray()).apply { qos = 1 }
+                )
+                MqttQuota.add(this@MqttAgentService, 1, 0)
+                Log.d(TAG, "告警推送 alert -> ${topicAlert()} $json")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun topicAlert() = "${Protocol.TOPIC_PREFIX}/$deviceId/alert"
 
     /**
      * 带诊断的订阅：返回订阅是否真正成功（broker 授予的 QoS != 128）。
@@ -926,6 +1008,9 @@ class MqttAgentService : Service() {
         bindingStateListener = null
         scope.cancel()
         MqttQuota.onDisconnect(this)
+        // 优雅停止：主动发布 retained offline（区别于 broker 的 Last-Will 异常掉线），
+        // 让控制端在服务被主动关闭时也能即时感知离线（需求：掉线增强）。
+        try { if (mqttClient?.isConnected == true) publishStatus("offline") } catch (_: Exception) { }
         try {
             mqttClient?.disconnect()
             mqttClient?.close()

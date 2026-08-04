@@ -287,6 +287,8 @@ object RemoteSnapshot {
             min = 0, max = 60, step = 1)
         add("ot", "超时时间", "int", SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, 30).coerceIn(0, 120),
             min = 0, max = 120, step = 1)
+        add("lb", "低电量阈值", "int", SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80),
+            min = 10, max = 80, step = 1)
         // 消息渠道 + 远程控制开关（镜像到控制端，允许控制端查看与修改）
         add("re", "远程控制服务", "bool", SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
         add("mc", "消息渠道", "int", SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, 0).coerceIn(0, 1))

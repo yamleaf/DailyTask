@@ -57,6 +57,7 @@ import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.TaskDataManager
+import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.utils.TipsEvent
 import com.pengxh.daily.app.utils.WatermarkDrawable
@@ -488,6 +489,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         when (event) {
             is MonitorEvent.ClockInSuccess -> {
                 TaskScheduler.notifyClockIn() // 通知 TaskScheduler：打卡成功，取消超时等待分支
+                MqttAgentService.pushTaskIncrement() // 打卡完成 → 增量推送控制端刷新日历/任务
                 backToMainActivity()
             }
 
@@ -495,9 +497,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 if (!TaskScheduler.isRunning()) {
                     TaskScheduler.startTask()
                 }
+                MqttAgentService.pushTaskIncrement() // 任务调度启动 → 推送状态变化
             }
 
-            is MonitorEvent.StopTaskCommand -> doStopTask()
+            is MonitorEvent.StopTaskCommand -> {
+                doStopTask()
+                MqttAgentService.pushTaskIncrement() // 任务调度停止 → 推送状态变化
+            }
 
             is MonitorEvent.ShowMaskCommand -> {
                 MaskOverlayHelper.show(this)
