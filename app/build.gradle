@@ -5,6 +5,37 @@ plugins {
     id('org.jetbrains.kotlin.android')
 }
 
+// ==== 构建标识（在 android{} 之外定义，供 defaultConfig 与产物命名共用）====
+
+// git 短哈希：优先取 CI 注入的 GIT_COMMIT_SHORT，本地编译回退到实际 git HEAD，
+// 都拿不到才退化为 nogit（回退值刻意不叫 local，避免与下面的构建来源标识混淆）
+def gitShort = {
+    def fromEnv = System.getenv('GIT_COMMIT_SHORT')
+    if (fromEnv) return fromEnv.take(7)
+    try {
+        def proc = 'git rev-parse --short=7 HEAD'.execute(null, rootDir)
+        proc.waitFor()
+        if (proc.exitValue() == 0) {
+            def sha = proc.text.trim()
+            if (sha) return sha.take(7)
+        }
+    } catch (Exception ignored) {
+    }
+    return 'nogit'
+}()
+
+// 构建来源标识：区分 CI 产物与本机手工编译产物。
+// GITHUB_ACTIONS/CI 由 GitHub Actions 自动注入，无需在 workflow 里手工声明；
+// 另留 BUILD_SOURCE 环境变量作为显式覆盖通道（迁移到其他 CI 时可手工指定）。
+def buildSource = System.getenv('BUILD_SOURCE') ?:
+        (((System.getenv('GITHUB_ACTIONS') == 'true') || (System.getenv('CI') == 'true')) ? 'ci' : 'local')
+
+// 产物标识：<构建来源>-<git短哈希>，如 local-9a76231 / ci-abcdef1
+def buildTag = "${buildSource}-${gitShort}"
+
+// 构建时间（分钟精度，与 versionCode 的 2 分钟粒度相称，避免秒级变动导致无谓重编）
+def buildTime = new SimpleDateFormat('yyyy-MM-dd HH:mm', Locale.CHINA).format(new Date())
+
 android {
     namespace 'com.pengxh.daily.app'
     compileSdk 36
@@ -21,9 +52,8 @@ android {
 
         // 版本号策略（alpha 分支）：
         // - 基线版本号自动同步 master 分支的 app/build.gradle（alpha 即基于该主线版本）
-        // - 默认（未设置或为 alpha）：alpha 自动版本
-        //     versionName = <master基线版本>-alpha-<git短哈希>
-        //     versionCode = 日期时间整数 yyMMdd*1000+HHmm（如 2607181153，每次编译分钟级唯一）
+        // - 默认（未设置或为 alpha）：自动版本
+        //     versionName = <master基线版本>-<构建来源>-<git短哈希>，如 2.4.2.1-local-9a76231
         // - 仅当显式设置 BUILD_FLAVOR=release 时回退到 master 固定版本号（正式发版用）
         def baselineVersion = {
             try {
@@ -36,20 +66,38 @@ android {
             } catch (Exception ignored) {}
             return '2.4.2.0'
         }()
+
+        // 版本信息页所需的构建元数据
+        buildConfigField 'String', 'BUILD_SOURCE', "\"$buildSource\""
+        buildConfigField 'String', 'GIT_SHA', "\"$gitShort\""
+        buildConfigField 'String', 'BUILD_TIME', "\"$buildTime\""
+        buildConfigField 'String', 'BASELINE_VERSION', "\"$baselineVersion\""
+
         def isAlphaBuild = System.getenv('BUILD_FLAVOR') != 'release'
         if (isAlphaBuild) {
-            def gitShort = (System.getenv('GIT_COMMIT_SHORT') ?: 'local').take(7)
-            // versionCode 采用日期时间整数 yyMMdd*1000+HHmm（如 2607181153），
-            // 既保持日期可读格式，又保证每次编译（分钟级）唯一，避免同天覆盖安装冲突。
+            // versionCode = yyMMdd*1000 + 720 + (HH*30 + mm/2)
+            //
+            // 为什么不是原来的 yyMMdd*1000 + HHmm：HHmm 最大 2359 远超 1000，10:00 之后必然进位
+            // 污染日期位，导致「今天 23:59 的包 > 明天 00:01 的包」——Android 拒绝 versionCode 降级，
+            // 第二天凌晨打的新包反而装不上前一晚的旧包，且 08-04 10:12 与 08-05 00:12 会算出同一个数。
+            //
+            // 现算法：(HH*30 + mm/2) 是「当天第几个 2 分钟片」，取值 0..719，绝不越界；
+            // +720 偏移把当天取值抬进 [720,1439] 区间，作用有二：
+            //   1) 保证严格大于历史上按旧算法已发出的版本号（如 260805012），不会触发降级；
+            //   2) 跨天时 (D+1)*1000+720 恒大于 D*1000+1439，全局严格单调。
+            // 上限 991231*1000+1439 ≈ 9.9e8，远低于 int 上限 2.147e9，不会溢出。
+            // 代价：同 2 分钟内的两次构建会得到相同 versionCode（一次构建耗时 1~5 分钟，不构成问题）。
             def now = new Date()
             def ymd = new SimpleDateFormat('yyMMdd', Locale.CHINA).format(now).toInteger()
-            def hm = new SimpleDateFormat('HHmm', Locale.CHINA).format(now).toInteger()
-            def buildDateCode = ymd * 1000 + hm
-            versionName "${baselineVersion}-alpha-${gitShort}"
-            versionCode buildDateCode
+            def hh = new SimpleDateFormat('HH', Locale.CHINA).format(now).toInteger()
+            def mm = new SimpleDateFormat('mm', Locale.CHINA).format(now).toInteger()
+            versionName "${baselineVersion}-${buildTag}"
+            versionCode ymd * 1000 + 720 + (hh * 30 + (int) (mm / 2))
         } else {
+            // 正式发版：CI 产物保持干净版本号；本机手工打的「正式包」强制带 -local 后缀，
+            // 避免本地包被误当成正式发布包分发出去。
             versionCode 2420
-            versionName baselineVersion
+            versionName buildSource == 'ci' ? baselineVersion : "${baselineVersion}-local"
         }
 
         ndkVersion '21.4.7075529'
@@ -60,6 +108,11 @@ android {
 
         // 仅保留中文资源（values/ 与 values-zh），剔除依赖库自带的多语言字符串，缩减体积
         resConfigs "zh"
+
+        // 控制端下载地址：默认 GitHub Releases 发布页（人类可读的发布列表，下载方免登录）。
+        // 仍支持通过同名环境变量 CTRL_DOWNLOAD_URL 在 CI 覆盖（例如换私有/匿名托管）。
+        def ctrlDownloadUrl = System.getenv('CTRL_DOWNLOAD_URL') ?: 'https://github.com/yamleaf/DailyController/releases'
+        buildConfigField 'String', 'CTRL_DOWNLOAD_URL', "\"$ctrlDownloadUrl\""
 
         externalNativeBuild {
             cmake {
@@ -124,9 +177,13 @@ android {
         viewBinding true
     }
 
+    // 产物命名：dailyTask_<构建来源>-<git短哈希>_<构建类型>.apk
+    // 如 dailyTask_local-9a76231_release.apk / dailyTask_ci-abcdef1_release.apk。
+    // 刻意不带版本号：版本号已在 App 内「版本信息」页与 versionName 中可查，
+    // 文件名只承担「这个包从哪来、对应哪次提交」的溯源职责。
     applicationVariants.configureEach { variant ->
         variant.outputs.configureEach {
-            outputFileName = "dailyTask_v${android.defaultConfig.versionName}_${variant.buildType.name}.apk"
+            outputFileName = "dailyTask_${buildTag}_${variant.buildType.name}.apk"
         }
     }
 }

@@ -1199,11 +1199,15 @@
                         android:background="@color/outline_variant" />
 
                     <LinearLayout
+                        android:id="@+id/versionRow"
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/itemLayoutHeight"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true">
 
                         <ImageView
                             android:layout_width="@dimen/size_28"

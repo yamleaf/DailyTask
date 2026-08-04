@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.ui
 
 import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -48,6 +49,7 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.AlertInputDialog
 import java.security.SecureRandom
 import java.util.UUID
+import com.pengxh.daily.app.BuildConfig
 
 class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>() {
 
@@ -55,6 +57,9 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
 
     /** 最近一次连接成功的时间戳（用于 Hero 卡「最后心跳」展示） */
     private var lastConnectedMs = 0L
+
+    /** 最近一次到 broker 的 RTT（ms），由 MqttAgentService.measureRtt 测量，用于连接质量展示 */
+    private var lastRttMs = -1L
 
     override fun initViewBinding(): ActivityRemoteControlBinding =
         ActivityRemoteControlBinding.inflate(layoutInflater)
@@ -104,15 +109,8 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
 
         binding.qrRow.setOnClickListener { generateAndShowQR() }
         binding.unbindRow.setOnClickListener { forceUnbind() }
-        // 关于：控制端下载地址（GitHub Actions 发布页）
-        binding.downloadRow.setOnClickListener {
-            val url = "https://github.com/yamleaf/DailyController/actions"
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-            } catch (_: Exception) {
-                url.show(this)
-            }
-        }
+        // 关于：控制端下载地址（默认 GitHub Releases 发布页，可由 CI 环境变量 CTRL_DOWNLOAD_URL 覆盖；未配置时显示友好提示）
+        binding.downloadRow.setOnClickListener { showControllerDownload() }
         // 预热配置引导 WebView，使首次打开几乎无感
         prewarmGuideWebView()
         binding.btnGoQr.setOnClickListener { generateAndShowQR() }
@@ -140,6 +138,11 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         updateRescanBanner()
         updateHeroUI()
         updateQuotaUI()
+        // 页面可见时主动测一次 RTT，使「连接质量」展示与控制端一致的「优 · 100ms」口径
+        MqttAgentService.measureRtt { rtt ->
+            lastRttMs = rtt
+            runOnUiThread { updateQuotaUI() }
+        }
         // 已连上但还没绑定：给出下一步指引，避免用户茫然停在「未绑定」
         if (MqttAgentService.isConnected() && !MqttAgentService.isBound()) {
             binding.root.postDelayed({
@@ -260,6 +263,15 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
      */
     private fun computeConnQuality(): String {
         if (!MqttAgentService.isConnected()) return "未连接"
+        // 优先用实测 RTT（与控制端「优 · 100ms」口径一致）；无实测值时回退到心跳新鲜度
+        if (lastRttMs >= 0) {
+            return when {
+                lastRttMs < 300 -> "优 · ${lastRttMs}ms"
+                lastRttMs < 800 -> "良 · ${lastRttMs}ms"
+                lastRttMs < 2000 -> "一般 · ${lastRttMs}ms"
+                else -> "弱 · ${lastRttMs}ms"
+            }
+        }
         if (lastConnectedMs <= 0L) return "已连接"
         val sec = (System.currentTimeMillis() - lastConnectedMs) / 1000
         return when {
@@ -533,6 +545,75 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
             return null
         }
         return baseUrl.removeSuffix("/") to Credentials.basic(appId, appSecret)
+    }
+
+    /** 控制端下载地址：由构建注入的单一地址（默认 GitHub Releases 发布页）；未配置时显示友好提示 */
+    private fun showControllerDownload() {
+        val downloadUrl = BuildConfig.CTRL_DOWNLOAD_URL.trim()
+        if (downloadUrl.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("获取控制端 DailyController")
+                .setMessage("当前未配置控制端下载地址。\n\n控制端安装包由分发方通过构建参数注入。如需安装控制端，请向提供者获取安装方式，或等待后续版本开放下载入口。")
+                .setPositiveButton("知道了", null)
+                .show()
+            return
+        }
+        val items = listOf(
+            Triple("控制端下载", downloadUrl, "点击打开下载页，或复制地址")
+        )
+        val sb = StringBuilder()
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 16, 40, 8)
+        }
+        val outValue = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+        items.forEach { (label, url, desc) ->
+            sb.append("$label：$url\n")
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(24, 12, 24, 12)
+                setBackgroundResource(outValue.resourceId)
+                setOnClickListener { openUrl(url) }
+            }
+            row.addView(TextView(this).apply {
+                text = label
+                textSize = 15f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(resources.getColor(R.color.text_default_color, theme))
+            })
+            row.addView(TextView(this).apply {
+                text = desc
+                textSize = 12f
+                setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                setPadding(0, 4, 0, 0)
+            })
+            row.addView(TextView(this).apply {
+                text = url
+                textSize = 12f
+                setTextColor(resources.getColor(R.color.md_primary, theme))
+                setPadding(0, 4, 0, 0)
+            })
+            container.addView(row)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("获取控制端 DailyController")
+            .setView(container)
+            .setPositiveButton("复制全部") { _, _ ->
+                val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("控制端下载地址", sb.toString().trimEnd()))
+                "已复制全部下载地址到剪贴板".show(this)
+            }
+            .setNegativeButton("关闭", null)
+            .show()
+    }
+
+    private fun openUrl(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            url.show(this)
+        }
     }
 
     /** 在线客户端管理：调用 GET /clients 列出当前在线客户端，可强制下线（DELETE /clients/{clientid}） */
