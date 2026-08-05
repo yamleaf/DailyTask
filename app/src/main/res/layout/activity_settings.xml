@@ -19,7 +19,8 @@
     <androidx.core.widget.NestedScrollView
         android:id="@+id/contentView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:fillViewport="true">
 
         <LinearLayout
@@ -32,8 +33,8 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginBottom="6dp"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginBottom="@dimen/dp_6"
                 android:text="通用"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/text_hint_color" />
@@ -41,10 +42,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -59,12 +57,12 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/iconView"
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
                             android:background="@color/surface_variant"
-                            app:shapeAppearance="@style/RoundedStyle" />
+                            app:shapeAppearance="@style/RoundedStyle" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -73,12 +71,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_target_app"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -95,10 +93,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_guide" />
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -107,7 +105,7 @@
                             android:layout_weight="1"
                             android:text="@string/settings_msg_channel"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/channelView"
@@ -130,10 +128,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_link" />
+                            android:src="@drawable/ic_link" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -142,7 +140,7 @@
                             android:layout_weight="1"
                             android:text="@string/settings_result_source"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/resultSourceView"
@@ -168,10 +166,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:visibility="gone">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_binder" />
+                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -180,7 +178,7 @@
                             android:layout_weight="1"
                             android:text="@string/settings_feedback_mode"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/accessibilityFeedbackView"
@@ -203,10 +201,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_server" />
+                            android:src="@drawable/ic_server" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -215,12 +213,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_task_config"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -237,10 +235,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_sand" />
+                            android:src="@drawable/ic_sand" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -249,12 +247,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_update_holiday"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -263,9 +261,9 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="22dp"
-                android:layout_marginBottom="6dp"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
                 android:text="功能开关"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/text_hint_color" />
@@ -273,10 +271,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -291,10 +286,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_settings_toggle" />
+                            android:src="@drawable/ic_settings_toggle" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -308,7 +303,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_floating_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:id="@+id/floatingTipsView"
@@ -340,10 +335,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_remote_service" />
+                            android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -357,7 +352,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_notice_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:id="@+id/noticeTipsView"
@@ -390,10 +385,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_lock" />
+                            android:src="@drawable/ic_lock" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -407,7 +402,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_transfer_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
@@ -439,10 +434,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_id" />
+                            android:src="@drawable/ic_id" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -456,7 +451,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_capture_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:id="@+id/captureTipsView"
@@ -488,10 +483,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_account" />
+                            android:src="@drawable/ic_account" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -505,7 +500,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_accessibility_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:id="@+id/accessibilityTipsView"
@@ -537,10 +532,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_guide" />
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -554,7 +549,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_gesture_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
@@ -585,10 +580,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_settings_general" />
+                            android:src="@drawable/ic_settings_general" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -602,7 +597,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_power_save_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
@@ -638,10 +633,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_settings_toggle" />
+                            android:src="@drawable/ic_settings_toggle" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -656,7 +651,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_pseudo_mask_group_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="match_parent"
@@ -667,13 +662,13 @@
                                 android:textSize="@dimen/sp_10" />
                         </LinearLayout>
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/pseudoMaskGroupArrow"
-                            android:layout_width="20dp"
-                            android:layout_height="20dp"
+                            android:layout_width="@dimen/dp_20"
+                            android:layout_height="@dimen/dp_20"
                             android:rotation="90"
                             android:src="@drawable/ic_arrow_right"
-                            android:tint="@color/on_surface_variant" />
+                            app:tint="@color/on_surface_variant" android:contentDescription="@null" />
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/pseudoMaskGroupSwitch"
@@ -718,7 +713,7 @@
                                     android:layout_height="wrap_content"
                                     android:text="@string/settings_force_mask_title"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                    android:textColor="@color/black" />
+                                    android:textColor="@color/md_onSurface" />
 
                                 <com.google.android.material.textview.MaterialTextView
                                     android:layout_width="match_parent"
@@ -762,7 +757,7 @@
                                     android:layout_height="wrap_content"
                                     android:text="@string/settings_pseudo_mask_delay_title"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                    android:textColor="@color/black" />
+                                    android:textColor="@color/md_onSurface" />
 
                                 <com.google.android.material.textview.MaterialTextView
                                     android:layout_width="wrap_content"
@@ -820,7 +815,7 @@
                                     android:layout_height="wrap_content"
                                     android:text="@string/settings_pseudo_mask_no_clock_title"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                    android:textColor="@color/black" />
+                                    android:textColor="@color/md_onSurface" />
 
                                 <com.google.android.material.textview.MaterialTextView
                                     android:layout_width="match_parent"
@@ -852,10 +847,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_arrow_back_blue" />
+                            android:src="@drawable/ic_arrow_back_blue" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -869,7 +864,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_back_home_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
@@ -900,10 +895,10 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_remote_service" />
+                            android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -917,7 +912,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="@string/settings_keep_alive_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
@@ -940,9 +935,9 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="22dp"
-                android:layout_marginBottom="6dp"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
                 android:text="更多"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/text_hint_color" />
@@ -950,49 +945,13 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <LinearLayout
-                        android:id="@+id/remoteControlLayout"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView
-                            android:layout_width="@dimen/size_28"
-                            android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_remote_service" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:text="远程控制"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
-
-                        <ImageView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
 
                     <LinearLayout
                         android:id="@+id/commandLayout"
@@ -1002,10 +961,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_qr" />
+                            android:src="@drawable/ic_qr" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1014,12 +973,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_all_commands"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -1036,10 +995,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_custom_app" />
+                            android:src="@drawable/ic_custom_app" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1048,12 +1007,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_open_test"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -1070,10 +1029,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_id" />
+                            android:src="@drawable/ic_id" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1082,12 +1041,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_capture_test"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -1104,10 +1063,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_link" />
+                            android:src="@drawable/ic_link" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1116,12 +1075,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_status_query"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -1138,10 +1097,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_guide" />
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1150,12 +1109,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_diagnostic"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -1172,10 +1131,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_binder" />
+                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1184,12 +1143,12 @@
                             android:layout_weight="1"
                             android:text="@string/settings_faq"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -1209,10 +1168,10 @@
                         android:clickable="true"
                         android:focusable="true">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_settings_more" />
+                            android:src="@drawable/ic_settings_more" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -1221,7 +1180,7 @@
                             android:layout_weight="1"
                             android:text="@string/settings_current_version"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/appVersion"
@@ -1232,6 +1191,78 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- 关于（承接远程页迁出的「控制端下载」入口） -->
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
+                android:text="关于"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                android:textColor="@color/text_hint_color" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/downloadRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <ImageView 
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_link" android:contentDescription="@null" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:text="控制端下载"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_8"
+                            android:layout_weight="1"
+                            android:ellipsize="end"
+                            android:gravity="end"
+                            android:maxLines="1"
+                            android:text="GitHub Releases"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                            android:textColor="@color/text_hint_color" />
+
+                        <ImageView 
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_8"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
+
+    <include
+        android:id="@+id/bottomNavBar"
+        layout="@layout/bottom_nav_bar" />
+
 </LinearLayout>

@@ -369,6 +369,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun initEvent() {
+        // P1 底部悬浮导航：默认选中「任务」
+        setupBottomNav(R.id.nav_task)
         binding.executeTaskButton.setOnClickListener {
             if (TaskScheduler.isRunning()) {
                 doStopTask()
@@ -384,6 +386,28 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                     TaskScheduler.startTask()
                 }
             }
+        }
+    }
+
+    private fun setupBottomNav(currentTab: Int) {
+        binding.bottomNavBar.bottomNav.selectedItemId = currentTab
+        binding.bottomNavBar.bottomNav.setOnItemSelectedListener { item ->
+            if (item.itemId == currentTab) return@setOnItemSelectedListener true
+            val target = when (item.itemId) {
+                R.id.nav_task -> MainActivity::class.java
+                R.id.nav_remote -> RemoteControlActivity::class.java
+                R.id.nav_settings -> SettingsActivity::class.java
+                else -> null
+            }
+            target?.let {
+                startActivity(Intent(this, it).apply { flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT })
+                finish()
+                // P4：底部导航切换 200ms 淡入淡出；系统开启"减少动态效果"时跳过动画
+                if (android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE, 1f) != 0f) {
+                    overridePendingTransition(R.anim.fade_in, R.anim.fade_out)
+                }
+            }
+            true
         }
     }
 

@@ -30,10 +30,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="@dimen/dp_16"
-                app:cardBackgroundColor="@color/white"
                 app:cardCornerRadius="20dp"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -67,10 +65,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                app:cardBackgroundColor="@color/white"
                 app:cardCornerRadius="20dp"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -113,7 +109,7 @@
                         android:paddingHorizontal="@dimen/dp_16">
 
                         <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="80dp"
+                            android:layout_width="@dimen/dp_80"
                             android:layout_height="@dimen/size_36"
                             android:gravity="center_vertical"
                             android:text="key"
@@ -138,10 +134,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="@dimen/dp_16"
-                app:cardBackgroundColor="@color/white"
                 app:cardCornerRadius="20dp"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -189,7 +183,7 @@
                             android:paddingHorizontal="@dimen/dp_16">
 
                             <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="80dp"
+                                android:layout_width="@dimen/dp_80"
                                 android:layout_height="@dimen/size_36"
                                 android:gravity="center_vertical"
                                 android:text="发件箱"
@@ -231,7 +225,7 @@
                             android:paddingHorizontal="@dimen/dp_16">
 
                             <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="80dp"
+                                android:layout_width="@dimen/dp_80"
                                 android:layout_height="@dimen/size_36"
                                 android:gravity="center_vertical"
                                 android:text="授权码"
@@ -264,7 +258,7 @@
                             android:paddingHorizontal="@dimen/dp_16">
 
                             <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="80dp"
+                                android:layout_width="@dimen/dp_80"
                                 android:layout_height="@dimen/size_36"
                                 android:gravity="center_vertical"
                                 android:text="收件箱"
@@ -292,10 +286,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_margin="@dimen/dp_16"
-                app:cardBackgroundColor="@color/white"
                 app:cardCornerRadius="20dp"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"

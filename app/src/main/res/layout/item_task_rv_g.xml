@@ -4,7 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_gravity="center"
-    app:cardCornerRadius="@dimen/radius_medium"
+    app:cardBackgroundColor="@color/md_surface"
+    app:cardCornerRadius="@dimen/radius_card"
     app:strokeWidth="0dp">
 
     <com.google.android.material.textview.MaterialTextView

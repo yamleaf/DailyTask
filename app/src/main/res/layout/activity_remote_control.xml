@@ -48,10 +48,10 @@
                     android:orientation="horizontal"
                     android:padding="@dimen/dp_12">
 
-                    <ImageView
+                    <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                        android:src="@drawable/ic_qr" />
+                        android:src="@drawable/ic_qr" android:contentDescription="@null" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:id="@+id/rescanText"
@@ -94,26 +94,22 @@
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
-                        <View
-                            android:id="@+id/heroDot"
-                            android:layout_width="@dimen/dp_12"
-                            android:layout_height="@dimen/dp_12"
-                            android:background="@drawable/bg_dot_offline" />
-
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/heroStatus"
-                            android:layout_width="0dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
+                            android:background="@drawable/bg_status_pill_offline"
+                            android:paddingHorizontal="@dimen/dp_12"
+                            android:paddingVertical="@dimen/dp_4"
                             android:text="远程控制已关闭"
                             android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                            android:textColor="@color/md_onPrimaryContainer" />
+                            android:textColor="@color/white" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/heroHeartbeat"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
                             android:text="—"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="@color/md_onPrimaryContainer" />
@@ -159,10 +155,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -178,10 +171,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_remote_service" />
+                            android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -190,7 +183,7 @@
                             android:layout_weight="1"
                             android:text="远程控制服务"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/mqttSwitch"
@@ -213,10 +206,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_link" />
+                            android:src="@drawable/ic_link" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -224,7 +217,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="连接状态"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/statusValue"
@@ -254,10 +247,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_binder" />
+                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -265,7 +258,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="绑定状态"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/bindingValue"
@@ -302,10 +295,10 @@
                             android:paddingHorizontal="@dimen/dp_16"
                             android:paddingVertical="@dimen/dp_12">
 
-                            <ImageView
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
-                                android:src="@drawable/ic_server" />
+                            <ImageView 
+                                android:layout_width="@dimen/dp_28"
+                                android:layout_height="@dimen/dp_28"
+                                android:src="@drawable/ic_server" android:contentDescription="@null" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
@@ -313,7 +306,7 @@
                                 android:layout_marginStart="@dimen/dp_12"
                                 android:text="连接信息"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/black" />
+                                android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
                                 android:id="@+id/quotaValue"
@@ -326,12 +319,12 @@
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                 android:textColor="@color/text_hint_color" />
 
-                            <ImageView
+                            <ImageView 
                                 android:id="@+id/ivChevronQuota"
-                                android:layout_width="20dp"
-                                android:layout_height="20dp"
+                                android:layout_width="@dimen/dp_20"
+                                android:layout_height="@dimen/dp_20"
                                 android:layout_marginStart="@dimen/dp_8"
-                                android:src="@drawable/ic_chevron_right" />
+                                android:src="@drawable/ic_chevron_right" android:contentDescription="@null" />
                         </LinearLayout>
 
                         <LinearLayout
@@ -370,9 +363,9 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="22dp"
-                android:layout_marginBottom="6dp"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
                 android:text="绑定操作"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/text_hint_color" />
@@ -380,10 +373,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -396,12 +386,12 @@
                         android:layout_height="@dimen/itemLayoutHeight"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/qrIcon"
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
                             android:layout_centerVertical="true"
-                            android:src="@drawable/ic_qr" />
+                            android:src="@drawable/ic_qr" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -411,14 +401,14 @@
                             android:layout_toEndOf="@id/qrIcon"
                             android:text="生成绑定二维码"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentEnd="true"
                             android:layout_centerVertical="true"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </RelativeLayout>
 
                     <View
@@ -433,12 +423,12 @@
                         android:layout_height="@dimen/itemLayoutHeight"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/unbindIcon"
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
                             android:layout_centerVertical="true"
-                            android:src="@drawable/ic_unbind" />
+                            android:src="@drawable/ic_unbind" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -450,12 +440,12 @@
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                             android:textColor="@color/md_error" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentEnd="true"
                             android:layout_centerVertical="true"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </RelativeLayout>
 
                 </LinearLayout>
@@ -475,9 +465,9 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="22dp"
-                android:layout_marginBottom="6dp"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
                 android:text="MQTT 配置"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/text_hint_color" />
@@ -485,10 +475,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -504,10 +491,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_server" />
+                            android:src="@drawable/ic_server" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -515,7 +502,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="公共 MQTT（临时使用）"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -529,11 +516,11 @@
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="@color/text_hint_color" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="@dimen/dp_8"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -548,12 +535,12 @@
                         android:layout_height="@dimen/itemLayoutHeight"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/guideIcon"
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
                             android:layout_centerVertical="true"
-                            android:src="@drawable/ic_guide" />
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -563,14 +550,14 @@
                             android:layout_toEndOf="@id/guideIcon"
                             android:text="MQTT 配置引导"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentEnd="true"
                             android:layout_centerVertical="true"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </RelativeLayout>
 
                     <View
@@ -587,10 +574,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_server" />
+                            android:src="@drawable/ic_server" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -598,7 +585,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="MQTT 服务器"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/brokerValue"
@@ -628,10 +615,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_account" />
+                            android:src="@drawable/ic_account" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -639,7 +626,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="被控端用户名"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/userValue"
@@ -669,10 +656,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_lock" />
+                            android:src="@drawable/ic_lock" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -680,7 +667,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="被控端密码"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/passValue"
@@ -711,10 +698,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_id" />
+                            android:src="@drawable/ic_id" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -722,7 +709,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="设备ID"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/deviceIdValue"
@@ -737,11 +724,11 @@
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                             android:textColor="@color/text_hint_color" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="@dimen/dp_8"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                     <View
@@ -758,10 +745,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_account" />
+                            android:src="@drawable/ic_account" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -769,7 +756,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="控制端凭证(ctl)"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/ctlValue"
@@ -784,11 +771,11 @@
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                             android:textColor="@color/text_hint_color" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="@dimen/dp_8"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
                 </LinearLayout>
@@ -799,9 +786,9 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="22dp"
-                android:layout_marginBottom="6dp"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
                 android:text="Serverless API 配置"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/text_hint_color" />
@@ -809,10 +796,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -827,10 +811,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_server" />
+                            android:src="@drawable/ic_server" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -838,7 +822,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="API 地址"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/apiUrlValue"
@@ -868,10 +852,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_account" />
+                            android:src="@drawable/ic_account" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -879,7 +863,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="AppID"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/apiAppIdValue"
@@ -909,10 +893,10 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_lock" />
+                            android:src="@drawable/ic_lock" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -920,7 +904,7 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:text="AppSecret"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/apiAppSecretValue"
@@ -948,12 +932,12 @@
                         android:layout_height="@dimen/itemLayoutHeight"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/apiClientsIcon"
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
                             android:layout_centerVertical="true"
-                            android:src="@drawable/ic_server" />
+                            android:src="@drawable/ic_server" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -963,14 +947,14 @@
                             android:layout_toEndOf="@id/apiClientsIcon"
                             android:text="在线客户端管理"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentEnd="true"
                             android:layout_centerVertical="true"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </RelativeLayout>
 
                     <View
@@ -985,12 +969,12 @@
                         android:layout_height="@dimen/itemLayoutHeight"
                         android:paddingHorizontal="@dimen/dp_16">
 
-                        <ImageView
+                        <ImageView 
                             android:id="@+id/apiTestIcon"
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
                             android:layout_centerVertical="true"
-                            android:src="@drawable/ic_link" />
+                            android:src="@drawable/ic_link" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -1000,14 +984,14 @@
                             android:layout_toEndOf="@id/apiTestIcon"
                             android:text="测试 API 连接"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
+                            android:textColor="@color/md_onSurface" />
 
-                        <ImageView
+                        <ImageView 
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_alignParentEnd="true"
                             android:layout_centerVertical="true"
-                            android:background="@drawable/ic_arrow_right" />
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </RelativeLayout>
 
                 </LinearLayout>
@@ -1023,83 +1007,12 @@
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                 android:textColor="@color/text_hint_color" />
 
-            <!-- 关于 -->
-            <com.google.android.material.textview.MaterialTextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:layout_marginTop="22dp"
-                android:layout_marginBottom="6dp"
-                android:text="关于"
-                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/white"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <LinearLayout
-                        android:id="@+id/downloadRow"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView
-                            android:layout_width="@dimen/size_28"
-                            android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_link" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:text="控制端下载"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/black" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:ellipsize="end"
-                            android:gravity="end"
-                            android:maxLines="1"
-                            android:text="GitHub Actions"
-                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                            android:textColor="@color/text_hint_color" />
-
-                        <ImageView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_8"
-                            android:background="@drawable/ic_arrow_right" />
-                    </LinearLayout>
-
-                </LinearLayout>
-
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.textview.MaterialTextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/dp_8"
-                android:paddingHorizontal="@dimen/dp_8"
-                android:text="控制端 App 可从 GitHub Actions 自动构建产物中获取；点击下方条目在浏览器打开发布页。"
-                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                android:textColor="@color/text_hint_color" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
+
+    <include
+        android:id="@+id/bottomNavBar"
+        layout="@layout/bottom_nav_bar" />
+
 </LinearLayout>

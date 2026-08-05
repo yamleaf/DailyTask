@@ -2,6 +2,7 @@ package com.pengxh.daily.app.ui
 
 import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
 import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ClipData
@@ -266,6 +267,8 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
     }
 
     override fun initEvent() {
+        // P1 底部悬浮导航：默认选中「设置」
+        setupBottomNav(R.id.nav_settings)
         binding.targetAppLayout.setOnClickListener {
             val labels = targetAppLabels()
             val builtInCount = Constant.getBuiltInTargets().size
@@ -479,8 +482,17 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             navigatePageTo<CommandActivity>()
         }
 
-        binding.remoteControlLayout.setOnClickListener {
-            navigatePageTo<RemoteControlActivity>()
+        binding.downloadRow.setOnClickListener {
+            val url = BuildConfig.CTRL_DOWNLOAD_URL.trim()
+            if (url.isNotEmpty()) {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } else {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("获取控制端 DailyController")
+                    .setMessage("当前未配置控制端下载地址。控制端安装包由分发方通过构建参数注入，请向提供者获取安装方式。")
+                    .setPositiveButton("知道了", null)
+                    .show()
+            }
         }
 
         binding.keepAliveSwitch.setOnClickListener {
@@ -1148,6 +1160,28 @@ class SettingsActivity : KotlinBaseActivity<ActivitySettingsBinding>() {
             .setPositiveButton("继续开启") { _, _ -> onConfirm() }
             .setCancelable(false)
             .show()
+    }
+
+    private fun setupBottomNav(currentTab: Int) {
+        binding.bottomNavBar.bottomNav.selectedItemId = currentTab
+        binding.bottomNavBar.bottomNav.setOnItemSelectedListener { item ->
+            if (item.itemId == currentTab) return@setOnItemSelectedListener true
+            val target = when (item.itemId) {
+                R.id.nav_task -> MainActivity::class.java
+                R.id.nav_remote -> RemoteControlActivity::class.java
+                R.id.nav_settings -> SettingsActivity::class.java
+                else -> null
+            }
+            target?.let {
+                startActivity(Intent(this, it).apply { flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT })
+                finish()
+                // P4：底部导航切换 200ms 淡入淡出；系统开启"减少动态效果"时跳过动画
+                if (android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE, 1f) != 0f) {
+                    overridePendingTransition(R.anim.fade_in, R.anim.fade_out)
+                }
+            }
+            true
+        }
     }
 
     override fun onResume() {

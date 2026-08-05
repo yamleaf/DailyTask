@@ -3,8 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    app:cardBackgroundColor="@color/white"
-    app:cardCornerRadius="@dimen/dp_16"
+    app:cardBackgroundColor="@color/md_surface"
+    app:cardCornerRadius="@dimen/radius_card"
     app:strokeWidth="0dp">
 
     <LinearLayout
@@ -30,7 +30,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="计划时间"
-                    android:textColor="@color/lib_hint_color"
+                    android:textColor="@color/md_onSurfaceVariant"
                     android:textSize="@dimen/sp_14"
                     android:textStyle="bold" />
 
@@ -39,7 +39,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="08:00"
-                    android:textColor="@color/black"
+                    android:textColor="@color/md_onSurface"
                     android:textSize="@dimen/sp_30"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -49,17 +49,17 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 app:cardBackgroundColor="@color/surface_variant"
-                app:cardCornerRadius="@dimen/dp_16"
-                app:strokeColor="@color/lib_hint_color"
-                app:strokeWidth="2dp">
+                app:cardCornerRadius="@dimen/radius_card"
+                app:strokeColor="@color/md_outlineVariant"
+                app:strokeWidth="1dp">
 
-                <androidx.appcompat.widget.AppCompatImageView
+                <androidx.appcompat.widget.AppCompatImageView 
                     android:id="@+id/arrowView"
                     android:layout_width="@dimen/dp_32"
                     android:layout_height="@dimen/dp_32"
                     android:layout_gravity="center"
                     android:padding="@dimen/dp_8"
-                    android:src="@drawable/ic_arrow_right" />
+                    android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
             </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
 
@@ -103,7 +103,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="--:--:--"
-                    android:textColor="@color/black"
+                    android:textColor="@color/md_onSurface"
                     android:textSize="@dimen/sp_30"
                     android:textStyle="bold" />
             </LinearLayout>

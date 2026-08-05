@@ -109,8 +109,7 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
 
         binding.qrRow.setOnClickListener { generateAndShowQR() }
         binding.unbindRow.setOnClickListener { forceUnbind() }
-        // 关于：控制端下载地址（默认 GitHub Releases 发布页，可由 CI 环境变量 CTRL_DOWNLOAD_URL 覆盖；未配置时显示友好提示）
-        binding.downloadRow.setOnClickListener { showControllerDownload() }
+        // 控制端下载入口已迁至「设置 → 关于」
         // 预热配置引导 WebView，使首次打开几乎无感
         prewarmGuideWebView()
         binding.btnGoQr.setOnClickListener { generateAndShowQR() }
@@ -125,6 +124,9 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         // 4) 连接 / 绑定状态回调 + 启动 MQTT 代理服务
         registerListeners()
         startMqttService()
+
+        // P1 底部悬浮导航：默认选中「远程」
+        setupBottomNav(R.id.nav_remote)
     }
 
     override fun onResume() {
@@ -349,16 +351,16 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
         binding.root.removeCallbacks(retryRunnable)
         val showRetry = enabled && !connected
         val remainSec = ((MqttAgentService.nextReconnectAtMs - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(0)
-        val (dotRes, statusText, beatText) = when {
+        val (pillRes, statusText, beatText) = when {
             !enabled -> {
-                Triple(R.drawable.bg_dot_offline, "远程控制已关闭", "—")
+                Triple(R.drawable.bg_status_pill_offline, "远程控制已关闭", "—")
             }
             connected -> {
-                Triple(R.drawable.bg_dot_online, "远程控制已连接", formatHeartbeat())
+                Triple(R.drawable.bg_status_pill_online, "远程控制已连接", formatHeartbeat())
             }
             else -> {
                 val txt = if (remainSec > 0) "连接中 · ${remainSec}s 后重试" else "连接中…"
-                Triple(R.drawable.bg_dot_offline, txt, "—")
+                Triple(R.drawable.bg_status_pill_pairing, txt, "—")
             }
         }
         if (showRetry) {
@@ -366,7 +368,8 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
             binding.root.postDelayed(retryRunnable, 1000)
         }
         binding.retryRow.visibility = if (showRetry) View.VISIBLE else View.GONE
-        binding.heroDot.setBackgroundResource(dotRes)
+        binding.heroStatus.setBackgroundResource(pillRes)
+        binding.heroStatus.setTextColor(ContextCompat.getColor(this, R.color.white))
         binding.heroStatus.text = statusText
         binding.heroHeartbeat.text = beatText
         applyRemoteDisabled(enabled)
@@ -545,6 +548,28 @@ class RemoteControlActivity : KotlinBaseActivity<ActivityRemoteControlBinding>()
             return null
         }
         return baseUrl.removeSuffix("/") to Credentials.basic(appId, appSecret)
+    }
+
+    private fun setupBottomNav(currentTab: Int) {
+        binding.bottomNavBar.bottomNav.selectedItemId = currentTab
+        binding.bottomNavBar.bottomNav.setOnItemSelectedListener { item ->
+            if (item.itemId == currentTab) return@setOnItemSelectedListener true
+            val target = when (item.itemId) {
+                R.id.nav_task -> MainActivity::class.java
+                R.id.nav_remote -> RemoteControlActivity::class.java
+                R.id.nav_settings -> SettingsActivity::class.java
+                else -> null
+            }
+            target?.let {
+                startActivity(Intent(this, it).apply { flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT })
+                finish()
+                // P4：底部导航切换 200ms 淡入淡出；系统开启"减少动态效果"时跳过动画
+                if (android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE, 1f) != 0f) {
+                    overridePendingTransition(R.anim.fade_in, R.anim.fade_out)
+                }
+            }
+            true
+        }
     }
 
     /** 控制端下载地址：由构建注入的单一地址（默认 GitHub Releases 发布页）；未配置时显示友好提示 */
