@@ -250,9 +250,15 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                 timePicker.selectedHour, timePicker.selectedMinute, timePicker.selectedSecond
             )
             lifecycleScope.launch {
-                item.time = time
+                // 用新 Bean 实例写库，避免原地改 item（适配器当前列表持有同一对象）导致
+                // 后续 submitList 的 DiffUtil 比对时新旧 time 相同 → 判定无变化 → UI 不刷新
+                val updated = DailyTaskBean().apply {
+                    id = item.id
+                    this.time = time
+                    name = item.name
+                }
                 withContext(Dispatchers.IO) {
-                    DatabaseWrapper.updateTask(item)
+                    DatabaseWrapper.updateTask(updated)
                     taskBeans = DatabaseWrapper.loadAllTask()
                 }
                 dailyTaskAdapter.refresh(taskBeans)
