@@ -441,13 +441,29 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx.openApplication()
         }
         binding.chainStartRow.setOnClickListener { checkChainStartPermission() }
-        // 电量智能预警
-        binding.batteryAlertSwitch.setOnCheckedChangeListener { _, checked ->
+        // 电量预警分组
+        binding.batteryAlertGroupSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
             SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
-            binding.batteryAlertTipsView.text = if (checked) "已开启，将在预警时间前检查电量耗尽风险" else "预测电量耗尽时间，在夜间前预警避免关机"
+        }
+        binding.batterySmartAlertSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncingSwitchState) return@setOnCheckedChangeListener
+            SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
+            binding.batteryAlertGroupSwitch.isChecked = checked
         }
         binding.batteryWarningTimeRow.setOnClickListener { showBatteryWarningTimePicker() }
+        binding.batteryAlertRangeRow.setOnClickListener { showBatteryAlertRangePicker() }
+        binding.batteryThresholdRow.setOnClickListener { showBatteryThresholdPicker() }
+        binding.batteryStageCountRow.setOnClickListener { showBatteryStageCountPicker() }
+        var batteryGroupExpanded = false
+        binding.batteryAlertGroupHeader.setOnClickListener {
+            batteryGroupExpanded = !batteryGroupExpanded
+            binding.batteryAlertGroupContent.visibility = if (batteryGroupExpanded) View.VISIBLE else View.GONE
+            binding.batteryAlertGroupArrow.animate()
+                .rotation(if (batteryGroupExpanded) 180f else 0f)
+                .setDuration(200)
+                .start()
+        }
         binding.captureTestLayout.setOnClickListener {
             val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, -1)
             lifecycleScope.launch {
@@ -704,10 +720,17 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.chainStartStatusView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
             // 电量智能预警
             val alertEnabled = SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
-            binding.batteryAlertSwitch.isChecked = alertEnabled
-            binding.batteryAlertTipsView.text = if (alertEnabled) "已开启，将在预警时间前检查电量耗尽风险" else "预测电量耗尽时间，在夜间前预警避免关机"
+            binding.batteryAlertGroupSwitch.isChecked = alertEnabled
+            binding.batterySmartAlertSwitch.isChecked = alertEnabled
             val warningHour = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
             binding.batteryWarningTimeValue.text = "%02d:00".format(warningHour)
+            val rangeStart = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)
+            val rangeEnd = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_END_KEY, 8).coerceIn(0, 23)
+            binding.batteryAlertRangeValue.text = "%02d:00~%02d:00".format(rangeStart, rangeEnd)
+            val threshold = SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80)
+            binding.batteryThresholdValue.text = "${threshold}%"
+            val maxStages = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3)
+            binding.batteryStageCountValue.text = "$maxStages"
         } finally {
             syncingSwitchState = false
         }
@@ -833,6 +856,90 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 val hour = dialogView.selectedHour
                 SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, hour)
                 binding.batteryWarningTimeValue.text = "%02d:00".format(hour)
+                true
+            }
+        )
+    }
+
+    /** 预警检测区间选择器（起始~结束小时） */
+    private fun showBatteryAlertRangePicker() {
+        val start = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)
+        val end = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_END_KEY, 8).coerceIn(0, 23)
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 16, 24, 16)
+        }
+        val startPicker = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, start); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            }
+            setDefaultValue(com.github.gzuliyujiang.wheelpicker.entity.TimeEntity.target(cal.time))
+        }
+        container.addView(android.widget.TextView(ctx).apply { text = "区间起始" })
+        container.addView(startPicker)
+        val endPicker = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, end); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            }
+            setDefaultValue(com.github.gzuliyujiang.wheelpicker.entity.TimeEntity.target(cal.time))
+        }
+        container.addView(android.widget.TextView(ctx).apply { text = "区间结束（次日）"; setPadding(0, 16, 0, 0) })
+        container.addView(endPicker)
+        UnifiedDialogKit.showForm(
+            ctx = ctx, contentView = container, title = "预警检测区间",
+            message = "预测耗尽时间落在此区间时才触发预警，避免白天频繁误报",
+            positiveText = "确定", negativeText = "取消",
+            onConfirm = {
+                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, startPicker.selectedHour)
+                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_END_KEY, endPicker.selectedHour)
+                binding.batteryAlertRangeValue.text = "%02d:00~%02d:00".format(startPicker.selectedHour, endPicker.selectedHour)
+                true
+            }
+        )
+    }
+
+    /** 低电量告警阈值选择器（10~80%） */
+    private fun showBatteryThresholdPicker() {
+        val current = SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80)
+        val slider = com.google.android.material.slider.Slider(ctx).apply {
+            valueFrom = 10f; valueTo = 80f; stepSize = 5f; value = current.toFloat()
+        }
+        UnifiedDialogKit.showForm(
+            ctx = ctx, contentView = slider, title = "低电量告警阈值",
+            message = "电量低于此值时触发三段式低电量告警（各段按比例划分，最低不低于 1%）",
+            positiveText = "确定", negativeText = "取消",
+            onConfirm = {
+                val v = slider.value.toInt().coerceIn(10, 80)
+                SaveKeyValues.saveInt(Constant.LOW_BATTERY_THRESHOLD_KEY, v)
+                // 阈值变更时清零三段告警标记，允许重新计数
+                SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE1_KEY, false)
+                SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE2_KEY, false)
+                SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE3_KEY, false)
+                binding.batteryThresholdValue.text = "${v}%"
+                true
+            }
+        )
+    }
+
+    /** 低电量告警次数选择器（0~3） */
+    private fun showBatteryStageCountPicker() {
+        val current = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3)
+        val options = listOf("0 - 关闭低电量告警", "1 - 仅第一段（阈值）", "2 - 前两段", "3 - 全三段")
+        val dialogView = android.widget.ListView(ctx).apply {
+            adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_list_item_single_choice, options)
+            choiceMode = android.widget.AbsListView.CHOICE_MODE_SINGLE
+            setItemChecked(current, true)
+        }
+        UnifiedDialogKit.showForm(
+            ctx = ctx, contentView = dialogView, title = "低电量告警次数",
+            message = "选择低电量分段告警的段数（0=关闭，3=阈值→阈值-10→阈值-20 各告警一次）",
+            positiveText = "确定", negativeText = "取消",
+            onConfirm = {
+                val checked = dialogView.checkedItemPosition
+                if (checked >= 0) {
+                    SaveKeyValues.saveInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, checked)
+                    binding.batteryStageCountValue.text = "$checked"
+                }
                 true
             }
         )

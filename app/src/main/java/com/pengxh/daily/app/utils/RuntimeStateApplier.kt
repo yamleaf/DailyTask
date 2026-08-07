@@ -148,6 +148,24 @@ object RuntimeStateApplier {
                     ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
                     true
                 }
+                Protocol.FIELD_BATTERY_SMART_ALERT -> {
+                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
+                    SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, v)
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_BATTERY_WARNING_HOUR -> {
+                    val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
+                    SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, v.coerceIn(0, 23))
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_BATTERY_ALERT_STAGES -> {
+                    val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
+                    SaveKeyValues.saveInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, v.coerceIn(0, 3))
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
                 "ax", "cx" -> false // 权限类开关，拒绝执行
                 else -> false
             }

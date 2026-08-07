@@ -48,7 +48,9 @@ object BatteryPredictor {
      * 计算当前电池消耗速度并预测到达 targetLevel 的时间。
      * 返回 null 表示数据不足或正在充电。
      */
-    fun predict(ctx: Context, targetLevel: Int = TARGET_LEVEL): Prediction? {
+    fun predict(ctx: Context, targetLevel: Int = SaveKeyValues.loadInt(
+        Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
+    ).coerceIn(10, 80)): Prediction? {
         try {
             val f = batteryFile(ctx)
             if (!f.exists()) return null
@@ -115,6 +117,12 @@ object BatteryPredictor {
             Constant.BATTERY_WARNING_HOUR_KEY,
             DEFAULT_WARNING_HOUR
         ).coerceIn(0, 23)
+        val rangeStart = SaveKeyValues.loadInt(
+            Constant.BATTERY_ALERT_DETECTION_START_KEY, 20
+        ).coerceIn(0, 23)
+        val rangeEnd = SaveKeyValues.loadInt(
+            Constant.BATTERY_ALERT_DETECTION_END_KEY, 8
+        ).coerceIn(0, 23)
 
         val prediction = predict(ctx) ?: return AlertCheck(
             false, null, warningHour, "数据不足或充电中，无法预测"
@@ -127,22 +135,45 @@ object BatteryPredictor {
         val cal = Calendar.getInstance()
         val now = cal.timeInMillis
 
-        // 计算当天的 warningHour
+        // 计算当天的预警时间
         cal.set(Calendar.HOUR_OF_DAY, warningHour)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         val warningTimeMs = cal.timeInMillis
 
-        // 计算次日 8:00
-        cal.add(Calendar.DATE, 1)
-        cal.set(Calendar.HOUR_OF_DAY, 8)
-        val nextDay8am = cal.timeInMillis
+        // 计算检测区间的起始和结束时间
+        // 如果 rangeEnd <= rangeStart（如 20~8），说明结束在次日
+        val todayStartMs: Long
+        val todayEndMs: Long
+        cal.timeInMillis = now
+        cal.set(Calendar.HOUR_OF_DAY, rangeStart)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        todayStartMs = cal.timeInMillis
 
-        // 判断预测到达 30% 的时间是否在警告窗口内 (warningHour ~ 次日 8:00)
-        val targetInDangerZone = prediction.targetTimeMs in warningTimeMs..nextDay8am
+        if (rangeEnd > rangeStart) {
+            // 当天结束
+            cal.set(Calendar.HOUR_OF_DAY, rangeEnd)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            todayEndMs = cal.timeInMillis
+        } else {
+            // 次日结束
+            cal.add(Calendar.DATE, 1)
+            cal.set(Calendar.HOUR_OF_DAY, rangeEnd)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            todayEndMs = cal.timeInMillis
+        }
 
-        // 当前时间在 warningHour 之前
+        // 判断预测到达 30% 的时间是否在检测区间内
+        val targetInDangerZone = prediction.targetTimeMs in todayStartMs..todayEndMs
+
+        // 当前时间在预警时间之前
         val nowBeforeWarning = now < warningTimeMs
 
         // 检查是否已预警过（每日一次）
@@ -153,7 +184,7 @@ object BatteryPredictor {
 
         val reason = when {
             alreadySent -> "今日已预警过，跳过重复推送"
-            !targetInDangerZone -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 30%，不在预警窗口内"
+            !targetInDangerZone -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 30%，不在检测区间内"
             !nowBeforeWarning -> "已过 ${warningHour}:00，无法在预警前推送"
             else -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 30%，需在 ${warningHour}:00 前预警"
         }

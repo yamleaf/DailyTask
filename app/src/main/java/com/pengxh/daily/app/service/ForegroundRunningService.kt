@@ -342,12 +342,16 @@ class ForegroundRunningService : Service() {
         // 充电中不处理低电量分段（避免插着电反复误报）
         if (charging) return
 
-        // 2) 三段式低电量告警
-        val stageBounds = listOf(
+        // 2) 三段式低电量告警（受告警次数设置控制，各段按比例划分，最低不低于 1%）
+        val maxStages = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3)
+        if (maxStages == 0) return  // 0=关闭低电量告警
+        // 各段边界：阈值 / 阈值*2/3 / 阈值*1/3（比例划分，始终有效，最低 1%）
+        val stageAll = listOf(
             Triple(Constant.LOW_BATTERY_STAGE1_KEY, threshold, 1),
-            Triple(Constant.LOW_BATTERY_STAGE2_KEY, threshold - 10, 2),
-            Triple(Constant.LOW_BATTERY_STAGE3_KEY, threshold - 20, 3)
+            Triple(Constant.LOW_BATTERY_STAGE2_KEY, (threshold * 2 / 3).coerceAtLeast(1), 2),
+            Triple(Constant.LOW_BATTERY_STAGE3_KEY, (threshold * 1 / 3).coerceAtLeast(1), 3)
         )
+        val stageBounds = stageAll.take(maxStages)
         for ((key, bound, stage) in stageBounds) {
             if (battery < bound && !SaveKeyValues.loadBoolean(key, false)) {
                 SaveKeyValues.saveBoolean(key, true)

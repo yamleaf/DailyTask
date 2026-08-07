@@ -93,6 +93,12 @@ object Constant {
     const val BATTERY_WARNING_HOUR_KEY = "BATTERY_WARNING_HOUR_KEY"
     /** 电量智能预警已发送标记（每次充电重置，避免重复推送） */
     const val BATTERY_SMART_ALERT_SENT_KEY = "BATTERY_SMART_ALERT_SENT_KEY"
+    /** 预警检测区间起始小时（默认 20，即 20:00） */
+    const val BATTERY_ALERT_DETECTION_START_KEY = "BATTERY_ALERT_DETECTION_START_KEY"
+    /** 预警检测区间结束小时（默认 8，即次日 8:00） */
+    const val BATTERY_ALERT_DETECTION_END_KEY = "BATTERY_ALERT_DETECTION_END_KEY"
+    /** 低电量告警最多段数（0-3，默认 3，0=不发送低电量告警） */
+    const val BATTERY_ALERT_MAX_STAGES_KEY = "BATTERY_ALERT_MAX_STAGES_KEY"
     /** 三段式低电量告警已提醒标记：阈值→阈值-10→阈值-20 各触发一次，充电或阈值变更后清零 */
     const val LOW_BATTERY_STAGE1_KEY = "LOW_BATTERY_STAGE1_KEY"
     const val LOW_BATTERY_STAGE2_KEY = "LOW_BATTERY_STAGE2_KEY"

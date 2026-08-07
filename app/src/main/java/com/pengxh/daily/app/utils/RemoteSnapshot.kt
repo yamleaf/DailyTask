@@ -289,6 +289,11 @@ object RemoteSnapshot {
             min = 0, max = 120, step = 1)
         add("lb", "低电量阈值", "int", SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80),
             min = 10, max = 80, step = 1)
+        add("ba", "智能预警", "bool", SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false))
+        add("bw", "预警时间", "int", SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23),
+            min = 0, max = 23, step = 1)
+        add("bs", "告警段数", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3),
+            min = 0, max = 3, step = 1)
         // 消息渠道 + 远程控制开关（镜像到控制端，允许控制端查看与修改）
         add("re", "远程控制服务", "bool", SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
         add("mc", "消息渠道", "int", SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, 0).coerceIn(0, 1))
