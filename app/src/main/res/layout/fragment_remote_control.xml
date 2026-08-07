@@ -167,11 +167,25 @@
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
+                        <!-- 版本药丸（移到最前） -->
+                        <TextView
+                            android:id="@+id/heroVersion"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/dp_28"
+                            android:background="@drawable/bg_status_pill_neutral"
+                            android:gravity="center_vertical"
+                            android:minWidth="0dp"
+                            android:paddingHorizontal="@dimen/dp_10"
+                            android:text="0.0.0"
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="@dimen/sp_11" />
+
                         <!-- 连接状态药丸 -->
                         <TextView
                             android:id="@+id/heroConnStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="@dimen/dp_28"
+                            android:layout_marginStart="@dimen/dp_8"
                             android:background="@drawable/bg_status_pill_offline"
                             android:gravity="center_vertical"
                             android:minWidth="0dp"
@@ -205,19 +219,6 @@
                             android:text=""
                             android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
                             android:textColor="@color/md_onSurfaceVariant" />
-
-                        <!-- 版本药丸（中性色，与状态药丸同规格） -->
-                        <TextView
-                            android:id="@+id/heroVersion"
-                            android:layout_width="wrap_content"
-                            android:layout_height="@dimen/dp_28"
-                            android:background="@drawable/bg_status_pill_neutral"
-                            android:gravity="center_vertical"
-                            android:minWidth="0dp"
-                            android:paddingHorizontal="@dimen/dp_10"
-                            android:text="0.0.0"
-                            android:textColor="@color/md_onSurfaceVariant"
-                            android:textSize="@dimen/sp_11" />
                     </LinearLayout>
 
                     <!-- 描述文字（离线时显示说明） -->

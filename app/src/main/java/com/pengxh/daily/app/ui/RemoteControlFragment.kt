@@ -30,6 +30,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textview.MaterialTextView
 import com.google.gson.Gson
@@ -291,13 +292,28 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     }
 
     private fun applyRemoteDisabled(enabled: Boolean) {
-        val alpha = if (enabled) 1f else 0.45f
+        val configAlpha = if (enabled) 0.45f else 1f
+        val actionAlpha = 1f
+        // MQTT 配置类行：服务开启时禁用
         listOf(
-            binding.guideRow, binding.brokerRow, binding.userRow, binding.passRow,
+            binding.brokerRow, binding.userRow, binding.passRow,
             binding.apiUrlRow, binding.apiAppIdRow, binding.apiAppSecretRow,
-            binding.apiTestRow, binding.deviceIdRow, binding.ctlRow,
-            binding.qrRow, binding.unbindRow
-        ).forEach { it.alpha = alpha }
+            binding.deviceIdRow, binding.ctlRow,
+            binding.guideRow
+        ).forEach {
+            it.alpha = configAlpha
+            it.isClickable = !enabled
+            it.isFocusable = !enabled
+        }
+        // 操作类行：始终可用
+        listOf(
+            binding.qrRow, binding.unbindRow,
+            binding.apiTestRow
+        ).forEach {
+            it.alpha = actionAlpha
+            it.isClickable = true
+            it.isFocusable = true
+        }
     }
 
     private fun applyHeroPowerBg(res: Int) {
@@ -444,7 +460,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 24)
+            setPadding(24, 16, 24, 16)
         }
         val etUser = EditText(ctx).apply {
             setText(ctlUser)
@@ -453,30 +469,16 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val etPass = EditText(ctx).apply {
             setText(ctlPass)
             hint = "控制端密码（默认随机生成）"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         container.addView(etUser)
+        container.addView(TextView(ctx).apply { setPadding(0, 12, 0, 0) }) // spacing
         container.addView(etPass)
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("控制端凭证 (ctl)")
-            .setMessage(
-                "控制端通过此账户连接 MQTT，仅拥有本设备的受限权限。\n" +
-                    "默认由 App 自动生成（ctl-{设备ID} + 随机密码）；你也可以改为自定义账户，" +
-                    "但需与 EMQX 中建立的账户名/密码保持一致（含 ACL）。"
-            )
-            .setView(container)
-            .setPositiveButton("保存") { _, _ ->
-                val user = etUser.text.toString().trim()
-                val pass = etPass.text.toString().trim()
-                if (user.isBlank() || pass.isBlank()) {
-                    "用户名与密码均不能为空".show(ctx)
-                } else {
-                    SaveKeyValues.saveString(Constant.MQTT_CTL_USER_KEY, user)
-                    SaveKeyValues.saveString(Constant.MQTT_CTL_PASS_KEY, pass)
-                    binding.ctlValue.text = user
-                    "已保存控制端凭证".show(ctx)
-                }
-            }
-            .setNeutralButton("复制凭证") { _, _ ->
+        // 复制凭证按钮内嵌在内容区
+        val btnCopy = com.google.android.material.button.MaterialButton(ctx).apply {
+            text = "复制凭证"
+            setTextColor(resources.getColor(R.color.md_primary, theme))
+            setOnClickListener {
                 val user = etUser.text.toString().trim()
                 val pass = etPass.text.toString().trim()
                 if (user.isBlank() || pass.isBlank()) {
@@ -486,8 +488,33 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     "已复制控制端凭证，可粘贴到 EMQX".show(ctx)
                 }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        }
+        container.addView(btnCopy)
+        container.addView(TextView(ctx).apply { setPadding(0, 8, 0, 0) })
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = container,
+            title = "控制端凭证 (ctl)",
+            message = "控制端通过此账户连接 MQTT，仅拥有本设备的受限权限。\n" +
+                "默认由 App 自动生成（ctl-{设备ID} + 随机密码）；你也可以改为自定义账户，" +
+                "但需与 EMQX 中建立的账户名/密码保持一致（含 ACL）。",
+            positiveText = "保存",
+            negativeText = "取消",
+            onConfirm = { dlg ->
+                val user = etUser.text.toString().trim()
+                val pass = etPass.text.toString().trim()
+                if (user.isBlank() || pass.isBlank()) {
+                    "用户名与密码均不能为空".show(ctx)
+                    false
+                } else {
+                    SaveKeyValues.saveString(Constant.MQTT_CTL_USER_KEY, user)
+                    SaveKeyValues.saveString(Constant.MQTT_CTL_PASS_KEY, pass)
+                    binding.ctlValue.text = user
+                    "已保存控制端凭证".show(ctx)
+                    true
+                }
+            }
+        )
     }
 
     private fun isMqttConfigValid(): Boolean =
@@ -1365,21 +1392,27 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         container.addView(tipCard)
 
-        UnifiedDialogKit.showForm(
-            ctx,
-            ScrollView(ctx).apply {
+        val dialogRoot = ScrollView(ctx).apply {
                 addView(container)
                 setPadding(dip(20), dip(8), dip(20), dip(8))
-            },
-            title = "MQTT 配置引导",
-            positiveText = "我知道了",
-            negativeText = "关闭",
-            onConfirm = {
-                onOk?.invoke()
-                true
             }
-        )
-    }
+            UnifiedDialogKit.showForm(
+                ctx,
+                dialogRoot,
+                title = "MQTT 配置引导",
+                positiveText = "关闭",
+                negativeText = "跳转 EMQX",
+                onCancel = {
+                    openUrl("https://www.emqx.com/zh/free-trial")
+                    onOk?.invoke()
+                    true
+                },
+                onConfirm = {
+                    onOk?.invoke()
+                    true
+                }
+            )
+        }
 
     /** 获取控制端下载地址弹窗 */
     private fun showControllerDownload() {
