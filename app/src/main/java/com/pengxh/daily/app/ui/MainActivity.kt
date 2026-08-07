@@ -79,6 +79,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         private const val TAG_TASK = "task"
         private const val TAG_REMOTE = "remote"
         private const val TAG_SETTINGS = "settings"
+        private const val KEY_CURRENT_TAB = "current_tab"
     }
 
     private val kTag = "MainActivity"
@@ -108,12 +109,11 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private var batteryOptimizationPrompted = false
 
     /** 三个 Tab 常驻 Fragment（一次性 add，hide/show 切换，与控制端交互一致） */
-    private val taskFragment by lazy { TaskFragment() }
-    private val remoteControlFragment by lazy { RemoteControlFragment() }
-    private val settingsFragment by lazy { SettingsFragment() }
-    private val allFragments: List<Fragment> by lazy {
-        listOf(taskFragment, remoteControlFragment, settingsFragment)
-    }
+    private lateinit var taskFragment: TaskFragment
+    private lateinit var remoteControlFragment: RemoteControlFragment
+    private lateinit var settingsFragment: SettingsFragment
+    private val allFragments: List<Fragment>
+        get() = listOf(taskFragment, remoteControlFragment, settingsFragment)
     private var currentTab = R.id.nav_task
     private var ignoreNavSelection = false
 
@@ -149,14 +149,25 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 先同步 BottomNavigationView 选中状态（默认任务页），再设置监听器，避免递归
         binding.bottomNavBar.bottomNav.selectedItemId = R.id.nav_task
 
-        // 一次性添加三个 Tab（隐藏非默认 Tab），后续切换只做 hide/show
-        supportFragmentManager.beginTransaction()
-            .add(R.id.fragmentContainer, taskFragment, TAG_TASK)
-            .add(R.id.fragmentContainer, remoteControlFragment, TAG_REMOTE)
-            .add(R.id.fragmentContainer, settingsFragment, TAG_SETTINGS)
-            .hide(remoteControlFragment)
-            .hide(settingsFragment)
-            .commitNow()
+        // 一次性添加三个 Tab（隐藏非默认 Tab），后续切换只做 hide/show。
+        // 重建（recreate，如切换主题）时 FragmentManager 已恢复旧实例，必须按 tag 复用，
+        // 否则会重复 add 新实例导致内容与 BottomNavigationView 高亮脱节（如内容=任务页、tab=设置）。
+        val ft = supportFragmentManager.beginTransaction()
+        taskFragment = supportFragmentManager.findFragmentByTag(TAG_TASK) as? TaskFragment
+            ?: TaskFragment().also { ft.add(R.id.fragmentContainer, it, TAG_TASK) }
+        remoteControlFragment = supportFragmentManager.findFragmentByTag(TAG_REMOTE) as? RemoteControlFragment
+            ?: RemoteControlFragment().also { ft.add(R.id.fragmentContainer, it, TAG_REMOTE) }
+        settingsFragment = supportFragmentManager.findFragmentByTag(TAG_SETTINGS) as? SettingsFragment
+            ?: SettingsFragment().also { ft.add(R.id.fragmentContainer, it, TAG_SETTINGS) }
+        if (savedInstanceState == null) {
+            // 首次创建：只显示默认任务页
+            ft.hide(remoteControlFragment).hide(settingsFragment)
+        } else {
+            // 重建：FragmentManager 已恢复各实例隐藏/显示状态，无需再 hide；
+            // 重新同步当前 tab，与恢复后的 BottomNavigationView 高亮保持一致
+            currentTab = savedInstanceState.getInt(KEY_CURRENT_TAB, R.id.nav_task)
+        }
+        ft.commitNow()
 
         if (Settings.canDrawOverlays(this)) {
             Intent(this, FloatingWindowService::class.java).apply { startService(this) }
@@ -202,9 +213,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
         // 处理外部拉起指定 Tab（如 MQTT 通知点击进入「远程」）
         applyTabFromIntent(intent)
-        ignoreNavSelection = true
-        binding.bottomNavBar.bottomNav.selectedItemId = R.id.nav_task
-        ignoreNavSelection = false
+        // 首次创建默认任务页；重建（如主题切换）由 onRestoreInstanceState 恢复原 tab，
+        // 此处不再强制任务页，避免内容与 BottomNavigationView 高亮脱节
+        if (savedInstanceState == null) {
+            ignoreNavSelection = true
+            binding.bottomNavBar.bottomNav.selectedItemId = R.id.nav_task
+            ignoreNavSelection = false
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt(KEY_CURRENT_TAB, currentTab)
+        super.onSaveInstanceState(outState)
     }
 
     override fun initEvent() {

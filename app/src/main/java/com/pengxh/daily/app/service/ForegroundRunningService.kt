@@ -182,6 +182,9 @@ class ForegroundRunningService : Service() {
         KeepAliveReceiver.schedule(this)
         // 无论是否收到重置广播，每次服务启动都确保每日重置闹钟已调度（幂等）
         KeepAliveReceiver.scheduleResetAlarm(this)
+        // 重启 / 复活后恢复远程控制 MQTT 代理：开机自启与保活心跳都经本服务进入，
+        // 在此统一拉起 MQTT，否则手机重启后 MqttAgentService 永不启动、控制端命令下发失效
+        KeepAliveReceiver.startMqttAgentIfEnabled(this)
         // 由每日重置闹钟触发：到点后启动任务调度
         if (intent?.action == KeepAliveReceiver.ACTION_RESET_TASK) {
             if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)

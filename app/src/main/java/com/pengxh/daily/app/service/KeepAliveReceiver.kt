@@ -106,6 +106,27 @@ class KeepAliveReceiver : BroadcastReceiver() {
         }
 
         /**
+         * 远程控制恢复：远程开关开启时拉起 MQTT 代理前台服务。
+         *
+         * 关键缺口修复：手机重启后仅拉起 ForegroundRunningService 是不够的——远程指令、控制端命令
+         * 下发全部依赖 MqttAgentService，而它只在 UI 开关 / 短信指令 / 覆盖安装 / 远程改配置时才被启动，
+         * 其复活闹钟也无法跨重启存活。因此开机自启 / 保活心跳路径必须显式拉起它，否则重启后
+         * 控制端永远联系不上被控端。
+         *
+         * 开关关闭时无需启动（MqttAgentService 的 onCreate / onStartCommand 自带开关守卫，会自行停止并撤通知）。
+         * 用 isRunning() 防重复拉起（同一进程内 instance 判空）。
+         */
+        fun startMqttAgentIfEnabled(context: Context) {
+            if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
+            if (MqttAgentService.isRunning()) return
+            try {
+                context.startForegroundService(Intent(context, MqttAgentService::class.java))
+            } catch (e: Exception) {
+                Log.e(javaClass.simpleName, "KeepAliveReceiver 启动 MQTT 代理服务失败", e)
+            }
+        }
+
+        /**
          * 调度每日重置闹钟：精确到自定义重置点整点（或下一个重置点）。
          * 当「每日循环」关闭时，取消已设置的闹钟。
          */
@@ -188,6 +209,8 @@ class KeepAliveReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED -> {
                 tryStartForegroundService(context)
+                // 开机自启：恢复远程控制 MQTT 代理（远程开关开启时），否则重启后控制端命令下发失效
+                startMqttAgentIfEnabled(context)
                 // 无论保活是否开启，只要每日循环开启就调度重置闹钟（开机后生效）
                 scheduleResetAlarm(context)
             }
@@ -196,6 +219,9 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 // 原实现在服务存活时直接 return、拉起后也只续重置闹钟，导致 15 分钟心跳只触发一次，
                 // 进程被杀后无复活闹钟，只能苦等每日重置点。现改为每次心跳都自续约，链条永不中断。
                 schedule(context)
+                // 心跳复活：无论保活前台服务是否存活，都确保 MQTT 代理在运行，
+                // 覆盖「进程被杀后 ForegroundRunningService 仍存活但 MQTT 已死」的情况
+                startMqttAgentIfEnabled(context)
                 if (ForegroundRunningService.isRunning) return
                 tryStartForegroundService(context)
                 // 复活后同时确保每日重置闹钟存在
@@ -213,6 +239,8 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 } catch (e: Exception) {
                     Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
                 }
+                // 顺手确保 MQTT 代理在运行（每日重置点同样是恢复远程的兜底时机）
+                startMqttAgentIfEnabled(context)
                 // 立即安排明天的重置闹钟，避免今天任务结束后循环不再设置
                 scheduleResetAlarm(context)
             }
