@@ -20,7 +20,7 @@ import androidx.core.content.ContextCompat
 import com.google.gson.GsonBuilder
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
-import com.pengxh.daily.app.ui.RemoteControlActivity
+import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.ConfigImportSignal
@@ -65,7 +65,7 @@ class MqttAgentService : Service() {
         fun isBound(): Boolean = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
 
         /**
-         * 连接状态变化回调。RemoteControlActivity 在 onResume 注册、onPause 注销，
+         * 连接状态变化回调。MainActivity 在 onResume 注册、onPause 注销，
          * 回调在 MQTT 后台线程触发，调用方需自行切主线程。
          */
         var stateListener: ((connected: Boolean) -> Unit)? = null
@@ -73,8 +73,7 @@ class MqttAgentService : Service() {
         /** 绑定状态变化回调（配对成功 / 解绑） */
         var bindingStateListener: ((bound: Boolean) -> Unit)? = null
 
-        /**
-         * 解绑原因，供 RemoteControlActivity 区分 UI 文案：
+        /** 解绑原因，供远程控制页（RemoteControlFragment）区分 UI 文案：
          * ""=从未绑定 / "remote"=被控制端移除 / "force"=本机强制解绑
          */
         var lastUnbindReason: String = ""
@@ -110,7 +109,10 @@ class MqttAgentService : Service() {
             nextReconnectAtMs = 0L
             instance?.let { svc ->
                 svc.cancelResurrect()
-                svc.reconnect()
+                // 关键修复：reconnect() 内的 mqttClient.connect() 是 Paho 阻塞式网络调用，
+                // 若在 UI 线程执行（按钮点击 / 闹钟 BroadcastReceiver 均为主线程）会卡死主线程 → ANR。
+                // 派发到服务的 IO 协程作用域执行，彻底离开主线程。
+                svc.scope.launch { svc.reconnect() }
             }
         }
     }
@@ -187,7 +189,8 @@ class MqttAgentService : Service() {
         }
         // B1：点击通知直达远程控制页，并设为常驻（setOngoing）避免被划掉
         val contentIntent = PendingIntent.getActivity(
-            this, 1002, Intent(this, RemoteControlActivity::class.java),
+            this, 1002, Intent(this, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_REMOTE),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         notificationBuilder = NotificationCompat.Builder(this, channelId)
@@ -402,7 +405,8 @@ class MqttAgentService : Service() {
                 val action = json.get("action")?.asString ?: ""
                 val time = json.get("time")?.asString ?: ""
                 val oldTime = json.get("oldTime")?.asString
-                applyTaskChange(action, time, oldTime)
+                val name = json.get("name")?.asString
+                applyTaskChange(action, time, oldTime, name)
             }.fold(
                 onSuccess = { it },
                 onFailure = { "TASK_FAIL:${it.message}" }
@@ -501,12 +505,15 @@ class MqttAgentService : Service() {
         }
     }
 
-    private suspend fun applyTaskChange(action: String, time: String, oldTime: String?): String {
+    private suspend fun applyTaskChange(action: String, time: String, oldTime: String?, name: String?): String {
         if (!TASK_TIME_PATTERN.matches(time)) return "TASK_FAIL:时间格式应为 HH:mm:ss"
         val result = when (action) {
             "add" -> {
                 if (DatabaseWrapper.isTaskTimeExist(time)) return "TASK_FAIL:该时间点已存在"
-                DatabaseWrapper.insert(com.pengxh.daily.app.sqlite.bean.DailyTaskBean().apply { this.time = time })
+                DatabaseWrapper.insert(com.pengxh.daily.app.sqlite.bean.DailyTaskBean().apply {
+                    this.time = time
+                    this.name = name ?: ""
+                })
                 rescheduleIfRunning()
                 "TASK_OK"
             }
@@ -518,6 +525,7 @@ class MqttAgentService : Service() {
                     return "TASK_FAIL:新时间点已存在"
                 }
                 target.time = time
+                if (name != null) target.name = name
                 DatabaseWrapper.updateTask(target)
                 rescheduleIfRunning()
                 "TASK_OK"
@@ -626,7 +634,7 @@ class MqttAgentService : Service() {
         // 关键：publishStatus 是 blocking 的 qos1 发布，绝不能在主线程执行
         // （被控端“强制解绑”按钮在主线程调用本方法，若在主线程 publish 会 ANR/闪退）。
         // 统一丢到 IO 协程域执行，无论本方法从主线程还是 MQTT 回调线程进入都安全。
-        // 记录解绑原因，供 RemoteControlActivity 区分“从未绑定 / 被控制端移除 / 本机强制解绑”文案。
+        // 记录解绑原因，供远程控制页（RemoteControlFragment）区分“从未绑定 / 被控制端移除 / 本机强制解绑”文案。
         // notifyController=true 表示本机强制解绑（需告知控制端），false 表示控制端主动解绑。
         lastUnbindReason = if (notifyController) "force" else "remote"
         if (wasBound || notifyController) {

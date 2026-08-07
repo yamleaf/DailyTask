@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:padding="24dp">
+
+    <!-- 标题：有则居中显示 -->
+    <TextView
+        android:id="@+id/tvDialogTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:textColor="@color/md_onSurface"
+        android:visibility="gone" />
+
+    <Space
+        android:id="@+id/titleGap"
+        android:layout_width="match_parent"
+        android:layout_height="8dp"
+        android:visibility="gone" />
+
+    <!-- 辅助说明：左对齐 -->
+    <TextView
+        android:id="@+id/tvDialogMessage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="start"
+        android:textSize="14sp"
+        android:lineSpacingExtra="2dp"
+        android:textColor="@color/md_onSurfaceVariant"
+        android:visibility="gone" />
+
+    <Space
+        android:id="@+id/messageGap"
+        android:layout_width="match_parent"
+        android:layout_height="8dp"
+        android:visibility="gone" />
+
+    <!-- 自定义内容容器：注入 EditText / 表单布局 / 滚动视图等 -->
+    <FrameLayout
+        android:id="@+id/contentHost"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="20dp" />
+
+    <!-- 底部按钮栏：双按钮等宽均分；单按钮由 kit 改为居中自然宽度 -->
+    <LinearLayout
+        android:id="@+id/btnBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+
+        <Button
+            android:id="@+id/btnNegative"
+            style="@style/Widget.DailyTask.Dialog.Button.Negative"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnPositive"
+            style="@style/Widget.DailyTask.Dialog.Button.Positive"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+</LinearLayout>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 磨砂玻璃导航：深色主题半透明底色（约 55% 深色 surface） -->
+    <color name="frosted_nav_tint">#8C26262E</color>
+    <!-- 磨砂玻璃导航：玻璃边缘细描边（深色主题） -->
+    <color name="frosted_nav_stroke">#40FFFFFF</color>
+</resources>

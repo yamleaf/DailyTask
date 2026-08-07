@@ -72,9 +72,17 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
         private val _captureScreenRequest = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
         /**
-         * 触发截屏，返回 CompletableDeferred 供调用方 await 结果
+         * 触发截屏，返回 CompletableDeferred 供调用方 await 结果。
+         *
+         * 权限守卫：仅当 MediaProjection 截屏权限已授权（ProjectionSession 处于 ACTIVE）时才真正触发；
+         * 否则直接返回空串（截屏失败），不拉起服务、不启动 MediaProjection，避免
+         * targetSDK 35+ 下未授权时 startForeground(mediaProjection) 抛 SecurityException 闪退。
          */
         fun requestCaptureScreen(): CompletableDeferred<String?> {
+            if (!ProjectionSession.isStateActive()) {
+                LogFileManager.writeLog("requestCaptureScreen: 截屏权限未授权（state=${ProjectionSession.getState()}），拒绝触发")
+                return CompletableDeferred<String?>().apply { complete("") }
+            }
             _captureScreenRequest.tryEmit(Unit)
             val deferred = CompletableDeferred<String?>()
             captureScope.launch {
@@ -128,6 +136,18 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
 
         createImageFileDir()
 
+        // 权限守卫：targetSDK 35+ 下，未授予 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限
+        // 时，startForeground(mediaProjection) 会抛 SecurityException 导致闪退。
+        // 截屏前检查权限：未授予则不再拉起前台服务，安全退出，避免崩溃。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+            && checkSelfPermission(android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            LogFileManager.writeLog("onCreate: 缺少 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限，截屏服务无法启动")
+            stopSelf()
+            return
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 Constant.CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID,
@@ -144,6 +164,21 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 权限守卫：targetSDK 35+ 启动 mediaProjection 类型前台服务还需运行时权限
+        // FOREGROUND_SERVICE_MEDIA_PROJECTION，未授予时拒绝启动服务，避免
+        // onCreate 的 startForeground(mediaProjection) 抛 SecurityException 闪退。
+        // （注意：此处不能用 ProjectionSession.isStateActive() 守卫——授权启动时
+        //   state 要到 onStartCommand 内部 setProjection 后才为 ACTIVE，会误伤正常启动）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+            && checkSelfPermission(android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            LogFileManager.writeLog("onStartCommand: 缺少 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限，拒绝启动截屏服务")
+            emitProjectionEvent(ProjectionEvent.Failed)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED)
             ?: return START_STICKY
 

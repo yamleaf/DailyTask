@@ -4,17 +4,17 @@
     android:id="@+id/rootView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/back_ground_color"
+    android:background="@color/md_background"
     android:orientation="vertical">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/theme_color"
+        android:background="@color/md_primary"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="@string/settings_title"
-        app:titleTextColor="@color/white" />
+        app:titleTextColor="@color/on_header" />
 
     <androidx.core.widget.NestedScrollView
         android:id="@+id/contentView"
@@ -27,22 +27,94 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="@dimen/dp_16"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:paddingBottom="@dimen/nav_content_inset">
 
-            <!-- 通用 -->
+            <!-- 外观 -->
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/dp_4"
                 android:layout_marginBottom="@dimen/dp_6"
-                android:text="通用"
+                android:text="外观"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                android:layout_marginBottom="@dimen/dp_16"
+                style="@style/Widget.Daily.SectionCard">
+
+                <LinearLayout
+                    android:id="@+id/themeRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/itemLayoutHeight"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="@dimen/dp_16">
+
+                    <ImageView
+                        android:layout_width="@dimen/size_28"
+                        android:layout_height="@dimen/size_28"
+                        android:contentDescription="@null"
+                        android:src="@drawable/daily_ic_theme"
+                        app:tint="@color/md_primary" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/dp_12"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="主题外观"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="深色 / 浅色 / 跟随系统"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                            android:textColor="@color/md_onSurfaceVariant" />
+                    </LinearLayout>
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/themeValueView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="@dimen/dp_4"
+                        android:text="跟随系统"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="@color/md_primary" />
+
+                    <ImageView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_arrow_right" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- 打卡设置 -->
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginBottom="@dimen/dp_6"
+                android:text="打卡设置"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                android:textColor="@color/md_onSurfaceVariant" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -61,7 +133,7 @@
                             android:id="@+id/iconView"
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:background="@color/surface_variant"
+                            android:background="@color/md_surfaceVariant"
                             app:shapeAppearance="@style/RoundedStyle" android:contentDescription="@null" />
 
                         <com.google.android.material.textview.MaterialTextView
@@ -83,7 +155,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/msgChannelLayout"
@@ -118,7 +190,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/resultSourceLayout"
@@ -154,7 +226,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant"
+                        android:background="@color/md_outlineVariant"
                         android:visibility="gone" />
 
                     <LinearLayout
@@ -191,7 +263,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/taskConfigLayout"
@@ -225,7 +297,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/updateHolidayLayout"
@@ -257,27 +329,39 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 功能开关 -->
+            <!-- 权限设置 -->
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/dp_4"
                 android:layout_marginTop="@dimen/dp_22"
                 android:layout_marginBottom="@dimen/dp_6"
-                android:text="功能开关"
+                android:text="权限设置"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
+
+            <!-- 基础权限（必选） -->
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginBottom="@dimen/dp_4"
+                android:text="基础权限"
+                android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                android:textColor="@color/md_primary" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                android:layout_marginBottom="@dimen/dp_16"
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
+                    <!-- 悬浮窗权限 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -325,8 +409,9 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
+                    <!-- 通知监听权限 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -335,7 +420,7 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView 
+                        <ImageView
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
                             android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
@@ -374,10 +459,10 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
+                    <!-- 链式启动权限 -->
                     <LinearLayout
-                        android:id="@+id/transferLayout"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
@@ -385,7 +470,7 @@
                         android:paddingHorizontal="@dimen/dp_16"
                         android:paddingVertical="@dimen/dp_12">
 
-                        <ImageView 
+                        <ImageView
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
                             android:src="@drawable/ic_lock" android:contentDescription="@null" />
@@ -400,7 +485,7 @@
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/settings_transfer_title"
+                                android:text="@string/settings_chain_launch_title"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                 android:textColor="@color/md_onSurface" />
 
@@ -409,8 +494,8 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="@dimen/dp_2"
                                 android:singleLine="true"
-                                android:text="@string/settings_transfer_tip"
-                                android:textColor="@color/text_default_color"
+                                android:text="@string/settings_chain_launch_tip"
+                                android:textColor="@color/md_onSurface"
                                 android:textSize="@dimen/sp_10" />
                         </LinearLayout>
 
@@ -419,13 +504,31 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
                     </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+            <!-- 次级权限（可选） -->
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginBottom="@dimen/dp_4"
+                android:text="次级权限"
+                android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                android:textColor="@color/md_primary" />
 
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/dp_16"
+                style="@style/Widget.Daily.SectionCard">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- 截屏服务 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -473,8 +576,9 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
+                    <!-- 无障碍服务 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -517,61 +621,31 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
                     </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+            <!-- 功能增强 -->
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginTop="@dimen/dp_22"
+                android:layout_marginBottom="@dimen/dp_6"
+                android:text="功能增强"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                android:textColor="@color/md_onSurfaceVariant" />
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:paddingVertical="@dimen/dp_12">
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                style="@style/Widget.Daily.SectionCard">
 
-                        <ImageView 
-                            android:layout_width="@dimen/size_28"
-                            android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
 
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="@string/settings_gesture_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/md_onSurface" />
-
-                            <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="@dimen/dp_2"
-                                android:singleLine="true"
-                                android:text="@string/settings_gesture_tip"
-                                android:textSize="@dimen/sp_10" />
-                        </LinearLayout>
-
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/gestureDetectSwitch"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
-
+                    <!-- 省电模式 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -618,7 +692,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <!-- 伪息屏增强：可展开分组（标题行带总开关，点击箭头/标题区域展开/收起） -->
                     <LinearLayout
@@ -668,7 +742,7 @@
                             android:layout_height="@dimen/dp_20"
                             android:rotation="90"
                             android:src="@drawable/ic_arrow_right"
-                            app:tint="@color/on_surface_variant" android:contentDescription="@null" />
+                            app:tint="@color/md_onSurfaceVariant" android:contentDescription="@null" />
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/pseudoMaskGroupSwitch"
@@ -691,7 +765,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/dividerLine"
                             android:layout_marginHorizontal="@dimen/dp_16"
-                            android:background="@color/outline_variant" />
+                            android:background="@color/md_outlineVariant" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -734,7 +808,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/dividerLine"
                             android:layout_marginHorizontal="@dimen/dp_16"
-                            android:background="@color/outline_variant" />
+                            android:background="@color/md_outlineVariant" />
 
                         <LinearLayout
                             android:id="@+id/pseudoMaskDelayLayout"
@@ -793,7 +867,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/dividerLine"
                             android:layout_marginHorizontal="@dimen/dp_16"
-                            android:background="@color/outline_variant" />
+                            android:background="@color/md_outlineVariant" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -837,7 +911,56 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
+
+                    <!-- 手势检测 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:paddingVertical="@dimen/dp_12">
+
+                        <ImageView 
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/settings_gesture_title"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textColor="@color/md_onSurface" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/dp_2"
+                                android:singleLine="true"
+                                android:text="@string/settings_gesture_tip"
+                                android:textSize="@dimen/sp_10" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/gestureDetectSwitch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -885,7 +1008,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -893,7 +1016,8 @@
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16"
-                        android:paddingVertical="@dimen/dp_12">
+                        android:paddingVertical="@dimen/dp_12"
+                        android:visibility="gone">
 
                         <ImageView 
                             android:layout_width="@dimen/size_28"
@@ -931,21 +1055,21 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 更多 -->
+            <!-- 工具 -->
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/dp_4"
                 android:layout_marginTop="@dimen/dp_22"
                 android:layout_marginBottom="@dimen/dp_6"
-                android:text="更多"
+                android:text="工具"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -985,7 +1109,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/openTestLayout"
@@ -1019,7 +1143,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/captureTestLayout"
@@ -1053,7 +1177,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/statusQueryLayout"
@@ -1087,7 +1211,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/diagnosticLayout"
@@ -1117,77 +1241,6 @@
                             android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
 
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
-
-                    <LinearLayout
-                        android:id="@+id/introduceLayout"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView 
-                            android:layout_width="@dimen/size_28"
-                            android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:text="@string/settings_faq"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <ImageView 
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
-
-                    <LinearLayout
-                        android:id="@+id/versionRow"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:background="?attr/selectableItemBackground"
-                        android:clickable="true"
-                        android:focusable="true">
-
-                        <ImageView 
-                            android:layout_width="@dimen/size_28"
-                            android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_settings_more" android:contentDescription="@null" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:text="@string/settings_current_version"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/appVersion"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
-                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -1200,12 +1253,12 @@
                 android:layout_marginBottom="@dimen/dp_6"
                 android:text="关于"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -1247,7 +1300,7 @@
                             android:maxLines="1"
                             android:text="GitHub Releases"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
 
                         <ImageView 
                             android:layout_width="wrap_content"
@@ -1255,14 +1308,82 @@
                             android:layout_marginStart="@dimen/dp_8"
                             android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
+                    <LinearLayout
+                        android:id="@+id/introduceLayout"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16">
+
+                        <ImageView 
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:text="@string/settings_faq"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <ImageView 
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
+                    <LinearLayout
+                        android:id="@+id/versionRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <ImageView 
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_settings_more" android:contentDescription="@null" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:text="@string/settings_current_version"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/appVersion"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+                    </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-
-    <include
-        android:id="@+id/bottomNavBar"
-        layout="@layout/bottom_nav_bar" />
 
 </LinearLayout>

@@ -4,17 +4,17 @@
     android:id="@+id/rootView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/back_ground_color"
+    android:background="@color/md_background"
     android:orientation="vertical">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/theme_color"
+        android:background="@color/md_primary"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="远程控制"
-        app:titleTextColor="@color/white" />
+        app:titleTextColor="@color/on_header" />
 
     <androidx.core.widget.NestedScrollView
         android:id="@+id/contentScrollView"
@@ -27,7 +27,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="@dimen/dp_16"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:paddingBottom="@dimen/nav_content_inset">
 
             <!-- C2：需重新扫码常驻提示条（未绑定 / 设备ID变更时显示） -->
             <com.google.android.material.card.MaterialCardView
@@ -67,61 +68,167 @@
                         android:id="@+id/btnGoQr"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="去生成" />
+                        android:text="去生成"
+                        android:stateListAnimator="@animator/btn_press_scale" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 状态 Hero 卡（在线/离线点 + 最后心跳 + 关闭零耗电说明） -->
+            <!-- Hero 状态卡：大卡片样式（左侧图标区 + 标题/副标题 + 电源按钮 + 信息行） -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/heroCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/dp_12"
-                app:cardBackgroundColor="@color/md_primaryContainer"
+                app:cardBackgroundColor="@color/md_surface"
                 app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
-                app:strokeWidth="0dp">
+                app:cardElevation="3dp"
+                app:strokeColor="@color/md_outlineVariant"
+                app:strokeWidth="1dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="@dimen/dp_16">
+                    android:padding="@dimen/dp_20">
 
+                    <!-- 第一行：左侧图标 + 标题/副标题 + 右侧电源按钮 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/heroStatus"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:background="@drawable/bg_status_pill_offline"
-                            android:paddingHorizontal="@dimen/dp_12"
-                            android:paddingVertical="@dimen/dp_4"
-                            android:text="远程控制已关闭"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-                            android:textColor="@color/white" />
+                        <!-- 左侧：方形图标区 -->
+                        <FrameLayout
+                            android:layout_width="@dimen/size_56"
+                            android:layout_height="@dimen/size_56"
+                            android:background="@drawable/bg_hero_icon_box">
 
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/heroHeartbeat"
-                            android:layout_width="wrap_content"
+                            <ImageView
+                                android:id="@+id/heroIcon"
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/daily_ic_check_circle"
+                                android:contentDescription="@null" />
+                        </FrameLayout>
+
+                        <!-- 中间：标题 + 副标题 -->
+                        <LinearLayout
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:text="—"
-                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                            android:textColor="@color/md_onPrimaryContainer" />
+                            android:layout_marginStart="@dimen/dp_16"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="服务状态"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+                                android:textColor="@color/md_onSurface" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/heroSubtitle"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/dp_2"
+                                android:text="正在运行"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="@color/md_onSurfaceVariant" />
+                        </LinearLayout>
+
+                        <!-- 右侧：电源操作按钮 -->
+                        <FrameLayout
+                            android:id="@+id/heroPowerBtn"
+                            android:layout_width="@dimen/size_40"
+                            android:layout_height="@dimen/size_40"
+                            android:background="@drawable/bg_hero_power_on"
+                            android:foreground="?attr/selectableItemBackgroundBorderless"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="开关远程控制服务">
+
+                            <ImageView
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
+                                android:layout_gravity="center"
+                                android:src="@drawable/daily_ic_power"
+                                android:contentDescription="@null" />
+                        </FrameLayout>
                     </LinearLayout>
 
-                    <com.google.android.material.textview.MaterialTextView
+                    <!-- 连接 & 绑定状态行（从下方状态概览卡提升到 Hero 内） -->
+                    <LinearLayout
+                        android:id="@+id/heroStatusRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/dp_8"
-                        android:text="服务关闭后完全断开 MQTT 连接，不再有任何后台网络与定时任务，零额外耗电。开启并连接后，控制端可远程查看与操作本机。"
+                        android:layout_marginTop="@dimen/dp_12"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <!-- 连接状态药丸 -->
+                        <TextView
+                            android:id="@+id/heroConnStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/dp_28"
+                            android:background="@drawable/bg_status_pill_offline"
+                            android:gravity="center_vertical"
+                            android:minWidth="0dp"
+                            android:paddingHorizontal="@dimen/dp_10"
+                            android:text="未连接"
+                            android:textColor="@color/white"
+                            android:textSize="@dimen/sp_12" />
+
+                        <!-- 绑定状态药丸 -->
+                        <TextView
+                            android:id="@+id/heroBindStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/dp_28"
+                            android:layout_marginStart="@dimen/dp_8"
+                            android:background="@drawable/bg_status_pill_offline"
+                            android:gravity="center_vertical"
+                            android:minWidth="0dp"
+                            android:paddingHorizontal="@dimen/dp_10"
+                            android:text="未绑定"
+                            android:textColor="@color/white"
+                            android:textSize="@dimen/sp_12" />
+
+                        <!-- 最后心跳（紧凑文字，无药丸背景） -->
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/heroHeartbeat"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="@dimen/dp_10"
+                            android:layout_weight="1"
+                            android:gravity="end"
+                            android:text=""
+                            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                            android:textColor="@color/md_onSurfaceVariant" />
+
+                        <!-- 版本药丸（中性色，与状态药丸同规格） -->
+                        <TextView
+                            android:id="@+id/heroVersion"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/dp_28"
+                            android:background="@drawable/bg_status_pill_neutral"
+                            android:gravity="center_vertical"
+                            android:minWidth="0dp"
+                            android:paddingHorizontal="@dimen/dp_10"
+                            android:text="0.0.0"
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="@dimen/sp_11" />
+                    </LinearLayout>
+
+                    <!-- 描述文字（离线时显示说明） -->
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/heroDesc"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dp_12"
+                        android:text="开启并连接后，控制端可远程查看与操作本机。关闭则完全断开 MQTT 连接。"
                         android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="@color/md_onPrimaryContainer" />
+                        android:textColor="@color/md_onSurfaceVariant" />
 
                     <!-- B2：断线时显示倒计时与「立即重连」入口（仅断线可见） -->
                     <LinearLayout
@@ -140,144 +247,28 @@
                             android:layout_weight="1"
                             android:text="连接中…"
                             android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onPrimaryContainer" />
+                            android:textColor="@color/md_onSurfaceVariant" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnRetryNow"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="立即重连" />
+                            android:text="立即重连"
+                            android:stateListAnimator="@animator/btn_press_scale" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 状态概览卡 -->
+            <!-- 连接信息（原状态概览卡瘦身：连接/绑定状态已入 Hero，仅保留 MQTT 额度折叠） -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
-
-                    <!-- 远程控制服务 -->
-                    <LinearLayout
-                        android:id="@+id/mqttSwitchRow"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView 
-                        android:layout_width="@dimen/size_28"
-                        android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:text="远程控制服务"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/mqttSwitch"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
-
-                    <!-- 连接状态 -->
-                    <LinearLayout
-                        android:id="@+id/statusRow"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView 
-                        android:layout_width="@dimen/size_28"
-                        android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_link" android:contentDescription="@null" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:text="连接状态"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/statusValue"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:ellipsize="end"
-                            android:gravity="end"
-                            android:maxLines="1"
-                            android:text="未连接"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
-
-                    <!-- 绑定状态 -->
-                    <LinearLayout
-                        android:id="@+id/bindingRow"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView 
-                        android:layout_width="@dimen/size_28"
-                        android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:text="绑定状态"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/bindingValue"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:ellipsize="end"
-                            android:gravity="end"
-                            android:maxLines="1"
-                        android:text="未绑定"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
 
                     <!-- MQTT 额度（默认折叠） -->
                     <LinearLayout
@@ -317,7 +308,7 @@
                                 android:gravity="end"
                                 android:text="—"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/text_hint_color" />
+                                android:textColor="@color/md_onSurfaceVariant" />
 
                             <ImageView 
                                 android:id="@+id/ivChevronQuota"
@@ -342,8 +333,8 @@
                                 android:layout_marginTop="@dimen/dp_8"
                                 android:max="100"
                                 android:progress="0"
-                                app:indicatorColor="@color/theme_color"
-                                app:trackColor="@color/outline_variant"
+                                app:indicatorColor="@color/md_primary"
+                                app:trackColor="@color/md_outlineVariant"
                                 app:trackThickness="6dp" />
 
                             <LinearLayout
@@ -368,12 +359,12 @@
                 android:layout_marginBottom="@dimen/dp_6"
                 android:text="绑定操作"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -415,7 +406,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <RelativeLayout
                         android:id="@+id/unbindRow"
@@ -459,7 +450,7 @@
                 android:paddingHorizontal="@dimen/dp_8"
                 android:text="提示：强制解绑只解除与控制端的绑定关系，不会清除本机的 MQTT 配置；下次绑定无需重新填写服务器/账号。"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <!-- MQTT 配置 -->
             <com.google.android.material.textview.MaterialTextView
@@ -470,12 +461,12 @@
                 android:layout_marginBottom="@dimen/dp_6"
                 android:text="MQTT 配置"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -514,7 +505,7 @@
                             android:maxLines="1"
                             android:text="broker.emqx.io"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
 
                         <ImageView 
                             android:layout_width="wrap_content"
@@ -527,7 +518,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <RelativeLayout
                         android:id="@+id/guideRow"
@@ -564,7 +555,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/brokerRow"
@@ -598,14 +589,14 @@
                             android:maxLines="1"
                             android:text="未设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/userRow"
@@ -639,14 +630,14 @@
                             android:maxLines="1"
                             android:text="未设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/passRow"
@@ -680,14 +671,14 @@
                             android:maxLines="1"
                             android:text="未设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <!-- 设备身份（并入 MQTT 配置卡） -->
                     <LinearLayout
@@ -722,7 +713,7 @@
                             android:maxLines="1"
                             android:text="未生成"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
 
                         <ImageView 
                             android:layout_width="wrap_content"
@@ -735,7 +726,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/ctlRow"
@@ -769,7 +760,7 @@
                             android:maxLines="1"
                             android:text="未生成"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
 
                         <ImageView 
                             android:layout_width="wrap_content"
@@ -791,12 +782,12 @@
                 android:layout_marginBottom="@dimen/dp_6"
                 android:text="Serverless API 配置"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -835,14 +826,14 @@
                             android:maxLines="1"
                             android:text="未设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/apiAppIdRow"
@@ -876,14 +867,14 @@
                             android:maxLines="1"
                             android:text="未设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:id="@+id/apiAppSecretRow"
@@ -917,14 +908,14 @@
                             android:maxLines="1"
                             android:text="未设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/text_hint_color" />
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <RelativeLayout
                         android:id="@+id/apiClientsRow"
@@ -961,7 +952,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <RelativeLayout
                         android:id="@+id/apiTestRow"
@@ -1005,14 +996,10 @@
                 android:paddingHorizontal="@dimen/dp_8"
                 android:text="提示：API 地址通常为 https://xxx.emqxsl.com/api/v5，AppID/AppSecret 在 EMQX Serverless 部署的「API 访问」中获取。配置后可用于 HTTP 方式查看客户端/订阅/发布消息。"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                android:textColor="@color/text_hint_color" />
+                android:textColor="@color/md_onSurfaceVariant" />
 
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-
-    <include
-        android:id="@+id/bottomNavBar"
-        layout="@layout/bottom_nav_bar" />
 
 </LinearLayout>

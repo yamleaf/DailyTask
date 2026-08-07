@@ -4,17 +4,17 @@
     android:id="@+id/rootView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/back_ground_color"
+    android:background="@color/md_background"
     android:orientation="vertical">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/theme_color"
+        android:background="@color/md_primary"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="常见问题"
-        app:titleTextColor="@color/white" />
+        app:titleTextColor="@color/on_header" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerView"
@@ -34,6 +34,6 @@
         android:padding="@dimen/dp_16"
         android:singleLine="true"
         android:text="Tips：由于本人不再使用，测试不尽仔细，如有问题请加QQ群：560354109（1群）、643595483（2群）、377923252（3群）。"
-        android:textColor="@color/text_hint_color"
+        android:textColor="@color/md_onSurfaceVariant"
         android:textSize="@dimen/sp_12" />
 </LinearLayout>

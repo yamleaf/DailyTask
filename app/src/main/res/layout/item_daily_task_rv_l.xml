@@ -48,7 +48,7 @@
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:cardBackgroundColor="@color/surface_variant"
+                app:cardBackgroundColor="@color/md_surfaceVariant"
                 app:cardCornerRadius="@dimen/radius_card"
                 app:strokeColor="@color/md_outlineVariant"
                 app:strokeWidth="1dp">
@@ -94,7 +94,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="实际时间"
-                    android:textColor="@color/theme_color"
+                    android:textColor="@color/md_primary"
                     android:textSize="@dimen/sp_14"
                     android:textStyle="bold" />
 

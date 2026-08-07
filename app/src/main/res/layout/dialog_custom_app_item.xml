@@ -12,7 +12,7 @@
         android:id="@+id/appIcon"
         android:layout_width="@dimen/dp_40"
         android:layout_height="@dimen/dp_40"
-        android:background="@color/surface_variant"
+        android:background="@color/md_surfaceVariant"
         app:shapeAppearance="@style/RoundedStyle" android:contentDescription="@null" />
 
     <LinearLayout
@@ -38,7 +38,7 @@
             android:layout_marginTop="@dimen/dp_4"
             android:ellipsize="middle"
             android:singleLine="true"
-            android:textColor="@color/on_surface_variant"
+            android:textColor="@color/md_onSurfaceVariant"
             android:textSize="@dimen/sp_10" />
     </LinearLayout>
 

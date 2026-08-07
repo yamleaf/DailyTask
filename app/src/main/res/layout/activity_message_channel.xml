@@ -4,17 +4,17 @@
     android:id="@+id/rootView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/back_ground_color"
+    android:background="@color/md_background"
     android:orientation="vertical">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/theme_color"
+        android:background="@color/md_primary"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="消息渠道"
-        app:titleTextColor="@color/white" />
+        app:titleTextColor="@color/on_header" />
 
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
@@ -31,7 +31,7 @@
                 android:layout_height="wrap_content"
                 android:layout_margin="@dimen/dp_16"
                 app:cardCornerRadius="20dp"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -66,7 +66,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="@dimen/dp_16"
                 app:cardCornerRadius="20dp"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -98,7 +98,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -135,7 +135,7 @@
                 android:layout_height="wrap_content"
                 android:layout_margin="@dimen/dp_16"
                 app:cardCornerRadius="20dp"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -167,7 +167,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -215,7 +215,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/dividerLine"
                             android:layout_marginHorizontal="@dimen/dp_16"
-                            android:background="@color/outline_variant" />
+                            android:background="@color/md_outlineVariant" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -247,7 +247,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="@dimen/dividerLine"
                             android:layout_marginHorizontal="@dimen/dp_16"
-                            android:background="@color/outline_variant" />
+                            android:background="@color/md_outlineVariant" />
 
                         <LinearLayout
                             android:id="@+id/emailLayout"
@@ -287,7 +287,7 @@
                 android:layout_height="wrap_content"
                 android:layout_margin="@dimen/dp_16"
                 app:cardCornerRadius="20dp"
-                app:strokeWidth="0dp" style="@style/Widget.Daily.SectionCard">
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -318,7 +318,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"
                         android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/outline_variant" />
+                        android:background="@color/md_outlineVariant" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="match_parent"

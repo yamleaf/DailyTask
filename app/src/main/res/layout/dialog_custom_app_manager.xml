@@ -36,7 +36,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/dp_8"
         android:text="@string/settings_custom_target_app_tip"
-        android:textColor="@color/text_hint_color"
+        android:textColor="@color/md_onSurfaceVariant"
         android:textSize="@dimen/sp_12" />
 
     <FrameLayout

@@ -9,4 +9,9 @@
     <color name="lib_text_color">#323232</color>
     <color name="lib_hint_color">#CCCCCC</color>
     <color name="lib_line_color">#D3D3D3</color>
+
+    <!-- ===== 弹窗统一令牌（镜像 :protocol tokens.xml，值与库保持一致；lite 为独立通用库不依赖 :protocol） ===== -->
+    <color name="md_primary">#5B5BD6</color>
+    <color name="md_onSurface">#1B1B23</color>
+    <color name="md_outline">#767680</color>
 </resources>

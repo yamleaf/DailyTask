@@ -44,7 +44,7 @@
             android:layout_height="wrap_content"
             app:wheel_hourLabel="时"
             app:wheel_itemTextBoldSelected="true"
-            app:wheel_itemTextColorSelected="@color/theme_color"
+            app:wheel_itemTextColorSelected="@color/md_primary"
             app:wheel_minuteLabel="分"
             app:wheel_secondLabel="秒"
             app:wheel_timeMode="hour_24_has_second" />

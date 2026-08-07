@@ -3,6 +3,7 @@ package com.pengxh.kt.lite.base
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.viewbinding.ViewBinding
+import com.pengxh.kt.lite.base.ForegroundIdleBridge
 
 abstract class KotlinBaseActivity<VB : ViewBinding> : AppCompatActivity() {
 
@@ -52,6 +53,21 @@ abstract class KotlinBaseActivity<VB : ViewBinding> : AppCompatActivity() {
      * 初始化业务逻辑
      */
     abstract fun initEvent()
+
+    override fun onResume() {
+        super.onResume()
+        ForegroundIdleBridge.onResume?.invoke(this)
+    }
+
+    override fun onPause() {
+        ForegroundIdleBridge.onPause?.invoke(this)
+        super.onPause()
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        ForegroundIdleBridge.onUserInteraction?.invoke(this)
+    }
 
     override fun onDestroy() {
         super.onDestroy()

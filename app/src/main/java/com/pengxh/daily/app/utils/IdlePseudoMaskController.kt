@@ -199,6 +199,57 @@ object IdlePseudoMaskController {
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
     }
 
+    // ═══════════════════════ 前台「无操作」自动进入伪息屏 ═══════════════════════
+    // 由 lite 模块 KotlinBaseActivity 经 ForegroundIdleBridge 在 DailyTaskApplication.onCreate
+    // 接线：统一驱动任务页 / 远程页 / 设置页等所有前台页面的无操作计时，
+    // 复用「伪息屏增强」配置（总开关 + 延时），进入方式与后台路径一致（MaskOverlayHelper 蒙层）。
+
+    private var idleMaskContext: Context? = null
+
+    private val foregroundIdleRunnable: Runnable = Runnable {
+        val context = idleMaskContext ?: return@Runnable
+        if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
+        if (appInBackground) return@Runnable
+        if (TaskScheduler.isInActivePunch()) return@Runnable
+        if (MaskOverlayHelper.isShowing()) return@Runnable
+        LogFileManager.writeLog("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪息屏")
+        MaskOverlayHelper.show(context)
+    }
+
+    fun startIdleMask(context: Context) {
+        if (!AppRuntimeConfig.isForcePseudoMask()) return
+        if (MaskOverlayHelper.isShowing()) return
+        idleMaskContext = context
+        mainHandler.removeCallbacks(foregroundIdleRunnable)
+        mainHandler.postDelayed(foregroundIdleRunnable, idleToMaskMs())
+    }
+
+    fun stopIdleMask() {
+        mainHandler.removeCallbacks(foregroundIdleRunnable)
+    }
+
+    /** 用户在本 App 前台有交互：重置无操作计时 */
+    fun notifyUserActivity(context: Context) {
+        startIdleMask(context)
+    }
+
+    /** 主界面在 onNewIntent 时判断：刚从后台拉起则补显伪息屏蒙层 */
+    fun wasAppInBackground(): Boolean = appInBackground
+
+    // ═══════════════════════ 打卡返回即息屏 ═══════════════════════
+    /** 「打卡动作完成 → 返回本 App 立即进入伪息屏」的请求标志（主线程使用） */
+    private var punchReturnMaskRequested = false
+
+    fun requestPunchReturnMask() {
+        punchReturnMaskRequested = true
+    }
+
+    fun consumePunchReturnMask(): Boolean {
+        if (!punchReturnMaskRequested) return false
+        punchReturnMaskRequested = false
+        return true
+    }
+
     /** 黑屏蒙层被关掉后，若仍在外部且开关开启，则继续透明保亮并重新计时 */
     fun onBlackMaskHidden(context: Context) {
         if (!appInBackground) return

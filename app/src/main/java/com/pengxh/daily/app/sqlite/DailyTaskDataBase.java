@@ -8,7 +8,7 @@ import com.pengxh.daily.app.sqlite.bean.NotificationBean;
 import com.pengxh.daily.app.sqlite.dao.DailyTaskBeanDao;
 import com.pengxh.daily.app.sqlite.dao.NotificationBeanDao;
 
-@Database(entities = {DailyTaskBean.class, NotificationBean.class}, version = 1, exportSchema = false)
+@Database(entities = {DailyTaskBean.class, NotificationBean.class}, version = 2, exportSchema = false)
 public abstract class DailyTaskDataBase extends RoomDatabase {
     public abstract DailyTaskBeanDao dailyTaskDao();
 

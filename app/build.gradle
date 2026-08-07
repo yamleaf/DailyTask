@@ -231,4 +231,6 @@ dependencies {
     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
     // 绑定二维码生成（ZXing core，仅编解码，无 Android 视图依赖）
     implementation 'com.google.zxing:core:3.4.1'
+    // 磨砂玻璃（悬浮导航模糊背景；API 31+ 走硬件 RenderEffect，低版本走 RenderScript）
+    implementation 'com.github.Dimezis:BlurView:version-2.0.4'
 }
