@@ -441,6 +441,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx.openApplication()
         }
         binding.chainStartRow.setOnClickListener { checkChainStartPermission() }
+        // 电量智能预警
+        binding.batteryAlertSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncingSwitchState) return@setOnCheckedChangeListener
+            SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
+            binding.batteryAlertTipsView.text = if (checked) "已开启，将在预警时间前检查电量耗尽风险" else "预测电量耗尽时间，在夜间前预警避免关机"
+        }
+        binding.batteryWarningTimeRow.setOnClickListener { showBatteryWarningTimePicker() }
         binding.captureTestLayout.setOnClickListener {
             val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, -1)
             lifecycleScope.launch {
@@ -692,9 +699,15 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
             binding.pseudoMaskNoClockSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
             binding.transferSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)
-        // 链式启动权限状态初始显示
-        binding.chainStartStatusView.text = "未检测"
-        binding.chainStartStatusView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
+            // 链式启动权限状态初始显示
+            binding.chainStartStatusView.text = "未检测"
+            binding.chainStartStatusView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
+            // 电量智能预警
+            val alertEnabled = SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
+            binding.batteryAlertSwitch.isChecked = alertEnabled
+            binding.batteryAlertTipsView.text = if (alertEnabled) "已开启，将在预警时间前检查电量耗尽风险" else "预测电量耗尽时间，在夜间前预警避免关机"
+            val warningHour = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
+            binding.batteryWarningTimeValue.text = "%02d:00".format(warningHour)
         } finally {
             syncingSwitchState = false
         }
@@ -796,6 +809,33 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         } catch (e: Exception) {
             "无法打开系统设置：${e.message}".show(ctx)
         }
+    }
+
+    /** 电量智能预警时间选择器 */
+    private fun showBatteryWarningTimePicker() {
+        val current = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
+        val dialogView = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
+            val cal = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, current)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+            }
+            setDefaultValue(com.github.gzuliyujiang.wheelpicker.entity.TimeEntity.target(cal.time))
+        }
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = dialogView,
+            title = "最晚预警时间",
+            message = "若预测电量在此时之后降至 30% 以下，将在此时前发送预警，避免夜间低电量关机",
+            positiveText = "确定",
+            negativeText = "取消",
+            onConfirm = {
+                val hour = dialogView.selectedHour
+                SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, hour)
+                binding.batteryWarningTimeValue.text = "%02d:00".format(hour)
+                true
+            }
+        )
     }
 
     /** 目标应用标签列表（内置 + 自定义入口） */

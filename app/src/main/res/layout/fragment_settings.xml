@@ -752,6 +752,118 @@
                             android:layout_height="wrap_content" />
                     </LinearLayout>
 
+<View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
+                    <!-- 电量智能预警 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:paddingVertical="@dimen/dp_12">
+
+                        <ImageView
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="电量智能预警"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textColor="@color/md_onSurface" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/batteryAlertTipsView"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/dp_2"
+                                android:singleLine="true"
+                                android:text="预测电量耗尽时间，在夜间前预警避免关机"
+                                android:textSize="@dimen/sp_10" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/batteryAlertSwitch"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
+                    <!-- 预警时间（点击展开时间选择器） -->
+                    <LinearLayout
+                        android:id="@+id/batteryWarningTimeRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:paddingVertical="@dimen/dp_12"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackground">
+
+                        <ImageView
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="最晚预警时间"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textColor="@color/md_onSurface" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/dp_2"
+                                android:singleLine="true"
+                                android:text="若预测夜间耗尽，在此时间前预警"
+                                android:textSize="@dimen/sp_10" />
+                        </LinearLayout>
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/batteryWarningTimeValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="20:00"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_primary" />
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_8"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
+                    </LinearLayout>
+
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="@dimen/dividerLine"

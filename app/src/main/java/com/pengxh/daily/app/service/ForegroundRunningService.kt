@@ -17,6 +17,7 @@ import android.os.Environment
 import android.os.IBinder
 import android.service.notification.NotificationListenerService
 import com.pengxh.daily.app.utils.BatteryHistory
+import com.pengxh.daily.app.utils.BatteryPredictor
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.Constant
@@ -85,6 +86,8 @@ class ForegroundRunningService : Service() {
     private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
     /** 上一次检测时的充电状态，用于仅在「刚插入充电」的瞬间触发一次「开始充电」通知 */
     private var wasCharging = false
+    /** 电量智能预警上次检测时间（节流，每 10 分钟检查一次） */
+    private var lastBatteryAlertCheckMs = 0L
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
@@ -206,6 +209,7 @@ class ForegroundRunningService : Service() {
                         updateResetTimeView()
                         checkAndTriggerReset()
                         BatteryHistory.recordSample(this@ForegroundRunningService)
+                        checkBatterySmartAlert()
                     }
 
                     Intent.ACTION_BATTERY_CHANGED -> checkLowBattery()
@@ -369,6 +373,49 @@ class ForegroundRunningService : Service() {
         SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE1_KEY, false)
         SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE2_KEY, false)
         SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_STAGE3_KEY, false)
+    }
+
+    /**
+     * 电量智能预警检查（每 10 分钟节流）。
+     *
+     * 根据 BatteryPredictor 预测电量降至 30% 的时间，若落在预警时间（默认 20:00）之后，
+     * 则在预警时间前发送预警，防止用户睡眠期间低电量关机。
+     */
+    private fun checkBatterySmartAlert() {
+        try {
+            if (!SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)) return
+
+            // 节流：每 10 分钟检查一次
+            val now = System.currentTimeMillis()
+            if (now - lastBatteryAlertCheckMs < 10 * 60 * 1000L) return
+            lastBatteryAlertCheckMs = now
+
+            val result = BatteryPredictor.checkAlert(this)
+            if (!result.shouldAlert) return
+
+            val pred = result.prediction ?: return
+            val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val targetTimeText = BatteryPredictor.formatTime(pred.targetTimeMs)
+
+            LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 30%（当前 ${battery}%），在 ${result.warningHour}:00 前提醒")
+            MessageDispatcher.sendMessage(
+                "电量智能预警",
+                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningHour),
+                force = true,
+                appendMeta = false
+            )
+            MqttAgentService.publishAlert(
+                org.json.JSONObject().apply {
+                    put("type", "battery_smart_alert")
+                    put("battery", battery)
+                    put("predictedTime", targetTimeText)
+                    put("warningHour", result.warningHour)
+                }.toString()
+            )
+            BatteryPredictor.markAlertSent(this)
+        } catch (e: Exception) {
+            Log.e(javaClass.simpleName, "电量智能预警检查失败", e)
+        }
     }
 
     /** 构造低电量告警的 MQTT 推送 JSON（type: low_battery | charging_resumed | battery_full） */
