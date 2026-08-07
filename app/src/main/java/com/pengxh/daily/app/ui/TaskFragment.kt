@@ -6,6 +6,7 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -22,15 +23,14 @@ import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.CustomWorkdayManager
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.TaskScheduler
-import com.pengxh.daily.app.utils.UnifiedDialogKit
 import com.pengxh.daily.app.utils.WatermarkDrawable
 import com.pengxh.kt.lite.base.KotlinBaseFragment
 import com.pengxh.kt.lite.divider.RecyclerViewItemBorder
 import com.pengxh.kt.lite.extensions.convertColor
 import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.show
-import com.pengxh.kt.lite.widget.dialog.AlertInputDialog
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -296,14 +296,23 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     /** 导入任务：粘贴文本解析 */
     private fun importTask() {
-        AlertInputDialog.Builder()
-            .setContext(requireContext())
-            .setTitle("导入任务")
-            .setHintMessage("请将导出的任务粘贴到这里")
-            .setNegativeButton("取消")
-            .setPositiveButton("确定")
-            .setOnDialogButtonClickListener(object : AlertInputDialog.OnDialogButtonClickListener {
-                override fun onConfirmClick(value: String) {
+        val editText = EditText(requireContext()).apply {
+            hint = "请将导出的任务粘贴到这里"
+            isSingleLine = false
+            minLines = 4
+            gravity = android.view.Gravity.START or android.view.Gravity.TOP
+        }
+        UnifiedDialogKit.showForm(
+            requireContext(), editText,
+            title = "导入任务",
+            positiveText = "确定",
+            negativeText = "取消",
+            onConfirm = {
+                val value = editText.text.toString().trim()
+                if (value.isEmpty()) {
+                    "输入错误，请检查！".show(ctx)
+                    false
+                } else {
                     lifecycleScope.launch {
                         // 解析导入文本并写入数据库（每行一个时间 HH:mm:ss）
                         val times = value.split("\n").map { it.trim() }.filter {
@@ -320,12 +329,10 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                         binding.emptyView.visibility = if (taskBeans.isEmpty()) View.VISIBLE else View.GONE
                         com.pengxh.daily.app.utils.ConfigImportSignal.notifyRemoteChanged(ctx)
                     }
+                    true
                 }
-
-                override fun onCancelClick() {}
-            })
-            .build()
-            .show()
+            }
+        )
     }
 
     /** 从数据库加载任务列表并刷新 UI */

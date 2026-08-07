@@ -3,7 +3,6 @@ package com.pengxh.daily.app.ui
 import android.os.Bundle
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.JsonObject
 import com.pengxh.daily.app.databinding.ActivityMessageChannelBinding
 import com.pengxh.daily.app.utils.ConfigImportSignal
@@ -17,6 +16,7 @@ import com.pengxh.kt.lite.extensions.isEmail
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 
 class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>() {
 
@@ -79,13 +79,15 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             )
             ConfigImportSignal.notifyRemoteChanged(context)
 
-            MaterialAlertDialogBuilder(this)
-                .setTitle("测试消息")
-                .setMessage("企业微信配置完成，可以发送企业微信消息。\n\n是否继续？")
-                .setCancelable(false)
-                .setPositiveButton("继续") { _, _ ->
-                    sendTestMessage()
-                }.setNegativeButton("取消", null).show()
+            UnifiedDialogKit.showSuccess(
+                this,
+                "测试消息",
+                "企业微信配置完成，可以发送企业微信消息。\n\n是否继续？",
+                confirmText = "继续",
+                cancelText = "取消",
+                cancelable = false,
+                onConfirm = { sendTestMessage() }
+            )
         }
 
         binding.sendEmailButton.setOnClickListener {
@@ -175,11 +177,14 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
     }
 
     private fun sendTestEmail() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("测试邮件")
-            .setMessage("QQ邮箱配置完成，可以发送QQ邮件。\n\n是否继续？")
-            .setCancelable(false)
-            .setPositiveButton("继续") { _, _ ->
+        UnifiedDialogKit.showSuccess(
+            this,
+            "测试邮件",
+            "QQ邮箱配置完成，可以发送QQ邮件。\n\n是否继续？",
+            confirmText = "继续",
+            cancelText = "取消",
+            cancelable = false,
+            onConfirm = {
                 LoadingDialog.show(context, "邮件发送中，请稍后....")
                 MessageDispatcher.sendMessage(
                     "邮箱测试", StatusReporter.buildTestEmailHtml(),
@@ -201,6 +206,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                         LoadingDialog.dismiss()
                         "发送失败：${it}".show(context)
                     })
-            }.setNegativeButton("取消", null).show()
+            }
+        )
     }
 }

@@ -56,7 +56,6 @@ import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.utils.StatusReporter
-import com.pengxh.daily.app.utils.UnifiedDialogKit
 import com.pengxh.daily.app.utils.WatermarkDrawable
 import com.pengxh.kt.lite.base.KotlinBaseFragment
 import com.pengxh.kt.lite.extensions.convertColor
@@ -65,6 +64,7 @@ import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
 import com.yample.mqttprotocol.ThemeManager
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -238,13 +238,14 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                                 }
                                 SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
                             } else {
-                                if (!binding.captureSwitch.isChecked &&
-                                    !binding.accessibilitySwitch.isChecked
-                                ) {
-                                    "请先打开截屏服务或无障碍服务".show(ctx)
-                                    return
+                                // 飞书/企业微信/M3 不再强制要求截屏或无障碍服务；
+                                // 仅在已开启对应能力时设置结果来源，否则保留现有配置。
+                                val source = when {
+                                    binding.captureSwitch.isChecked -> 1
+                                    binding.accessibilitySwitch.isChecked -> 2
+                                    else -> SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, 0)
                                 }
-                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, if (binding.captureSwitch.isChecked) 1 else 2)
+                                SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, source)
                             }
                             Constant.getTargetAppPackageByPosition(position)?.let { pkg ->
                                 SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, position)
@@ -388,11 +389,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.downloadRow.setOnClickListener {
             val url = BuildConfig.CTRL_DOWNLOAD_URL.trim()
             if (url.isEmpty()) {
-                MaterialAlertDialogBuilder(ctx)
-                    .setTitle("获取控制端 DailyController")
-                    .setMessage("当前未配置控制端下载地址。控制端安装包由分发方通过构建参数注入，请向提供者获取安装方式。")
-                    .setPositiveButton("知道了", null)
-                    .show()
+                UnifiedDialogKit.showInfo(
+                    ctx,
+                    "获取控制端 DailyController",
+                    "当前未配置控制端下载地址。控制端安装包由分发方通过构建参数注入，请向提供者获取安装方式。"
+                )
             } else {
                 ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             }
@@ -400,17 +401,17 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.themeValueView.text = ThemeManager.labelOf(ThemeManager.getMode(ctx))
         binding.themeRow.setOnClickListener {
             val current = ThemeManager.getMode(ctx)
-            MaterialAlertDialogBuilder(ctx)
-                .setTitle("主题外观")
-                .setSingleChoiceItems(ThemeManager.LABELS, current) { dialog, which ->
-                    dialog.dismiss()
-                    if (which != current) {
-                        ThemeManager.setMode(ctx, which)
-                        requireActivity().recreate()
-                    }
+            UnifiedDialogKit.showSingleChoice(
+                ctx,
+                "主题外观",
+                ThemeManager.LABELS.toList(),
+                current
+            ) { which ->
+                if (which != current) {
+                    ThemeManager.setMode(ctx, which)
+                    requireActivity().recreate()
                 }
-                .setNegativeButton("取消", null)
-                .show()
+            }
         }
         binding.transferSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
@@ -519,22 +520,21 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             if (!enabled) {
                 onConfirm(false)
             } else {
-                MaterialAlertDialogBuilder(ctx)
-                    .setTitle("开启强制伪息屏？")
-                    .setMessage(
-                        "离开本软件超过设定时间（默认 60 秒）后将自动进入伪息屏模式。\n\n" +
-                            "⚠ 可能打断其他 App 使用；适合无人值守挂机，白天操作手机建议关闭。"
-                    )
-                    .setNegativeButton("取消") { dialog, _ ->
+                UnifiedDialogKit.showWarning(
+                    ctx,
+                    "开启强制伪息屏？",
+                    "离开本软件超过设定时间（默认 60 秒）后将自动进入伪息屏模式。\n\n" +
+                        "⚠ 可能打断其他 App 使用；适合无人值守挂机，白天操作手机建议关闭。",
+                    confirmText = "确认开启",
+                    cancelable = false,
+                    onCancel = {
                         syncingSwitchState = true
                         binding.forcePseudoMaskSwitch.isChecked = false
                         binding.pseudoMaskGroupSwitch.isChecked = false
                         syncingSwitchState = false
-                        dialog.dismiss()
-                    }
-                    .setPositiveButton("确认开启") { _, _ -> onConfirm(true) }
-                    .setCancelable(false)
-                    .show()
+                    },
+                    onConfirm = { onConfirm(true) }
+                )
             }
         }
         binding.forcePseudoMaskSwitch.setOnCheckedChangeListener { _, checked ->
@@ -873,7 +873,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 val info = allApps[position]
                 item.findViewById<ImageView>(R.id.appIcon).setImageDrawable(info.activityInfo.loadIcon(pm))
                 item.findViewById<TextView>(R.id.appLabel).text = info.activityInfo.loadLabel(pm)
-                item.findViewById<TextView>(R.id.appPkg).text = info.activityInfo.packageName
                 return item
             }
         }
@@ -931,26 +930,28 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 开启截屏服务提醒 */
     private fun showCaptureEnableWarning(onConfirm: () -> Unit) {
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle(R.string.settings_capture_enable_warning_title)
-            .setMessage(R.string.settings_capture_enable_warning_msg)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("继续开启") { _, _ -> onConfirm() }
-            .setCancelable(false)
-            .show()
+        UnifiedDialogKit.showWarning(
+            ctx,
+            getString(R.string.settings_capture_enable_warning_title),
+            getString(R.string.settings_capture_enable_warning_msg),
+            confirmText = "继续开启",
+            cancelable = false,
+            onConfirm = onConfirm
+        )
     }
 
     /** 开启无障碍服务提醒 */
     private fun showAccessibilityEnableWarning() {
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle(R.string.settings_accessibility_enable_warning_title)
-            .setMessage(R.string.settings_accessibility_enable_warning_msg)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("前往开启") { _, _ ->
+        UnifiedDialogKit.showWarning(
+            ctx,
+            getString(R.string.settings_accessibility_enable_warning_title),
+            getString(R.string.settings_accessibility_enable_warning_msg),
+            confirmText = "前往开启",
+            cancelable = false,
+            onConfirm = {
                 ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
-            .setCancelable(false)
-            .show()
+        )
     }
 
     /** 伪息屏延迟设置滑杆 */
@@ -964,18 +965,21 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         bindingDlg.slider.addOnChangeListener { _, value, _ ->
             bindingDlg.tvSliderValue.text = "${value.toInt()} 秒"
         }
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle(R.string.settings_pseudo_mask_delay_title)
-            .setMessage(R.string.settings_pseudo_mask_delay_tip)
-            .setView(bindingDlg.root)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
+        UnifiedDialogKit.showForm(
+            ctx,
+            bindingDlg.root,
+            title = getString(R.string.settings_pseudo_mask_delay_title),
+            message = getString(R.string.settings_pseudo_mask_delay_tip),
+            positiveText = getString(android.R.string.ok),
+            negativeText = getString(android.R.string.cancel),
+            onConfirm = {
                 val delay = bindingDlg.slider.value.toInt().coerceIn(10, 3600)
                 SaveKeyValues.saveInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, delay)
                 binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
                 ConfigImportSignal.notifyRemoteChanged(ctx)
+                true
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        )
     }
 
     /** 状态报告展示（WebView 渲染 HTML） */
@@ -1052,16 +1056,19 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 })
             })
         }
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("版本信息")
-            .setView(container)
-            .setPositiveButton("复制全部") { _, _ ->
+        UnifiedDialogKit.showForm(
+            ctx,
+            container,
+            title = "版本信息",
+            positiveText = "复制全部",
+            negativeText = "关闭",
+            onConfirm = {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("版本信息", versionText.trimEnd()))
                 "已复制全部版本信息到剪贴板".show(ctx)
+                true
             }
-            .setNegativeButton("关闭", null)
-            .show()
+        )
     }
 
     /** 开启通知监听服务（启用组件 + 周期性检查） */

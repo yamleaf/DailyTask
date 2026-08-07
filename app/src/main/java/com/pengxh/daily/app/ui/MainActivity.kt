@@ -22,11 +22,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.pengxh.daily.app.utils.UnifiedDialogKit
 import com.google.android.material.transition.MaterialFadeThrough
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.R
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import com.pengxh.daily.app.databinding.ActivityMainBinding
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService

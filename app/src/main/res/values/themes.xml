@@ -24,35 +24,6 @@
         <item name="cornerSizeBottomRight">0dp</item>
     </style>
 
-    <!-- ===== 统一弹窗按钮样式（胶囊形，两端一致） ===== -->
-    <!-- 主按钮：实心 Primary -->
-    <style name="Widget.DailyTask.Dialog.Button.Positive" parent="Widget.Material3.Button">
-        <item name="backgroundTint">@color/md_primary</item>
-        <item name="android:textColor">@color/md_onPrimary</item>
-        <item name="cornerRadius">20dp</item>
-        <item name="android:minHeight">40dp</item>
-        <item name="android:paddingHorizontal">20dp</item>
-        <item name="android:textSize">14sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-    <!-- 次按钮：描边 -->
-    <style name="Widget.DailyTask.Dialog.Button.Negative" parent="Widget.Material3.Button.OutlinedButton">
-        <item name="android:textColor">@color/md_outline</item>
-        <item name="strokeColor">@color/md_outlineVariant</item>
-        <item name="strokeWidth">1.5dp</item>
-        <item name="cornerRadius">20dp</item>
-        <item name="android:minHeight">40dp</item>
-        <item name="android:paddingHorizontal">20dp</item>
-        <item name="android:textSize">14sp</item>
-    </style>
-    <!-- 三按钮：文字（知道了/关闭） -->
-    <style name="Widget.DailyTask.Dialog.Button.Neutral" parent="Widget.Material3.Button.TextButton">
-        <item name="android:textColor">@color/md_primary</item>
-        <item name="android:minHeight">40dp</item>
-        <item name="android:paddingHorizontal">20dp</item>
-        <item name="android:textSize">14sp</item>
-    </style>
-
     <!-- 弹窗入场/出场动画（scale + fade，200ms / 150ms） -->
     <style name="Animation.DailyTask.DialogScale" parent="@android:style/Animation">
         <item name="android:windowEnterAnimation">@anim/dialog_enter</item>
@@ -89,8 +60,8 @@
         <!-- 导航栏跟随明暗：浅色模式深色图标，深色模式浅色图标 -->
         <item name="android:navigationBarColor">@color/md_surface</item>
         <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
-        <!-- 对话框主题（统一规范：16dp 圆角 + 胶囊按钮） -->
-        <item name="materialAlertDialogTheme">@style/ThemeOverlay.DailyTask.UnifiedDialog</item>
+        <!-- 对话框主题（统一规范：28dp 圆角 + 胶囊按钮，双端共用 :protocol 弹窗体系） -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Daily.UnifiedDialog</item>
         <!-- BottomSheet 主题（方案 C1，统一底部弹窗圆角/背景） -->
         <item name="bottomSheetDialogTheme">@style/ThemeOverlay.DailyTask.BottomSheetDialog</item>
         <!-- 窗口转场：用系统合成（自动尊重系统「减少动态效果」缩放），替代已弃用的 overridePendingTransition -->
@@ -99,16 +70,6 @@
         <item name="android:windowExitTransition">@transition/fade</item>
         <item name="android:windowReenterTransition">@transition/fade</item>
         <item name="android:windowReturnTransition">@transition/fade</item>
-    </style>
-
-    <!-- 统一弹窗主题：16dp 圆角 + 胶囊按钮 + 缩放动画 -->
-    <style name="ThemeOverlay.DailyTask.UnifiedDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
-        <item name="shapeAppearance">@style/ShapeAppearance.DailyTask.Large</item>
-        <item name="colorPrimary">@color/md_primary</item>
-        <item name="buttonBarPositiveButtonStyle">@style/Widget.DailyTask.Dialog.Button.Positive</item>
-        <item name="buttonBarNegativeButtonStyle">@style/Widget.DailyTask.Dialog.Button.Negative</item>
-        <item name="buttonBarNeutralButtonStyle">@style/Widget.DailyTask.Dialog.Button.Neutral</item>
-        <item name="android:windowAnimationStyle">@style/Animation.DailyTask.DialogScale</item>
     </style>
 
     <!-- 底部面板主题：顶部 24dp 圆角 + 缩放从底部滑入 -->

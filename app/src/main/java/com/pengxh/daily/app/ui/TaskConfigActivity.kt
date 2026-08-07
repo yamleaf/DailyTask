@@ -6,10 +6,10 @@ import android.os.Environment
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.widget.EditText
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
 import com.pengxh.daily.app.utils.ConfigCipher
@@ -33,8 +33,8 @@ import com.pengxh.kt.lite.extensions.isNumber
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.extensions.toJson
 import com.pengxh.kt.lite.utils.SaveKeyValues
-import com.pengxh.kt.lite.widget.dialog.AlertInputDialog
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -163,22 +163,25 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         }
 
         binding.keyLayout.setOnClickListener {
-            AlertInputDialog.Builder()
-                .setContext(this)
-                .setTitle("设置打卡口令")
-                .setHintMessage("请输入打卡口令，如：打卡")
-                .setNegativeButton("取消")
-                .setPositiveButton("确定")
-                .setOnDialogButtonClickListener(object :
-                    AlertInputDialog.OnDialogButtonClickListener {
-                    override fun onConfirmClick(value: String) {
+            val editText = EditText(this).apply { hint = "请输入打卡口令，如：打卡" }
+            UnifiedDialogKit.showForm(
+                this, editText,
+                title = "设置打卡口令",
+                positiveText = "确定",
+                negativeText = "取消",
+                onConfirm = {
+                    val value = editText.text.toString().trim()
+                    if (value.isEmpty()) {
+                        "输入错误，请检查！".show(this)
+                        false
+                    } else {
                         SaveKeyValues.saveString(Constant.REMOTE_COMMAND_KEY, value)
                         binding.keyTextView.text = value
                         ConfigImportSignal.notifyRemoteChanged(context)
+                        true
                     }
-
-                    override fun onCancelClick() {}
-                }).build().show()
+                }
+            )
         }
 
         binding.workdayLayout.setOnClickListener {
@@ -214,24 +217,26 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         }
 
         binding.minuteRangeLayout.setOnClickListener {
-            AlertInputDialog.Builder()
-                .setContext(this)
-                .setTitle("设置随机时间范围")
-                .setHintMessage("请输入整数，如：30")
-                .setNegativeButton("取消")
-                .setPositiveButton("确定")
-                .setOnDialogButtonClickListener(object :
-                    AlertInputDialog.OnDialogButtonClickListener {
-                    override fun onConfirmClick(value: String) {
-                        if (value.isNumber()) {
-                            updateRandomMinuteRange(value.toInt())
-                        } else {
-                            "直接输入整数时间即可".show(context)
-                        }
+            val editText = EditText(this).apply { hint = "请输入整数，如：30" }
+            UnifiedDialogKit.showForm(
+                this, editText,
+                title = "设置随机时间范围",
+                positiveText = "确定",
+                negativeText = "取消",
+                onConfirm = {
+                    val value = editText.text.toString().trim()
+                    if (value.isEmpty()) {
+                        "输入错误，请检查！".show(this)
+                        false
+                    } else if (value.isNumber()) {
+                        updateRandomMinuteRange(value.toInt())
+                        true
+                    } else {
+                        "直接输入整数时间即可".show(this)
+                        false
                     }
-
-                    override fun onCancelClick() {}
-                }).build().show()
+                }
+            )
         }
 
         binding.exportLayout.setOnClickListener {
@@ -335,32 +340,28 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
     private fun showWorkdaySelector() {
         val orderedDays = CustomWorkdayManager.getOrderedDays()
         val selectedDays = CustomWorkdayManager.loadWorkdays().toMutableSet()
-        val labels = orderedDays.map { CustomWorkdayManager.getDayLabel(it) }.toTypedArray()
+        val labels = orderedDays.map { CustomWorkdayManager.getDayLabel(it) }.toList()
         val checkedItems = orderedDays.map { it in selectedDays }.toBooleanArray()
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle("选择工作日")
-            .setMultiChoiceItems(labels, checkedItems) { _, which, isChecked ->
-                val day = orderedDays[which]
-                if (isChecked) {
-                    selectedDays.add(day)
-                } else {
-                    selectedDays.remove(day)
-                }
-            }
-            .setNegativeButton("取消", null)
-            .setPositiveButton("确定") { _, _ ->
-                if (selectedDays.isEmpty()) {
+        UnifiedDialogKit.showMultiChoice(
+            this,
+            "选择工作日",
+            labels,
+            checkedItems,
+            onConfirm = { checked ->
+                val current = orderedDays.filterIndexed { index, _ -> checked[index] }.toSet()
+                if (current.isEmpty()) {
                     "至少保留一天为工作日".show(this)
-                    return@setPositiveButton
+                    false
+                } else {
+                    val normalized = orderedDays.filter { it in current }.toSet()
+                    CustomWorkdayManager.saveWorkdays(normalized)
+                    updateCustomWorkdaySummary(normalized)
+                    ConfigImportSignal.notifyRemoteChanged(context)
+                    true
                 }
-
-                val normalized = orderedDays.filter { it in selectedDays }.toSet()
-                CustomWorkdayManager.saveWorkdays(normalized)
-                updateCustomWorkdaySummary(normalized)
-                ConfigImportSignal.notifyRemoteChanged(context)
             }
-            .show()
+        )
     }
 
     private fun updateCustomWorkdaySummary(workdays: Set<DayOfWeek>) {
@@ -369,24 +370,26 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
     private fun setHourByPosition(position: Int) {
         if (position == hourArray.size - 1) {
-            AlertInputDialog.Builder()
-                .setContext(this)
-                .setTitle("设置重置时间")
-                .setHintMessage("直接输入整数时间即可，如：6")
-                .setNegativeButton("取消")
-                .setPositiveButton("确定")
-                .setOnDialogButtonClickListener(object :
-                    AlertInputDialog.OnDialogButtonClickListener {
-                    override fun onConfirmClick(value: String) {
-                        if (value.isNumber()) {
-                            updateResetHour(value.toInt())
-                        } else {
-                            "直接输入整数时间即可".show(context)
-                        }
+            val editText = EditText(this).apply { hint = "直接输入整数时间即可，如：6" }
+            UnifiedDialogKit.showForm(
+                this, editText,
+                title = "设置重置时间",
+                positiveText = "确定",
+                negativeText = "取消",
+                onConfirm = {
+                    val value = editText.text.toString().trim()
+                    if (value.isEmpty()) {
+                        "输入错误，请检查！".show(this)
+                        false
+                    } else if (value.isNumber()) {
+                        updateResetHour(value.toInt())
+                        true
+                    } else {
+                        "直接输入整数时间即可".show(this)
+                        false
                     }
-
-                    override fun onCancelClick() {}
-                }).build().show()
+                }
+            )
         } else {
             updateResetHour(hourArray[position].toInt())
         }
@@ -413,24 +416,26 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
     private fun setTimeByPosition(position: Int) {
         if (position == timeArray.size - 1) {
-            AlertInputDialog.Builder()
-                .setContext(this)
-                .setTitle("设置超时时间")
-                .setHintMessage("直接输入整数时间即可，如：60")
-                .setNegativeButton("取消")
-                .setPositiveButton("确定")
-                .setOnDialogButtonClickListener(object :
-                    AlertInputDialog.OnDialogButtonClickListener {
-                    override fun onConfirmClick(value: String) {
-                        if (value.isNumber()) {
-                            updateTimeout(value.toInt())
-                        } else {
-                            "直接输入整数时间即可".show(context)
-                        }
+            val editText = EditText(this).apply { hint = "直接输入整数时间即可，如：60" }
+            UnifiedDialogKit.showForm(
+                this, editText,
+                title = "设置超时时间",
+                positiveText = "确定",
+                negativeText = "取消",
+                onConfirm = {
+                    val value = editText.text.toString().trim()
+                    if (value.isEmpty()) {
+                        "输入错误，请检查！".show(this)
+                        false
+                    } else if (value.isNumber()) {
+                        updateTimeout(value.toInt())
+                        true
+                    } else {
+                        "直接输入整数时间即可".show(this)
+                        false
                     }
-
-                    override fun onCancelClick() {}
-                }).build().show()
+                }
+            )
         } else {
             updateTimeout(timeArray[position].toInt())
         }

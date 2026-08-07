@@ -46,15 +46,14 @@ import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.utils.ServerlessApiSecureConfig
-import com.pengxh.daily.app.utils.UnifiedDialogKit
 import com.pengxh.daily.app.utils.WatermarkDrawable
 import com.pengxh.kt.lite.base.KotlinBaseFragment
 import com.pengxh.kt.lite.extensions.convertColor
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.SaveKeyValues
-import com.pengxh.kt.lite.widget.dialog.AlertInputDialog
 import com.yample.mqttprotocol.BindingPayload
 import com.yample.mqttprotocol.MqttQuota
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import com.yample.mqttprotocol.Protocol
 import com.yample.mqttprotocol.ThemeManager
 import kotlinx.coroutines.Dispatchers
@@ -384,41 +383,43 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             current.isNotBlank() -> if (isSecret) "当前：已设置" else "当前：$current"
             else -> "请输入$title"
         }
-        AlertInputDialog.Builder()
-            .setContext(ctx)
-            .setTitle(title)
-            .setHintMessage(hint)
-            .setPositiveButton("保存")
-            .setNegativeButton("取消")
-            .setOnDialogButtonClickListener(object : AlertInputDialog.OnDialogButtonClickListener {
-                override fun onConfirmClick(value: String) {
-                    val v = value.trim()
-                    if (v.isEmpty()) return
-                    SaveKeyValues.saveString(key, v)
-                    target.text = if (isSecret) "已设置" else v
+        val editText = EditText(ctx).apply { this.hint = hint }
+        UnifiedDialogKit.showForm(
+            ctx, editText,
+            title = title,
+            positiveText = "保存",
+            negativeText = "取消",
+            onConfirm = {
+                val value = editText.text.toString().trim()
+                if (value.isEmpty()) {
+                    "输入错误，请检查！".show(ctx)
+                    false
+                } else {
+                    SaveKeyValues.saveString(key, value)
+                    target.text = if (isSecret) "已设置" else value
                     ConfigImportSignal.notifyRemoteChanged(ctx)
                     "已保存".show(ctx)
+                    true
                 }
-
-                override fun onCancelClick() {}
-            })
-            .build()
-            .show()
+            }
+        )
     }
 
     private fun editDeviceId() {
         val current = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "")
         val hint = if (current.isNotBlank()) "当前：$current" else "请输入设备ID（建议与 EMQX 中规划的一致，如 k20pro）"
-        AlertInputDialog.Builder()
-            .setContext(ctx)
-            .setTitle("设备ID")
-            .setHintMessage(hint)
-            .setPositiveButton("保存")
-            .setNegativeButton("取消")
-            .setOnDialogButtonClickListener(object : AlertInputDialog.OnDialogButtonClickListener {
-                override fun onConfirmClick(value: String) {
-                    val deviceId = value.trim()
-                    if (deviceId.isEmpty()) return
+        val editText = EditText(ctx).apply { this.hint = hint }
+        UnifiedDialogKit.showForm(
+            ctx, editText,
+            title = "设备ID",
+            positiveText = "保存",
+            negativeText = "取消",
+            onConfirm = {
+                val deviceId = editText.text.toString().trim()
+                if (deviceId.isEmpty()) {
+                    "输入错误，请检查！".show(ctx)
+                    false
+                } else {
                     SaveKeyValues.saveString(Constant.DEVICE_ID_KEY, deviceId)
                     // 主题前缀与控制端账户同步
                     if (SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "").startsWith("ctl-")) {
@@ -428,12 +429,10 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     binding.ctlValue.text = SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "")
                     ConfigImportSignal.notifyRemoteChanged(ctx)
                     "已保存设备ID（主题前缀与控制端账户已同步；已绑定的控制端需重新扫码）".show(ctx)
+                    true
                 }
-
-                override fun onCancelClick() {}
-            })
-            .build()
-            .show()
+            }
+        )
     }
 
     private fun showCtlEditDialog() {
@@ -591,15 +590,14 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             return
         }
         if (MqttAgentService.isBound()) {
-            val dlg = MaterialAlertDialogBuilder(ctx)
-                .setTitle("设备已绑定")
-                .setMessage("当前设备已与控制端配对。如需重新绑定，请先「强制解绑」再生成二维码。")
-                .setPositiveButton("我知道了", null)
-                .setNeutralButton("强制解绑") { _, _ -> forceUnbind() }
-                .show()
-            // 强制解绑按钮染红，避免误操作
-            dlg.getButton(AlertDialog.BUTTON_NEUTRAL)
-                ?.setTextColor(ContextCompat.getColor(ctx, R.color.md_error))
+            UnifiedDialogKit.showWarning(
+                ctx,
+                "设备已绑定",
+                "当前设备已与控制端配对。如需重新绑定，请先「强制解绑」再生成二维码。",
+                confirmText = "强制解绑",
+                cancelText = "我知道了",
+                onConfirm = { forceUnbind() }
+            )
             return
         }
         // 生成单次 / 60s 配对令牌（进二维码，不出长期密钥）
@@ -1093,24 +1091,20 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         container.addView(adviceRow)
 
-        // 底部两按钮均分（默认 MaterialAlertDialog 按内容宽度不均分，强制改 weight=1）
-        val dlg = MaterialAlertDialogBuilder(ctx)
-            .setTitle("临时公共 MQTT（测试用）")
-            .setView(ScrollView(ctx).apply { addView(container); setPadding(dip(20), dip(8), dip(20), dip(8)) })
-            .setNegativeButton("取消", null)
-            .setPositiveButton("一键配置") { _, _ -> applyPublicMqttConfig() }
-            .show()
-        listOf(
-            dlg.getButton(AlertDialog.BUTTON_NEGATIVE),
-            dlg.getButton(AlertDialog.BUTTON_POSITIVE)
-        ).forEach { btn ->
-            btn?.let {
-                val orig = it.layoutParams as? LinearLayout.LayoutParams
-                it.layoutParams = LinearLayout.LayoutParams(0, orig?.height ?: LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    leftMargin = orig?.leftMargin ?: 0; rightMargin = orig?.rightMargin ?: 0
-                }
+        UnifiedDialogKit.showForm(
+            ctx,
+            ScrollView(ctx).apply {
+                addView(container)
+                setPadding(dip(20), dip(8), dip(20), dip(8))
+            },
+            title = "临时公共 MQTT（测试用）",
+            positiveText = "一键配置",
+            negativeText = "取消",
+            onConfirm = {
+                applyPublicMqttConfig()
+                true
             }
-        }
+        )
     }
 
     /** MQTT 配置引导：原生卡片式弹窗（替代 HTML+WebView，色彩鲜明、秒开无延迟） */
@@ -1371,35 +1365,31 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         container.addView(tipCard)
 
-        // 底部两按钮均分
-        val dlg = MaterialAlertDialogBuilder(ctx)
-            .setTitle("MQTT 配置引导")
-            .setView(ScrollView(ctx).apply { addView(container); setPadding(dip(20), dip(8), dip(20), dip(8)) })
-            .setPositiveButton("我知道了") { _, _ -> onOk?.invoke() }
-            .setNegativeButton("关闭", null)
-            .show()
-        listOf(
-            dlg.getButton(AlertDialog.BUTTON_NEGATIVE),
-            dlg.getButton(AlertDialog.BUTTON_POSITIVE)
-        ).forEach { btn ->
-            btn?.let {
-                val orig = it.layoutParams as? LinearLayout.LayoutParams
-                it.layoutParams = LinearLayout.LayoutParams(0, orig?.height ?: LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    leftMargin = orig?.leftMargin ?: 0; rightMargin = orig?.rightMargin ?: 0
-                }
+        UnifiedDialogKit.showForm(
+            ctx,
+            ScrollView(ctx).apply {
+                addView(container)
+                setPadding(dip(20), dip(8), dip(20), dip(8))
+            },
+            title = "MQTT 配置引导",
+            positiveText = "我知道了",
+            negativeText = "关闭",
+            onConfirm = {
+                onOk?.invoke()
+                true
             }
-        }
+        )
     }
 
     /** 获取控制端下载地址弹窗 */
     private fun showControllerDownload() {
         val url = BuildConfig.CTRL_DOWNLOAD_URL.trim()
         if (url.isEmpty()) {
-            MaterialAlertDialogBuilder(ctx)
-                .setTitle("获取控制端 DailyController")
-                .setMessage("当前未配置控制端下载地址。\n\n控制端安装包由分发方通过构建参数注入。如需安装控制端，请向提供者获取安装方式，或等待后续版本开放下载入口。")
-                .setPositiveButton("知道了", null)
-                .show()
+            UnifiedDialogKit.showInfo(
+                ctx,
+                "获取控制端 DailyController",
+                "当前未配置控制端下载地址。\n\n控制端安装包由分发方通过构建参数注入。如需安装控制端，请向提供者获取安装方式，或等待后续版本开放下载入口。"
+            )
         } else {
             val summary = StringBuilder()
             val container = LinearLayout(ctx).apply {
@@ -1432,15 +1422,18 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             })
             container.addView(item)
             summary.append("控制端下载：$url\n")
-            MaterialAlertDialogBuilder(ctx)
-                .setTitle("获取控制端 DailyController")
-                .setView(container)
-                .setPositiveButton("复制全部") { _, _ ->
+            UnifiedDialogKit.showForm(
+                ctx,
+                container,
+                title = "获取控制端 DailyController",
+                positiveText = "复制全部",
+                negativeText = "关闭",
+                onConfirm = {
                     copyToClipboard(summary.toString().trimEnd(), "控制端下载地址")
                     "已复制全部下载地址到剪贴板".show(ctx)
+                    true
                 }
-                .setNegativeButton("关闭", null)
-                .show()
+            )
         }
     }
 
