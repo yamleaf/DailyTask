@@ -209,13 +209,18 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                 Locale.getDefault(), "%02d:%02d:%02d",
                 timePicker.selectedHour, timePicker.selectedMinute, timePicker.selectedSecond
             )
+            val name = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.nameEditText)
+                .text?.toString()?.trim().orEmpty()
             lifecycleScope.launch {
                 // IO：查重 → 不重复则插入 → 重载列表
                 val exists = withContext(Dispatchers.IO) { DatabaseWrapper.isTaskTimeExist(time) }
                 if (exists) {
                     "任务时间点已存在".show(ctx)
                 } else {
-                    val bean = DailyTaskBean().apply { this.time = time }
+                    val bean = DailyTaskBean().apply {
+                        this.time = time
+                        this.name = name
+                    }
                     withContext(Dispatchers.IO) {
                         DatabaseWrapper.insert(bean)
                         taskBeans = DatabaseWrapper.loadAllTask()
@@ -244,18 +249,21 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         view.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.titleView).text = "修改任务时间"
         val timePicker = view.findViewById<TimeWheelLayout>(R.id.timePicker)
         timePicker.setDefaultValue(item.convertToTimeEntity())
+        view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.nameEditText).setText(item.name)
         view.findViewById<com.google.android.material.button.MaterialButton>(R.id.saveButton).setOnClickListener {
             val time = String.format(
                 Locale.getDefault(), "%02d:%02d:%02d",
                 timePicker.selectedHour, timePicker.selectedMinute, timePicker.selectedSecond
             )
+            val name = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.nameEditText)
+                .text?.toString()?.trim().orEmpty()
             lifecycleScope.launch {
                 // 用新 Bean 实例写库，避免原地改 item（适配器当前列表持有同一对象）导致
                 // 后续 submitList 的 DiffUtil 比对时新旧 time 相同 → 判定无变化 → UI 不刷新
                 val updated = DailyTaskBean().apply {
                     id = item.id
                     this.time = time
-                    name = item.name
+                    this.name = name
                 }
                 withContext(Dispatchers.IO) {
                     DatabaseWrapper.updateTask(updated)

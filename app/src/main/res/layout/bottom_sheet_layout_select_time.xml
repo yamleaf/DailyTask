@@ -38,6 +38,22 @@
         android:orientation="vertical"
         app:layout_constraintTop_toBottomOf="@id/titleView">
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/nameInputLayout"
+            style="@style/Widget.DailyTask.TextInput.Outlined"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="@dimen/dp_16"
+            android:hint="任务备注（可选，如：早打卡）">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/nameEditText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+
         <com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout
             android:id="@+id/timePicker"
             android:layout_width="match_parent"

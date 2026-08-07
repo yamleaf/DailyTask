@@ -343,6 +343,7 @@ object RemoteSnapshot {
                 val o = JsonObject()
                 o.addProperty("id", plan.task.id)
                 o.addProperty("time", plan.task.time)
+                o.addProperty("name", plan.task.name ?: "")
                 o.addProperty("actualTime", plan.actualTime)
                 o.addProperty("status", taskStatus(plan, now, notices))
                 o.addProperty("statusLabel", taskStatusLabel(plan, now, notices))

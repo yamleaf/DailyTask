@@ -54,10 +54,12 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val taskBean = getItem(position)
-        holder.setText(
-            R.id.taskTimeView,
-            if (taskBean.name.isNullOrBlank()) taskBean.time else "${taskBean.time} ${taskBean.name}"
-        )
+        holder.setText(R.id.taskTimeView, taskBean.time)
+        // 备注独立成行展示（无备注时隐藏，不再内联拼进时间文本）
+        val name = taskBean.name.orEmpty()
+        val taskNameView = holder.getView<android.widget.TextView>(R.id.taskNameView)
+        taskNameView.text = name
+        taskNameView.isVisible = name.isNotBlank()
         val arrowView = holder.getView<AppCompatImageView>(R.id.arrowView)
         val actualTimeCardView = holder.getView<LinearLayout>(R.id.actualTimeCardView)
         if (position == mPosition) {
