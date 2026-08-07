@@ -461,7 +461,7 @@
                         android:layout_marginHorizontal="@dimen/dp_16"
                         android:background="@color/md_outlineVariant" />
 
-                    <!-- 链式启动权限 -->
+                    <!-- 通知转移 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -485,7 +485,7 @@
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/settings_chain_launch_title"
+                                android:text="通知转移"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                 android:textColor="@color/md_onSurface" />
 
@@ -494,7 +494,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="@dimen/dp_2"
                                 android:singleLine="true"
-                                android:text="@string/settings_chain_launch_tip"
+                                android:text="将目标打卡应用通知经消息渠道转发到目标手机"
                                 android:textColor="@color/md_onSurface"
                                 android:textSize="@dimen/sp_10" />
                         </LinearLayout>
@@ -503,6 +503,70 @@
                             android:id="@+id/transferSwitch"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
+                    <!-- 链式启动权限（点击检测/跳转系统设置） -->
+                    <LinearLayout
+                        android:id="@+id/chainStartRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16"
+                        android:paddingVertical="@dimen/dp_12"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true">
+
+                        <ImageView
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_lock" android:contentDescription="@null" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="链式启动权限"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textColor="@color/md_onSurface" />
+
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/chainStartTipsView"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="@dimen/dp_2"
+                                android:singleLine="true"
+                                android:text="点击检测：部分设备需手动授权才能拉起打卡应用"
+                                android:textColor="@color/md_onSurfaceVariant"
+                                android:textSize="@dimen/sp_10" />
+                        </LinearLayout>
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/chainStartStatusView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="未检测"
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="@dimen/sp_12" />
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_8"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

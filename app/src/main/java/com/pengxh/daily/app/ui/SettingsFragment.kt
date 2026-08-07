@@ -440,6 +440,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.openTestLayout.setOnClickListener {
             ctx.openApplication()
         }
+        binding.chainStartRow.setOnClickListener { checkChainStartPermission() }
         binding.captureTestLayout.setOnClickListener {
             val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, -1)
             lifecycleScope.launch {
@@ -691,6 +692,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
             binding.pseudoMaskNoClockSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
             binding.transferSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)
+        // 链式启动权限状态初始显示
+        binding.chainStartStatusView.text = "未检测"
+        binding.chainStartStatusView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
         } finally {
             syncingSwitchState = false
         }
@@ -711,6 +715,87 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         val label = if (SaveKeyValues.loadInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0) == 1) "文本反馈" else "截屏反馈"
         binding.accessibilityFeedbackView.text = label
         binding.accessibilityFeedbackView.setTextColor(R.color.theme_color.convertColor(ctx))
+    }
+
+    /**
+     * 链式启动权限检测：判断本应用能否从后台拉起其他应用（打卡应用）。
+     *
+     * Android 12+（API 31+）引入了 START_ACTIVITIES_FROM_BACKGROUND 权限限制后台启动 Activity。
+     * 国产 ROM（MIUI/ColorOS/EMUI 等）还有额外的「链式启动/关联启动」系统级开关，无标准 API 可查。
+     *
+     * 点击此行：先检测 API 31+ 权限，再弹引导对话框，提供「去系统设置」入口。
+     * 不自动拉起目标应用，避免打断当前界面。
+     */
+    private fun checkChainStartPermission() {
+        val targetApp = Constant.getTargetApp()
+        if (targetApp.isBlank()) {
+            "请先选择目标打卡应用".show(ctx)
+            return
+        }
+
+        // API 31+ 检查 START_ACTIVITIES_FROM_BACKGROUND 权限
+        var granted = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                granted = ctx.checkSelfPermission("android.permission.START_ACTIVITIES_FROM_BACKGROUND") ==
+                    PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) {
+                granted = false
+            }
+        }
+
+        val statusText: String
+        val statusColor: Int
+        val tipText: String
+        if (granted) {
+            statusText = "已授权"
+            statusColor = R.color.md_tertiary
+            tipText = "系统已授予后台启动权限，可正常拉起打卡应用"
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            statusText = "旧系统"
+            statusColor = R.color.md_onSurfaceVariant
+            tipText = "系统低于 Android 12，无后台启动限制；部分国产 ROM 仍需手动开启「链式启动」"
+        } else {
+            statusText = "待授权"
+            statusColor = R.color.md_warning
+            tipText = "Android 12+ 需授权后台启动；国产 ROM 可能还有「链式启动/关联启动」开关"
+        }
+        binding.chainStartStatusView.text = statusText
+        binding.chainStartStatusView.setTextColor(statusColor.convertColor(ctx))
+        binding.chainStartTipsView.text = tipText
+        binding.chainStartTipsView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
+
+        // 弹引导对话框：说明 + 去系统设置
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = TextView(ctx).apply {
+                text = "链式启动权限用于本应用在后台拉起打卡应用（$targetApp）。\n\n" +
+                    "标准判断：Android 12+ 需授予「后台启动其它应用」权限；\n" +
+                    "国产 ROM（小米/OPPO/vivo/华为等）还可能有独立的「链式启动/关联启动/自启动」开关。\n\n" +
+                    "当前状态：$statusText"
+                setPadding(24, 16, 24, 16)
+            },
+            title = "链式启动权限检测",
+            positiveText = "去系统设置",
+            negativeText = "知道了",
+            onConfirm = {
+                openAppDetailSettings(targetApp)
+                true
+            }
+        )
+    }
+
+    /** 打开指定应用的应用详情/权限设置页 */
+    private fun openAppDetailSettings(pkg: String) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$pkg")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+        } catch (e: Exception) {
+            "无法打开系统设置：${e.message}".show(ctx)
+        }
     }
 
     /** 目标应用标签列表（内置 + 自定义入口） */
