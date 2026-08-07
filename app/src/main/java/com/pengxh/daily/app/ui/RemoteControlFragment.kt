@@ -20,6 +20,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -298,8 +299,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         listOf(
             binding.brokerRow, binding.userRow, binding.passRow,
             binding.apiUrlRow, binding.apiAppIdRow, binding.apiAppSecretRow,
-            binding.deviceIdRow, binding.ctlRow,
-            binding.guideRow
+            binding.deviceIdRow, binding.ctlRow
         ).forEach {
             it.alpha = configAlpha
             it.isClickable = !enabled
@@ -307,7 +307,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         // 操作类行：始终可用
         listOf(
-            binding.qrRow, binding.unbindRow,
+            binding.guideRow, binding.qrRow, binding.unbindRow,
             binding.apiTestRow
         ).forEach {
             it.alpha = actionAlpha
@@ -474,8 +474,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         container.addView(etUser)
         container.addView(TextView(ctx).apply { setPadding(0, 12, 0, 0) }) // spacing
         container.addView(etPass)
-        // 复制凭证按钮内嵌在内容区
-        val btnCopy = com.google.android.material.button.MaterialButton(ctx).apply {
+        // 复制凭证按钮：文字按钮样式（避免默认实心主色底+主色文字导致文字不可见）
+        val btnCopy = com.google.android.material.button.MaterialButton(ctx, null, android.R.attr.borderlessButtonStyle).apply {
             text = "复制凭证"
             setTextColor(resources.getColor(R.color.md_primary, theme))
             setOnClickListener {
@@ -1395,6 +1395,10 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val dialogRoot = ScrollView(ctx).apply {
                 addView(container)
                 setPadding(dip(20), dip(8), dip(20), dip(8))
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    (resources.displayMetrics.heightPixels * 0.7).toInt()
+                )
             }
             UnifiedDialogKit.showForm(
                 ctx,
