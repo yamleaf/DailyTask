@@ -460,7 +460,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 16, 24, 16)
+            setPadding(0, 0, 0, 0)
         }
         val etUser = EditText(ctx).apply {
             setText(ctlUser)
@@ -490,7 +490,6 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             }
         }
         container.addView(btnCopy)
-        container.addView(TextView(ctx).apply { setPadding(0, 8, 0, 0) })
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = container,
@@ -1392,17 +1391,9 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         container.addView(tipCard)
 
-        val dialogRoot = ScrollView(ctx).apply {
-                addView(container)
-                setPadding(dip(20), dip(8), dip(20), dip(8))
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    (resources.displayMetrics.heightPixels * 0.7).toInt()
-                )
-            }
-            UnifiedDialogKit.showForm(
+        UnifiedDialogKit.showForm(
                 ctx,
-                dialogRoot,
+                container,
                 title = "MQTT 配置引导",
                 positiveText = "关闭",
                 negativeText = "跳转 EMQX",
