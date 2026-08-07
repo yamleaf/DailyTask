@@ -125,7 +125,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
         binding.recyclerView.adapter = dailyTaskAdapter
         binding.recyclerView.addItemDecoration(
-            RecyclerViewItemBorder(marginOffset, marginOffset / 2, marginOffset, marginOffset / 2)
+            RecyclerViewItemBorder(marginOffset, marginOffset / 4, marginOffset, marginOffset / 4)
         )
 
         // 每日重置后的重复周期提示（repeatTimeView）
