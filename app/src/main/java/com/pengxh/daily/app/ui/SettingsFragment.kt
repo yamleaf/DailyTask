@@ -954,16 +954,23 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         )
     }
 
-    /** 伪息屏延迟设置滑杆 */
+    /** 伪息屏延迟设置滑杆（非线性档位：时间越大档位间隔越大，缩短滑块行程） */
     private fun showPseudoMaskDelayDialog(current: Int) {
+        // 离散档位：10~50 步进5，60~100 步进10，120~180 步进30，之后间隔逐级放大直至 3600
+        val options = intArrayOf(
+            10, 15, 20, 25, 30, 35, 40, 45, 50,
+            60, 70, 80, 90, 100, 120, 150, 180,
+            240, 300, 420, 600, 900, 1200, 1800, 2700, 3600
+        )
         val bindingDlg = DialogSliderBinding.inflate(LayoutInflater.from(ctx))
-        bindingDlg.tvSliderValue.text = "$current 秒"
-        bindingDlg.slider.valueFrom = 10f
-        bindingDlg.slider.valueTo = 3600f
-        bindingDlg.slider.stepSize = 10f
-        bindingDlg.slider.value = current.toFloat().coerceIn(10f, 3600f)
+        val index = nearestIndex(options, current)
+        bindingDlg.tvSliderValue.text = "${options[index]} 秒"
+        bindingDlg.slider.valueFrom = 0f
+        bindingDlg.slider.valueTo = (options.size - 1).toFloat()
+        bindingDlg.slider.stepSize = 1f
+        bindingDlg.slider.value = index.toFloat()
         bindingDlg.slider.addOnChangeListener { _, value, _ ->
-            bindingDlg.tvSliderValue.text = "${value.toInt()} 秒"
+            bindingDlg.tvSliderValue.text = "${options[value.toInt()]} 秒"
         }
         UnifiedDialogKit.showForm(
             ctx,
@@ -973,13 +980,27 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             positiveText = getString(android.R.string.ok),
             negativeText = getString(android.R.string.cancel),
             onConfirm = {
-                val delay = bindingDlg.slider.value.toInt().coerceIn(10, 3600)
+                val delay = options[bindingDlg.slider.value.toInt().coerceIn(0, options.lastIndex)]
                 SaveKeyValues.saveInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, delay)
                 binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
                 ConfigImportSignal.notifyRemoteChanged(ctx)
                 true
             }
         )
+    }
+
+    /** 在离散档位数组中返回最接近 value 的下标 */
+    private fun nearestIndex(options: IntArray, value: Int): Int {
+        var best = 0
+        var bestDiff = Int.MAX_VALUE
+        for (i in options.indices) {
+            val diff = kotlin.math.abs(options[i] - value)
+            if (diff < bestDiff) {
+                bestDiff = diff
+                best = i
+            }
+        }
+        return best
     }
 
     /** 状态报告展示（WebView 渲染 HTML） */
