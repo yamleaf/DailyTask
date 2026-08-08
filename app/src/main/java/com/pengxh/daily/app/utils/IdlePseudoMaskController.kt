@@ -40,6 +40,7 @@ object IdlePseudoMaskController {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var appInBackground = false
+    private var pendingReturnFromBackground = false
     /** 是否正处于「进入伪息屏」的过渡中（离开超时后到蒙层真正显示前），用于阻止倒计时被重复重置 */
     private var enteringMask = false
     private var keepAwakeView: View? = null
@@ -130,6 +131,7 @@ object IdlePseudoMaskController {
 
     fun onAppBackgrounded(context: Context) {
         appInBackground = true
+        pendingReturnFromBackground = true
         enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         if (!AppRuntimeConfig.isForcePseudoMask()) {
@@ -234,6 +236,17 @@ object IdlePseudoMaskController {
 
     /** 主界面在 onNewIntent 时判断：刚从后台拉起则补显伪息屏蒙层 */
     fun wasAppInBackground(): Boolean = appInBackground
+
+    /**
+     * 消费「刚从后台返回」标志。onActivityStarted（onAppForegrounded）会先于
+     * Activity.onNewIntent 把 appInBackground 重置为 false，导致 onNewIntent 无法据此判断，
+     * 因此用本标志在 onAppBackgrounded 置位、由 onNewIntent 一次性消费。
+     */
+    fun consumeReturnFromBackground(): Boolean {
+        val v = pendingReturnFromBackground
+        pendingReturnFromBackground = false
+        return v
+    }
 
     // ═══════════════════════ 打卡返回即息屏 ═══════════════════════
     /** 「打卡动作完成 → 返回本 App 立即进入伪息屏」的请求标志（主线程使用） */
