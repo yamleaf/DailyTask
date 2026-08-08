@@ -14,6 +14,7 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -73,7 +74,17 @@ object MaskOverlayHelper {
             val frame = FrameLayout(appCtx).apply {
                 setBackgroundColor(Color.BLACK)
                 isClickable = true
+                isFocusable = true
+                isFocusableInTouchMode = true
                 setOnTouchEventForDismiss(this)
+                setOnKeyListener { _, keyCode, event ->
+                    if (event.action == KeyEvent.ACTION_DOWN &&
+                        keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                    ) {
+                        hide(appCtx)
+                        true
+                    } else false
+                }
             }
             val clock = TextClock(appCtx).apply {
                 format24Hour = "HH:mm"
