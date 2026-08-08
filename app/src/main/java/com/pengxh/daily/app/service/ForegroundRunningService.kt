@@ -417,7 +417,7 @@ class ForegroundRunningService : Service() {
             LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${result.warningHour}:00 前提醒")
             MessageDispatcher.sendMessage(
                 "电量智能预警",
-                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningHour, result.threshold),
+                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningHour, result.threshold, pred),
                 force = true,
                 appendMeta = false
             )

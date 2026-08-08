@@ -1120,7 +1120,9 @@ object StatusReporter {
 
     /** 电量智能预警（HTML，走反馈渠道通知） */
     @JvmStatic
-    fun buildBatterySmartAlertContentHtml(battery: Int, predictedTime: String, warningHour: Int, threshold: Int): String {
+    fun buildBatterySmartAlertContentHtml(battery: Int, predictedTime: String, warningHour: Int, threshold: Int, pred: BatteryPredictor.Prediction): String {
+        val shutdownTimeMs = System.currentTimeMillis() + (battery / pred.ratePerHour * 3600 * 1000).toLong()
+        val shutdownTimeText = java.util.Date(shutdownTimeMs).format("HH:mm")
         val body = buildString {
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">⚠️</div>")
@@ -1130,6 +1132,7 @@ object StatusReporter {
             append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
             append("<p style=\"margin:0 0 6px;\">⚠️ 当前电量 $battery%，预计 <b>${predictedTime}</b> 降至 <b>$threshold%</b>。</p>")
             append("<p style=\"margin:0 0 6px;\">预测时间落在夜间（${warningHour}:00 之后），可能在你睡眠期间电量耗尽关机。</p>")
+            append("<p style=\"margin:0 0 6px;\"><b>手机预计将在 ${shutdownTimeText} 后电量耗尽关机</b>（基于当前 ${String.format("%.1f", pred.ratePerHour)}%/h 消耗速度）。</p>")
             append("<p style=\"margin:0;color:#888;font-size:11px;\">请在 <b>${warningHour}:00</b> 前为设备充电，避免夜间低电量关机。</p>")
             append("</div>")
         }
