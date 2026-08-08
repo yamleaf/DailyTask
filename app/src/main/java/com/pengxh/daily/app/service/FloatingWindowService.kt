@@ -117,8 +117,9 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
 
-        val time = SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME)
-        binding.timeView.text = "${time}s"
+        // 初始隐藏，只在打卡倒计时时显示
+        binding.root.alpha = 0.0f
+        binding.timeView.text = "0s"
 
         // 移动悬浮窗
         onDragMove()

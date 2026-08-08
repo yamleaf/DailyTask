@@ -283,6 +283,8 @@ object TaskScheduler {
 
             timeoutJob.cancel()
             clockInDeferred = null
+            // 倒计时结束，隐藏悬浮窗
+            FloatingWindowController.updateTime(0)
             // 关闭无障碍文本检测
             AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
 

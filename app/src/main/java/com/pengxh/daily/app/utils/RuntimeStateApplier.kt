@@ -200,7 +200,7 @@ object RuntimeStateApplier {
     private fun applyMessageConfig(payload: String) {
         try {
             // 需求 8：控制端用会话密钥做了 AES-GCM 信封加密，这里先解封（旧版明文报文原样兼容）
-            val session = SaveKeyValues.loadString(Constant.MQTT_SESSION_SECRET_KEY, "")
+            val session = MqttSecureConfig.loadSession()
             val json = SecretBox.open(session, payload)
             val obj = JsonParser.parseString(json).asJsonObject
             val app = DailyTaskApplication.get()
