@@ -36,6 +36,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textview.MaterialTextView
 import com.google.gson.Gson
 import com.pengxh.daily.app.BuildConfig
+import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.FragmentRemoteControlBinding
 import com.pengxh.daily.app.extensions.notificationEnable
@@ -608,11 +609,35 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     private fun generateAndShowQR() {
         val broker = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "")
         if (broker.isBlank()) {
-            "请先设置 MQTT 服务器（可点「MQTT 配置引导」查看获取方式）".show(ctx)
+            UnifiedDialogKit.showWarning(
+                ctx,
+                "MQTT 未配置",
+                "请先设置 MQTT 服务器（可点「MQTT 配置引导」查看获取方式），再生成绑定二维码。",
+                confirmText = "去配置",
+                cancelText = "取消",
+                onConfirm = { showPublicMqttDialog() }
+            )
             return
         }
         if (SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "").isBlank() || MqttSecureConfig.loadPass().isBlank()) {
             "请先填写被控端用户名与密码".show(ctx)
+            return
+        }
+        if (!MqttAgentService.isRunning()) {
+            UnifiedDialogKit.showWarning(
+                ctx,
+                "远程控制服务未启动",
+                "需先开启远程控制服务，控制端才能扫描二维码完成配对。是否立即开启？",
+                confirmText = "开启服务",
+                cancelText = "取消",
+                onConfirm = {
+                    SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, true)
+                    ctx.startForegroundService(
+                        Intent(ctx, MqttAgentService::class.java)
+                    )
+                    generateAndShowQR()
+                }
+            )
             return
         }
         if (MqttAgentService.isBound()) {
