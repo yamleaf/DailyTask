@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/nav_remote"
+        android:icon="@drawable/daily_ic_cloud"
+        android:title="远程" />
+    <item
+        android:id="@+id/nav_task"
+        android:icon="@drawable/daily_ic_list"
+        android:title="任务" />
+    <item
+        android:id="@+id/nav_settings"
+        android:icon="@drawable/daily_ic_settings"
+        android:title="设置" />
+</menu>

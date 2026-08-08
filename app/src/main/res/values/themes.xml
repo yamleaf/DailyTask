@@ -1,11 +1,82 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base application theme. -->
-    <style name="Base.Theme.DailyTask" parent="Theme.Material3.Light.NoActionBar">
+    <!-- ShapeAppearance 圆角体系（方案 C1） -->
+    <style name="ShapeAppearance.DailyTask.Small" parent="ShapeAppearance.Material3.SmallComponent">
+        <item name="cornerSize">4dp</item>
+    </style>
+    <style name="ShapeAppearance.DailyTask.Medium" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerSize">8dp</item>
+    </style>
+    <style name="ShapeAppearance.DailyTask.Large" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">16dp</item>
+    </style>
+    <style name="ShapeAppearance.DailyTask.XL" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">20dp</item>
+    </style>
+    <style name="ShapeAppearance.DailyTask.Full" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">28dp</item>
+    </style>
+    <!-- 底部面板：仅顶部 24dp 圆角（统一规范） -->
+    <style name="ShapeAppearance.DailyTask.BottomSheet" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSizeTopLeft">24dp</item>
+        <item name="cornerSizeTopRight">24dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+
+    <!-- 弹窗入场/出场动画（scale + fade，200ms / 150ms） -->
+    <style name="Animation.DailyTask.DialogScale" parent="@android:style/Animation">
+        <item name="android:windowEnterAnimation">@anim/dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/dialog_exit</item>
+    </style>
+
+    <!-- 统一输入框样式（12dp 圆角，双端一致） -->
+    <style name="ShapeAppearance.DailyTask.Input" parent="ShapeAppearance.Material3.LargeComponent">
+        <item name="cornerSize">12dp</item>
+    </style>
+    <style name="Widget.DailyTask.TextInput.Outlined" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="shapeAppearance">@style/ShapeAppearance.DailyTask.Input</item>
+    </style>
+
+    <!-- Base application theme.（DayNight：随系统/用户设置在浅色与深色间切换） -->
+    <style name="Base.Theme.DailyTask" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- 修改控件系统默认颜色 -->
-        <item name="colorPrimary">@color/theme_color</item>
-        <item name="colorSecondary">@color/theme_color</item>
-        <!-- Customize your theme here. -->
+        <item name="colorPrimary">@color/md_primary</item>
+        <item name="colorPrimaryContainer">@color/md_primaryContainer</item>
+        <item name="colorOnPrimary">@color/md_onPrimary</item>
+        <item name="colorSecondary">@color/md_secondary</item>
+        <item name="colorError">@color/md_error</item>
+        <item name="colorSurface">@color/md_surface</item>
+        <item name="colorSurfaceVariant">@color/md_surfaceVariant</item>
+        <item name="colorOnSurface">@color/md_onSurface</item>
+        <item name="colorOnSurfaceVariant">@color/md_onSurfaceVariant</item>
+        <item name="colorOutline">@color/md_outline</item>
+        <item name="colorOutlineVariant">@color/md_outlineVariant</item>
+        <item name="android:colorBackground">@color/md_background</item>
+        <item name="android:windowBackground">@color/md_background</item>
+        <!-- 工具栏为紫色渐变/md_primary，状态栏统一浅色图标 -->
+        <item name="android:statusBarColor">@color/header_start</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <!-- 导航栏跟随明暗：浅色模式深色图标，深色模式浅色图标 -->
+        <item name="android:navigationBarColor">@color/md_surface</item>
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
+        <!-- 对话框主题（统一规范：28dp 圆角 + 胶囊按钮，双端共用 :protocol 弹窗体系） -->
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Daily.UnifiedDialog</item>
+        <!-- BottomSheet 主题（方案 C1，统一底部弹窗圆角/背景） -->
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.DailyTask.BottomSheetDialog</item>
+        <!-- 窗口转场：用系统合成（自动尊重系统「减少动态效果」缩放），替代已弃用的 overridePendingTransition -->
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="android:windowEnterTransition">@transition/fade</item>
+        <item name="android:windowExitTransition">@transition/fade</item>
+        <item name="android:windowReenterTransition">@transition/fade</item>
+        <item name="android:windowReturnTransition">@transition/fade</item>
+    </style>
+
+    <!-- 底部面板主题：顶部 24dp 圆角 + 缩放从底部滑入 -->
+    <style name="ThemeOverlay.DailyTask.BottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="shapeAppearance">@style/ShapeAppearance.DailyTask.BottomSheet</item>
+        <item name="backgroundTint">@color/md_surface</item>
+        <item name="android:windowAnimationStyle">@style/Animation.DailyTask.DialogScale</item>
     </style>
 
     <style name="Theme.DailyTask" parent="Base.Theme.DailyTask" />

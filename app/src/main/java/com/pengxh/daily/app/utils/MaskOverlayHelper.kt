@@ -14,6 +14,7 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -73,7 +74,17 @@ object MaskOverlayHelper {
             val frame = FrameLayout(appCtx).apply {
                 setBackgroundColor(Color.BLACK)
                 isClickable = true
+                isFocusable = true
+                isFocusableInTouchMode = true
                 setOnTouchEventForDismiss(this)
+                setOnKeyListener { _, keyCode, event ->
+                    if (event.action == KeyEvent.ACTION_DOWN &&
+                        keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+                    ) {
+                        hide(appCtx)
+                        true
+                    } else false
+                }
             }
             val clock = TextClock(appCtx).apply {
                 format24Hour = "HH:mm"
@@ -199,27 +210,28 @@ object MaskOverlayHelper {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     touchDownY = event.rawY
-                    true
+                    true // 开始追踪，消费 DOWN 事件
                 }
 
                 MotionEvent.ACTION_MOVE -> {
-                    // 在移动过程中检测，达到阈值立即关闭，避免系统手势导航提前发送 CANCEL
                     val deltaY = event.rawY - touchDownY
-                    if (kotlin.math.abs(deltaY) > 200f) {
+                    val isSwipe = kotlin.math.abs(deltaY) > 200f
+                    if (isSwipe) {
                         hide(view.context)
                     }
-                    true
+                    isSwipe // 仅滑动手势消费 MOVE 事件，其他移动事件透传给下层窗口
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val deltaY = event.rawY - touchDownY
-                    if (kotlin.math.abs(deltaY) > 200f) {
+                    val isSwipe = kotlin.math.abs(deltaY) > 200f
+                    if (isSwipe) {
                         hide(view.context)
                     }
-                    true
+                    isSwipe // 仅滑动手势消费 UP/CANCEL 事件
                 }
 
-                else -> true
+                else -> false // 其他事件（如点击）透传给下层窗口，不拦截桌面操作
             }
         }
     }

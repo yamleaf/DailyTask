@@ -10,6 +10,8 @@ public class DailyTaskBean {
 
     private String time;
 
+    private String name = "";//任务名称/备注（远程多任务命名，可为空）
+
     public int getId() {
         return id;
     }
@@ -24,5 +26,13 @@ public class DailyTaskBean {
 
     public void setTime(String time) {
         this.time = time;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 }

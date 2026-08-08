@@ -99,6 +99,32 @@ object BatteryHistory {
         return if (min >= 60) "%.1f 小时".format(min / 60.0) else "${min} 分钟"
     }
 
+    /**
+     * 供远程快照暴露的电池采样序列（B5：控制端电池曲线复用）。
+     * 返回最近 windowHours 小时内的 {ts, level} 序列，降采样到 maxPoints 个点以便控制端绘制。
+     * 失败/无数据返回空列表（控制端据此显示“数据不足”占位，不影响主流程）。
+     */
+    fun recentSeries(ctx: Context, windowHours: Int = 12, maxPoints: Int = 24): List<Pair<Long, Int>> {
+        return try {
+            val f = file(ctx)
+            if (!f.exists()) return emptyList()
+            val now = System.currentTimeMillis()
+            val windowMs = TimeUnit.HOURS.toMillis(windowHours.toLong())
+            val pts = f.readLines()
+                .mapNotNull { parse(it) }
+                .filter { now - it.ts <= windowMs }
+                .map { it.ts to it.level }
+            if (pts.size <= maxPoints) return pts
+            // 均匀降采样：保留首点 + 每隔 step 取一点 + 末点
+            val step = (pts.size / maxPoints).coerceAtLeast(1)
+            val sampled = pts.filterIndexed { i, _ -> i % step == 0 }.toMutableList()
+            if (sampled.last().first != pts.last().first) sampled.add(pts.last())
+            sampled
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun currentLevel(ctx: Context): Int {
         val mgr = ctx.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         return mgr?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1

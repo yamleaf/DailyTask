@@ -10,7 +10,7 @@
         android:id="@+id/handleView"
         android:layout_width="@dimen/dp_32"
         android:layout_height="4dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="@dimen/dp_12"
         android:layout_marginBottom="@dimen/dp_16"
         app:cardBackgroundColor="?attr/colorOutline"
         app:cardCornerRadius="2dp"
@@ -38,13 +38,29 @@
         android:orientation="vertical"
         app:layout_constraintTop_toBottomOf="@id/titleView">
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/nameInputLayout"
+            style="@style/Widget.DailyTask.TextInput.Outlined"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="@dimen/dp_16"
+            android:hint="任务备注（可选，如：早打卡）">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/nameEditText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+
         <com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout
             android:id="@+id/timePicker"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             app:wheel_hourLabel="时"
             app:wheel_itemTextBoldSelected="true"
-            app:wheel_itemTextColorSelected="@color/theme_color"
+            app:wheel_itemTextColorSelected="@color/md_primary"
             app:wheel_minuteLabel="分"
             app:wheel_secondLabel="秒"
             app:wheel_timeMode="hour_24_has_second" />

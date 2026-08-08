@@ -57,6 +57,19 @@
 -keep public class com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 -keep public class com.pengxh.daily.app.service.KeepAliveReceiver
 -keep public class com.pengxh.daily.app.service.PackageReplacedReceiver
+# 远程控制 MQTT 代理服务 + 协议类（含 sealed PacketValue，混淆后需保留类名与字段，
+# 否则 Gson 反序列化 MqttPacket 时无法还原 PacketValue 子类，导致远程指令静默失效）
+-keep public class com.pengxh.daily.app.service.MqttAgentService
+-keep class com.pengxh.daily.protocol.** { *; }
+
+# ZXing core（二维码编解码）：保留全部类，避免 R8 裁剪 MultiFormatWriter / 编解码表
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
+
+# Paho MQTT client：内部通过反射（Class.forName）加载 SimpleLogger 等日志类，
+# 混淆后会抛 MissingResourceException「Error locating the logging class」导致服务创建失败闪退
+-keep class org.eclipse.paho.client.mqttv3.** { *; }
+-dontwarn org.eclipse.paho.client.mqttv3.**
 
 # ---- 2) Room：实体、DAO、数据库（保留类与成员，避免字段/方法被混淆或裁剪） ----
 -keep class com.pengxh.daily.app.sqlite.bean.** { *; }

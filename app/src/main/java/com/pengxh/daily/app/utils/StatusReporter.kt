@@ -7,8 +7,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.app.KeyguardManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.DailyTaskApplication
@@ -55,7 +57,9 @@ object StatusReporter {
         "DT#状态查询" to "查询程序状态信息等",
         "DT#截屏" to "截取App 画面并回传",
         "DT#开启转移" to "开启通知转移（打卡应用通知转发到目标手机）",
-        "DT#关闭转移" to "关闭通知转移"
+        "DT#关闭转移" to "关闭通知转移",
+        "DT#开启远程" to "重新开启本机远程控制服务（MQTT）",
+        "DT#关闭远程" to "关闭本机远程控制服务（MQTT）"
     )
 
     /** 状态报告共性取数（纯文本版与 HTML 版共用），避免两份近乎镜像的取数逻辑分叉（P2-4） */
@@ -180,6 +184,7 @@ object StatusReporter {
             appendLine("· 今日：${buildTodayTextNote(d.cal)}")
             appendLine()
             appendLine("【设备信息】")
+            appendLine("· 手机状态：${deviceScreenStateText(context)}")
             appendLine("· 当前时间：${Date().formatDateTime()}")
             appendLine("· 当前电量：${if (d.battery >= 0) "${d.battery}%" else "未知"}")
             appendLine("· 充电状态：${batterySnap.chargingStatus}")
@@ -260,15 +265,16 @@ object StatusReporter {
         }
     }
 
-    fun buildLowBatteryContent(battery: Int): String {
+    fun buildLowBatteryContent(battery: Int, threshold: Int, stage: Int): String {
         return buildString {
             appendLine("====================")
-            appendLine("  低电量提醒")
+            appendLine("  低电量提醒（第${stage}档）")
             appendLine("====================")
             appendLine()
             appendLine("· 当前电量：$battery%")
-            appendLine("· 电量已低于 30%，请及时充电")
-            appendLine("· 本次欠压区间内仅提醒一次（充电回升到 30% 以上后重新计数）")
+            appendLine("· 低电量阈值：$threshold%")
+            appendLine("· 电量已低于第 $stage 档边界（阈值 - ${(stage - 1) * 10}%），请及时充电")
+            appendLine("· 各档仅提醒一次（开始充电后重新计数）")
         }
     }
 
@@ -352,6 +358,7 @@ object StatusReporter {
             "warn" -> "#fff7e6" to "#d46b08"
             "err" -> "#fff2f0" to "#cf1322"
             "info" -> "#e6f7ff" to "#096dd9"
+            "skip" -> "#f0f0f0" to "#8c8c8c"
             else -> "#f5f5f5" to "#595959"
         }
         return "<span style=\"display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;background:$bg;color:$fg;font-weight:500;\">$text</span>"
@@ -434,6 +441,7 @@ object StatusReporter {
                     when {
                         it.contains("完成") || it.contains("执行") -> it to "ok"
                         it.contains("待执行") -> it to "info"
+                        it.contains("跳过") -> it to "skip"
                         else -> it to "warn"
                     }
                 }
@@ -889,6 +897,7 @@ object StatusReporter {
 
             // 设备信息
             append(section("📱 设备信息",
+                row("手机状态", deviceScreenStateText(context)),
                 row("当前时间", Date().formatDateTime()),
                 row("充电状态", batterySnap.chargingStatus),
                 row("电池电流", batterySnap.currentText),
@@ -1020,15 +1029,16 @@ object StatusReporter {
     }
 
     @JvmStatic
-    fun buildLowBatteryContentHtml(battery: Int): String {
+    fun buildLowBatteryContentHtml(battery: Int, threshold: Int, stage: Int): String {
         val batColor = if (battery < 15) "#f5222d" else "#fa8c16"
         val pct = battery.coerceIn(0, 100)
+        val bound = threshold - (stage - 1) * 10
 
         val body = buildString {
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">🔋</div>")
             append("<div style=\"font-size:28px;font-weight:700;color:$batColor;\">$battery%</div>")
-            append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">电量低于 30%</div>")
+            append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">低电量提醒 · 第 ${stage} 档（低于 $bound%）</div>")
             append("</div>")
 
             // 电量条
@@ -1040,10 +1050,93 @@ object StatusReporter {
 
             append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
             append("<p style=\"margin:0 0 6px;\">📌 请及时连接充电器，避免设备关机导致任务中断。</p>")
-            append("<p style=\"margin:0;color:#888;font-size:11px;\">本次欠压区间仅提醒一次（充电回升到 30% 以上后重新计数）。</p>")
+            append("<p style=\"margin:0;color:#888;font-size:11px;\">低电量阈值 $threshold%：分 3 档各提醒一次（开始充电后重新计数）。</p>")
             append("</div>")
         }
-        return pageShell("🔋 低电量提醒", body, compact = false)
+        return pageShell("🔋 低电量提醒（第${stage}档）", body, compact = false)
+    }
+
+    /** 开始充电、低电量告警取消（纯文本，备用） */
+    @JvmStatic
+    fun buildChargingResumedContent(battery: Int): String {
+        return buildString {
+            appendLine("====================")
+            appendLine("  电量开始充电")
+            appendLine("====================")
+            appendLine()
+            appendLine("· 当前电量：$battery%")
+            appendLine("· 设备已接入电源，低电量告警已取消")
+            appendLine("· 下次放电将重新按档计数")
+        }
+    }
+
+    /** 开始充电、低电量告警取消（HTML，走反馈渠道通知） */
+    @JvmStatic
+    fun buildChargingResumedContentHtml(battery: Int): String {
+        val body = buildString {
+            append("<div style=\"text-align:center;padding:16px 0 10px;\">")
+            append("<div style=\"font-size:40px;margin-bottom:8px;\">⚡</div>")
+            append("<div style=\"font-size:28px;font-weight:700;color:#52c41a;\">$battery%</div>")
+            append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">设备已接入电源</div>")
+            append("</div>")
+            append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
+            append("<p style=\"margin:0 0 6px;\">⚡ 设备已开始充电，低电量告警已取消。</p>")
+            append("<p style=\"margin:0;color:#888;font-size:11px;\">下次放电将重新按档计数。</p>")
+            append("</div>")
+        }
+        return pageShell("⚡ 电量开始充电", body, compact = false)
+    }
+
+    /** 电量已充满（纯文本，备用） */
+    @JvmStatic
+    fun buildBatteryFullContent(battery: Int): String {
+        return buildString {
+            appendLine("====================")
+            appendLine("  电量已充满")
+            appendLine("====================")
+            appendLine()
+            appendLine("· 当前电量：$battery%")
+            appendLine("· 设备已充满，可拔除电源")
+            appendLine("· 充满后每轮充电周期上报一次，不重复")
+        }
+    }
+
+    /** 电量已充满（HTML，走反馈渠道通知） */
+    @JvmStatic
+    fun buildBatteryFullContentHtml(battery: Int): String {
+        val body = buildString {
+            append("<div style=\"text-align:center;padding:16px 0 10px;\">")
+            append("<div style=\"font-size:40px;margin-bottom:8px;\">🔋</div>")
+            append("<div style=\"font-size:28px;font-weight:700;color:#16a34a;\">100%</div>")
+            append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">电量已充满</div>")
+            append("</div>")
+            append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
+            append("<p style=\"margin:0 0 6px;\">🔋 设备电量已充满（$battery%），可拔除电源。</p>")
+            append("<p style=\"margin:0;color:#888;font-size:11px;\">充满后每轮充电周期上报一次，不重复提醒。</p>")
+            append("</div>")
+        }
+        return pageShell("🔋 电量已充满", body, compact = false)
+    }
+
+    /** 电量智能预警（HTML，走反馈渠道通知） */
+    @JvmStatic
+    fun buildBatterySmartAlertContentHtml(battery: Int, predictedTime: String, warningHour: Int, threshold: Int, pred: BatteryPredictor.Prediction): String {
+        val shutdownTimeMs = System.currentTimeMillis() + (battery / pred.ratePerHour * 3600 * 1000).toLong()
+        val shutdownTimeText = java.util.Date(shutdownTimeMs).format("HH:mm")
+        val body = buildString {
+            append("<div style=\"text-align:center;padding:16px 0 10px;\">")
+            append("<div style=\"font-size:40px;margin-bottom:8px;\">⚠️</div>")
+            append("<div style=\"font-size:28px;font-weight:700;color:#b45309;\">电量耗尽预警</div>")
+            append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">预计 ${predictedTime} 降至 $threshold%</div>")
+            append("</div>")
+            append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
+            append("<p style=\"margin:0 0 6px;\">⚠️ 当前电量 $battery%，预计 <b>${predictedTime}</b> 降至 <b>$threshold%</b>。</p>")
+            append("<p style=\"margin:0 0 6px;\">预测时间落在夜间（${warningHour}:00 之后），可能在你睡眠期间电量耗尽关机。</p>")
+            append("<p style=\"margin:0 0 6px;\"><b>手机预计将在 ${shutdownTimeText} 后电量耗尽关机</b>（基于当前 ${String.format("%.1f", pred.ratePerHour)}%/h 消耗速度）。</p>")
+            append("<p style=\"margin:0;color:#888;font-size:11px;\">请在 <b>${warningHour}:00</b> 前为设备充电，避免夜间低电量关机。</p>")
+            append("</div>")
+        }
+        return pageShell("⚠️ 电量耗尽预警", body, compact = false)
     }
 
     // ======================== 轻量级通知 HTML ========================
@@ -1277,6 +1370,29 @@ object StatusReporter {
             BatterySnapshot(chargingStatus, currentText, healthText, temperatureText)
         } catch (_: Exception) {
             BatterySnapshot("未知", "未知", "未知", "未知")
+        }
+    }
+
+    /**
+     * 手机屏幕状态：亮屏 / 伪息屏 / 锁屏。
+     * 优先级：伪息屏（黑屏蒙层悬浮窗在显示）> 锁屏（灭屏或锁屏界面）> 亮屏。
+     */
+    private fun deviceScreenStateText(context: Context): String {
+        return try {
+            when {
+                MaskOverlayHelper.isShowing() -> "伪息屏"
+                else -> {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                    when {
+                        pm?.isInteractive == false -> "锁屏（灭屏）"
+                        km?.isKeyguardLocked == true -> "锁屏"
+                        else -> "亮屏"
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            "未知"
         }
     }
 

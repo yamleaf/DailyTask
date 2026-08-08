@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 磨砂玻璃导航：浅色主题半透明底色（约 80% 白），配合 BlurView 产生明显磨砂感 -->
+    <color name="frosted_nav_tint">#CCFFFFFF</color>
+    <!-- 磨砂玻璃导航：玻璃边缘细描边（浅色主题，加深以增强层次） -->
+    <color name="frosted_nav_stroke">#33000000</color>
+</resources>

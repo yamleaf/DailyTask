@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 底部悬浮磨砂玻璃导航卡片：BlurView 模糊其下方内容（BlurTarget），
+     半透明圆角背景 + 细描边，children（BottomNavigationView）不被模糊 -->
+<eightbitlab.com.blurview.BlurView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="bottom"
+    android:layout_marginBottom="16dp"
+    android:background="@drawable/bg_frosted_nav"
+    android:clipToOutline="true"
+    android:elevation="2dp">
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        android:elevation="0dp"
+        app:itemIconTint="@color/bottom_nav_color"
+        app:itemTextColor="@color/bottom_nav_color"
+        app:itemActiveIndicatorStyle="@style/Widget.Material3.BottomNavigationView.ActiveIndicator"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_main" />
+
+</eightbitlab.com.blurview.BlurView>

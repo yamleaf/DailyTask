@@ -3,9 +3,9 @@ package com.pengxh.daily.app.ui
 import android.os.Bundle
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.JsonObject
 import com.pengxh.daily.app.databinding.ActivityMessageChannelBinding
+import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
@@ -16,6 +16,7 @@ import com.pengxh.kt.lite.extensions.isEmail
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 
 class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>() {
 
@@ -64,7 +65,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
     override fun initEvent() {
         binding.sendWxButton.setOnClickListener {
             if (SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)) {
-                "已关闭反馈通知，无法发送测试消息".show(this)
+                "已开启静默通知，无法发送测试消息".show(this)
                 return@setOnClickListener
             }
             val key = binding.wxKeyView.text.toString()
@@ -76,19 +77,22 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             SaveKeyValues.saveString(
                 Constant.WX_WEB_HOOK_KEY, binding.wxKeyView.text.toString()
             )
+            ConfigImportSignal.notifyRemoteChanged(context)
 
-            MaterialAlertDialogBuilder(this)
-                .setTitle("测试消息")
-                .setMessage("企业微信配置完成，可以发送企业微信消息。\n\n是否继续？")
-                .setCancelable(false)
-                .setPositiveButton("继续") { _, _ ->
-                    sendTestMessage()
-                }.setNegativeButton("取消", null).show()
+            UnifiedDialogKit.showSuccess(
+                this,
+                "测试消息",
+                "企业微信配置完成，可以发送企业微信消息。\n\n是否继续？",
+                confirmText = "继续",
+                cancelText = "取消",
+                cancelable = false,
+                onConfirm = { sendTestMessage() }
+            )
         }
 
         binding.sendEmailButton.setOnClickListener {
             if (SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)) {
-                "已关闭反馈通知，无法发送测试邮件".show(context)
+                "已开启静默通知，无法发送测试邮件".show(context)
                 return@setOnClickListener
             }
             val address = binding.emailSendAddressView.text.toString()
@@ -131,6 +135,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             }
             ConfigStore.get().save(Constant.EMAIL_CONFIG_KEY, cacheObj)
             EmailSecureConfig.saveAuthCode(binding.emailSendCodeView.text.toString())
+            ConfigImportSignal.notifyRemoteChanged(context)
 
             sendTestEmail()
         }
@@ -138,8 +143,9 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
         binding.feedbackNotifySwitch.setOnCheckedChangeListener { _, isChecked ->
             SaveKeyValues.saveBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, isChecked)
             if (isChecked) {
-                "已开启关闭反馈通知，将不再发送邮件/企业微信消息".show(this)
+                "已开启静默通知，将不再发送邮件/企业微信消息".show(this)
             }
+            ConfigImportSignal.notifyRemoteChanged(context)
         }
     }
 
@@ -161,6 +167,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                 )
 
                 SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, 1)
+                ConfigImportSignal.notifyRemoteChanged(context)
             },
             onFailure = {
                 if (isFinishing || isDestroyed) return@sendMessage
@@ -170,11 +177,14 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
     }
 
     private fun sendTestEmail() {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("测试邮件")
-            .setMessage("QQ邮箱配置完成，可以发送QQ邮件。\n\n是否继续？")
-            .setCancelable(false)
-            .setPositiveButton("继续") { _, _ ->
+        UnifiedDialogKit.showSuccess(
+            this,
+            "测试邮件",
+            "QQ邮箱配置完成，可以发送QQ邮件。\n\n是否继续？",
+            confirmText = "继续",
+            cancelText = "取消",
+            cancelable = false,
+            onConfirm = {
                 LoadingDialog.show(context, "邮件发送中，请稍后....")
                 MessageDispatcher.sendMessage(
                     "邮箱测试", StatusReporter.buildTestEmailHtml(),
@@ -190,11 +200,13 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
                         )
 
                         SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, 0)
+                        ConfigImportSignal.notifyRemoteChanged(context)
                     },
                     onFailure = {
                         LoadingDialog.dismiss()
                         "发送失败：${it}".show(context)
                     })
-            }.setNegativeButton("取消", null).show()
+            }
+        )
     }
 }

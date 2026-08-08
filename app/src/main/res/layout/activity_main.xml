@@ -3,99 +3,45 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/back_ground_color">
+    android:background="@color/md_background">
 
-    <LinearLayout
+    <!-- 磨砂玻璃模糊目标：包裹全部 Tab 内容（FragmentContainerView），
+         供底部悬浮导航 BlurView 模糊其下方的滚动内容。
+         注意：id 保持 rootView，MaskViewController 通过它统一隐藏/恢复全部内容。 -->
+    <FrameLayout
         android:id="@+id/rootView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:layout_height="match_parent">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
+        <androidx.fragment.app.FragmentContainerView
+            android:id="@+id/fragmentContainer"
             android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <!-- 悬浮导航：左右 Space 占位 weight=1:4:1 → 导航精确占屏幕 2/3 宽度并居中 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal">
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <include
+            android:id="@+id/bottomNavBar"
+            layout="@layout/bottom_nav_bar"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:background="@color/theme_color"
-            app:menu="@menu/main_top_bar_menu"
-            app:subtitleTextAppearance="@style/TextAppearance.Material3.TitleSmall"
-            app:subtitleTextColor="@color/white"
-            app:titleTextColor="@color/white" />
+            android:layout_weight="4" />
 
-        <LinearLayout
-            android:id="@+id/contentView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@color/white"
-                android:orientation="vertical">
-
-                <com.google.android.material.textview.MaterialTextView
-                    android:id="@+id/repeatTimeView"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@color/theme_color"
-                    android:drawablePadding="@dimen/dp_4"
-                    android:paddingHorizontal="@dimen/dp_16"
-                    android:paddingTop="0dp"
-                    android:paddingBottom="@dimen/dp_12"
-                    android:singleLine="true"
-                    android:text="--分钟后刷新每日任务"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                    android:textColor="@color/white"
-                    app:drawableStartCompat="@drawable/ic_sand" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:padding="@dimen/dp_16">
-
-                    <com.google.android.material.textview.MaterialTextView
-                        android:id="@+id/tipsView"
-                        android:layout_width="0dp"
-                        android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:gravity="center_vertical"
-                        android:hint="点击按钮开始执行任务"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="@color/theme_color"
-                        android:textColorHint="@color/lib_hint_color" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/executeTaskButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="@dimen/dp_16"
-                        android:text="启动"
-                        app:icon="@mipmap/ic_start"
-                        app:iconTint="@color/ios_green" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_marginVertical="@dimen/dp_8"
-                android:layout_weight="1">
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/recyclerView"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
-
-                <com.pengxh.kt.lite.widget.EmptyView
-                    android:id="@+id/emptyView"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:visibility="gone"
-                    app:show_reload_button="false" />
-            </FrameLayout>
-        </LinearLayout>
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
     </LinearLayout>
 
     <RelativeLayout
@@ -112,7 +58,7 @@
             android:layout_centerInParent="true"
             android:fontFamily="@font/ds_digital"
             android:format24Hour="HH:mm"
-            android:textColor="#B3FFFFFF"
-            android:textSize="56sp" />
+            android:textColor="@color/white_70"
+            android:textSize="@dimen/sp_56" />
     </RelativeLayout>
 </FrameLayout>

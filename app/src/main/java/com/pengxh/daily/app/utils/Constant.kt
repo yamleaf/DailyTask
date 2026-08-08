@@ -44,8 +44,33 @@ object Constant {
     /** 伪息屏：关闭时钟显示（Boolean，默认 false=显示时钟）。开启后伪息屏只显示黑屏，更省电 */
     const val PSEUDO_MASK_NO_CLOCK_KEY = "PSEUDO_MASK_NO_CLOCK_KEY" // Boolean
 
-    /** 后台保活：开机自启 + 进程被杀后由精确闹钟兜底重启前台服务(Boolean) */
-    const val BACKGROUND_KEEP_ALIVE_KEY = "BACKGROUND_KEEP_ALIVE_KEY"
+    // ===== 远程控制 MQTT 配置（被控端持久化；解绑时【不】清除，下次绑定无需重输）=====
+    const val MQTT_BROKER_KEY = "MQTT_BROKER_KEY"       // EMQX broker 地址(含端口)，如 xxx.emqx.com:8883
+    const val MQTT_USER_KEY = "MQTT_USER_KEY"           // 被控端 DEV 账户（设备自用，【不】进二维码）
+    const val MQTT_PASS_KEY = "MQTT_PASS_KEY"           // 被控端 DEV 账户密码
+    const val DEVICE_ID_KEY = "DEVICE_ID_KEY"           // 8 位设备 ID
+    /** 控制端 CTL 账户用户名：默认由 App 生成（ctl-{deviceId}），可在「控制端凭证(ctl)」改为自定义；进绑定二维码；需在 EMQX 建同名受限账户 */
+    const val MQTT_CTL_USER_KEY = "MQTT_CTL_USER_KEY"
+    /** 控制端 CTL 账户密码：默认由 App 随机生成，可在「控制端凭证(ctl)」改为自定义；进绑定二维码；需在 EMQX 建同名受限账户 */
+    const val MQTT_CTL_PASS_KEY = "MQTT_CTL_PASS_KEY"
+    /** 远程控制服务总开关：默认关闭；开启且账号配置有效才连接 MQTT，关闭则完全停止服务（断开连接、撤销前台通知、零耗电） */
+    const val MQTT_ENABLED_KEY = "MQTT_ENABLED_KEY"
+
+    // ===== EMQX Serverless API 配置（被控端专用；用于 HTTP 方式管理/测试部署）=====
+    const val MQTT_SERVERLESS_API_URL_KEY = "MQTT_SERVERLESS_API_URL_KEY" // 如 https://xxx.emqxsl.com/api/v5
+    const val MQTT_SERVERLESS_API_APP_ID_KEY = "MQTT_SERVERLESS_API_APP_ID_KEY"
+    const val MQTT_SERVERLESS_API_APP_SECRET_KEY = "MQTT_SERVERLESS_API_APP_SECRET_KEY"
+
+    // ===== 临时公共 MQTT（EMQX 官方免费公共 broker，仅临时测试用）=====
+    const val PUBLIC_MQTT_BROKER = "broker.emqx.io:1883"
+    const val MQTT_USE_PUBLIC_KEY = "MQTT_USE_PUBLIC_KEY" // Boolean：当前是否使用临时公共 MQTT 配置
+
+    // ===== 绑定态（解绑时清除；不含上面的 MQTT 配置）=====
+    const val IS_BOUND_KEY = "IS_BOUND_KEY"                       // 是否已与控制端完成配对
+    const val MQTT_SESSION_SECRET_KEY = "MQTT_SESSION_SECRET_KEY" // 配对后 HKDF 派生的会话密钥，运行时报文验签
+    const val MQTT_PAIRING_TOKEN_KEY = "MQTT_PAIRING_TOKEN_KEY"   // 配对令牌（单次 / 60s），进二维码
+    const val MQTT_PAIRING_EXPIRY_KEY = "MQTT_PAIRING_EXPIRY_KEY" // 配对令牌过期时间戳(ms)
+
 
     // Intent extra：远程息屏/亮屏（1=息屏，0=亮屏）
     const val EXTRA_MASK_COMMAND = "EXTRA_MASK_COMMAND"
@@ -55,8 +80,32 @@ object Constant {
     const val RESULT_SOURCE_KEY = "RESULT_SOURCE_KEY"
     /** 无障碍反馈模式：0=截屏反馈, 1=文本反馈 */
     const val ACCESSIBILITY_FEEDBACK_MODE_KEY = "ACCESSIBILITY_FEEDBACK_MODE_KEY"
-    /** 电量低于 30% 是否已提醒过（回升到 30% 以上后清零） */
+    /** 电量低于 30% 是否已提醒过（旧版单次提醒标记，已被三段式标记取代，保留以兼容旧数据） */
     const val LOW_BATTERY_NOTIFIED_KEY = "LOW_BATTERY_NOTIFIED_KEY"
+    /** 低电量告警阈值（%，默认 30，范围 10~80），经设置镜像链路贯通控制端 */
+    const val LOW_BATTERY_THRESHOLD_KEY = "LOW_BATTERY_THRESHOLD_KEY"
+    /** 电量智能预警总开关（Boolean） */
+    const val BATTERY_SMART_ALERT_ENABLED_KEY = "BATTERY_SMART_ALERT_ENABLED_KEY"
+    /** 电量智能预警最晚预警时间（小时 0-23，默认 20） */
+    const val BATTERY_WARNING_HOUR_KEY = "BATTERY_WARNING_HOUR_KEY"
+    /** 电量智能预警已发送标记（每次充电重置，避免重复推送） */
+    const val BATTERY_SMART_ALERT_SENT_KEY = "BATTERY_SMART_ALERT_SENT_KEY"
+    /** 预警检测区间起始小时（默认 20，即 20:00） */
+    const val BATTERY_ALERT_DETECTION_START_KEY = "BATTERY_ALERT_DETECTION_START_KEY"
+    /** 预警检测区间时长（小时 1~24，默认 12，结束时间 = 起始 + 时长） */
+    const val BATTERY_ALERT_DETECTION_DURATION_KEY = "BATTERY_ALERT_DETECTION_DURATION_KEY"
+    /** 低电量告警最多段数（0-3，默认 3，0=不发送低电量告警） */
+    const val BATTERY_ALERT_MAX_STAGES_KEY = "BATTERY_ALERT_MAX_STAGES_KEY"
+    /** 三段式低电量告警已提醒标记：阈值→阈值-10→阈值-20 各触发一次，充电或阈值变更后清零 */
+    const val LOW_BATTERY_STAGE1_KEY = "LOW_BATTERY_STAGE1_KEY"
+    const val LOW_BATTERY_STAGE2_KEY = "LOW_BATTERY_STAGE2_KEY"
+    const val LOW_BATTERY_STAGE3_KEY = "LOW_BATTERY_STAGE3_KEY"
+    /** 「低电量→充电」取消通知已上报标记：本轮低电量周期已报过一次取消通知后置 true，
+     *  当电量再次跌破任一档阈值（重新进入低电量状态）时重置为 false，方允许下次充电再报一次 */
+    const val LOW_BATTERY_CHARGE_NOTIFIED_KEY = "LOW_BATTERY_CHARGE_NOTIFIED_KEY"
+    /** 「电量已充满」通知已上报标记：本轮充电周期达到 100% 已报过一次后置 true；
+     *  当设备拔出电源/电量回落（充电态结束）时重置为 false，方允许下次充满再报一次 */
+    const val BATTERY_FULL_NOTIFIED_KEY = "BATTERY_FULL_NOTIFIED_KEY"
     const val INSTALL_ID_KEY = "INSTALL_ID_KEY"
 
     // ConfigStore 键
@@ -83,6 +132,8 @@ object Constant {
     const val DEFAULT_RESET_HOUR = 0
     const val DEFAULT_TIME_RANGE = 5
     const val DEFAULT_OVER_TIME = 30
+    const val DEFAULT_LOW_BATTERY_THRESHOLD = 30
+    const val DEFAULT_BATTERY_ALERT_DURATION = 12
     const val CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID = 1001
     const val FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID = 1002
 

@@ -8,12 +8,12 @@
     android:paddingHorizontal="@dimen/dp_16"
     android:paddingVertical="@dimen/dp_12">
 
-    <com.google.android.material.imageview.ShapeableImageView
+    <com.google.android.material.imageview.ShapeableImageView 
         android:id="@+id/appIcon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:background="#F1F1F1"
-        app:shapeAppearance="@style/RoundedStyle" />
+        android:layout_width="@dimen/dp_40"
+        android:layout_height="@dimen/dp_40"
+        android:background="@color/md_surfaceVariant"
+        app:shapeAppearance="@style/RoundedStyle" android:contentDescription="@null" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -38,18 +38,20 @@
             android:layout_marginTop="@dimen/dp_4"
             android:ellipsize="middle"
             android:singleLine="true"
-            android:textColor="#888888"
+            android:textColor="@color/md_onSurfaceVariant"
             android:textSize="@dimen/sp_10" />
     </LinearLayout>
 
-    <TextView
+    <com.google.android.material.textview.MaterialTextView
         android:id="@+id/btnRemove"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:minHeight="@dimen/min_touch"
         android:background="?attr/selectableItemBackground"
         android:paddingHorizontal="@dimen/dp_8"
         android:paddingVertical="@dimen/dp_4"
+        android:gravity="center"
         android:text="@string/settings_custom_app_remove"
-        android:textColor="@color/red"
+        android:textColor="@color/md_error"
         android:textSize="@dimen/sp_14" />
 </LinearLayout>

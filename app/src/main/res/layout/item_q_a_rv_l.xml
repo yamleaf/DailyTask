@@ -13,7 +13,7 @@
         android:layout_height="wrap_content"
         android:text="@string/app_name"
         android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-        android:textColor="@color/theme_color"
+        android:textColor="@color/md_primary"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 

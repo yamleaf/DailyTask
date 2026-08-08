@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 默认禁止明文 HTTP，强制走 TLS（代码已支持 ssl/wss/mqtts） -->
+    <base-config cleartextTrafficPermitted="false" />
+    <!-- 仅放行本机回环，便于本地 broker / 调试场景 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

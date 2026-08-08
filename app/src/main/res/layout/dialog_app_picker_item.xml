@@ -7,11 +7,11 @@
     android:paddingHorizontal="@dimen/dp_16"
     android:paddingVertical="@dimen/dp_12">
 
-    <ImageView
+    <ImageView 
         android:id="@+id/appIcon"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:scaleType="fitCenter" />
+        android:layout_width="@dimen/dp_40"
+        android:layout_height="@dimen/dp_40"
+        android:scaleType="fitCenter" android:contentDescription="@null" />
 
     <com.google.android.material.textview.MaterialTextView
         android:id="@+id/appLabel"

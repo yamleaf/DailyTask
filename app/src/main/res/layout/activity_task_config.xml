@@ -4,17 +4,17 @@
     android:id="@+id/rootView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/back_ground_color"
+    android:background="@color/md_background"
     android:orientation="vertical">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/theme_color"
+        android:background="@color/md_primary"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="任务配置"
-        app:titleTextColor="@color/white" />
+        app:titleTextColor="@color/on_header" />
 
     <androidx.core.widget.NestedScrollView
         android:id="@+id/contentScrollView"
@@ -23,21 +23,25 @@
         android:layout_weight="1"
         android:fillViewport="true">
 
-        <LinearLayout
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="@dimen/dp_16"
-            android:background="@drawable/bg_solid_layout_white_16"
-            android:orientation="vertical">
+            style="@style/Widget.Daily.SectionCard">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
             <RelativeLayout
                 android:id="@+id/resetTimeLayout"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@drawable/bg_solid_layout_white_16"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -45,7 +49,7 @@
                     android:text="重置时间"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:id="@+id/resetTimeView"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -57,18 +61,18 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:id="@+id/timeoutLayout"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@color/white"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -76,7 +80,7 @@
                     android:text="超时时间"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:id="@+id/timeoutTextView"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -88,18 +92,18 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:id="@+id/keyLayout"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@color/white"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -107,7 +111,7 @@
                     android:text="任务口令"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:id="@+id/keyTextView"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -119,26 +123,26 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <LinearLayout
                 android:id="@+id/workdayLayout"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@color/white"
+                android:background="@android:color/transparent"
                 android:gravity="center_vertical"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
                     android:text="工作日设置"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:id="@+id/workdayValueView"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -150,17 +154,17 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@color/white"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -178,14 +182,14 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@color/white"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
                 <LinearLayout
@@ -194,21 +198,21 @@
                     android:layout_centerVertical="true"
                     android:orientation="vertical">
 
-                    <TextView
+                    <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="循环任务"
                         android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                        android:textColor="@color/text_default_color" />
+                        android:textColor="@color/md_onSurface" />
 
-                    <TextView
+                    <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_gravity="end"
                         android:layout_marginTop="@dimen/dp_4"
                         android:singleLine="true"
                         android:text="注意：此开关只能通过远程指令修改"
-                        android:textColor="@color/red"
+                        android:textColor="@color/md_error"
                         android:textSize="@dimen/sp_10" />
                 </LinearLayout>
 
@@ -224,17 +228,17 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@color/white"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -257,25 +261,25 @@
 
                 <View
                     android:layout_width="match_parent"
-                    android:layout_height="1px"
+                    android:layout_height="@dimen/dividerLine"
                     android:layout_marginHorizontal="@dimen/dp_16"
-                    android:background="#CCC" />
+                    android:background="@color/md_outlineVariant" />
 
                 <RelativeLayout
                     android:layout_width="match_parent"
                     android:layout_height="@dimen/itemLayoutHeight"
-                    android:background="@color/white"
+                    android:background="@android:color/transparent"
                     android:paddingHorizontal="@dimen/dp_16">
 
-                    <TextView
+                    <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_centerVertical="true"
                         android:text="时间范围"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:textColor="@color/text_default_color" />
+                        android:textColor="@color/md_onSurface" />
 
-                    <TextView
+                    <com.google.android.material.textview.MaterialTextView
                         android:id="@+id/minuteRangeView"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
@@ -288,18 +292,18 @@
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:id="@+id/exportLayout"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@drawable/bg_solid_layout_white_16"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -307,28 +311,28 @@
                     android:text="导出配置"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                <ImageView
+                <ImageView 
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentEnd="true"
                     android:layout_centerVertical="true"
-                    android:background="@drawable/ic_arrow_right" />
+                    android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
             </RelativeLayout>
 
             <View
                 android:layout_width="match_parent"
-                android:layout_height="1px"
+                android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="#CCC" />
+                android:background="@color/md_outlineVariant" />
 
             <RelativeLayout
                 android:id="@+id/importLayout"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@drawable/bg_solid_layout_white_16"
+                android:background="@android:color/transparent"
                 android:paddingHorizontal="@dimen/dp_16">
 
-                <TextView
+                <com.google.android.material.textview.MaterialTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_centerVertical="true"
@@ -336,13 +340,14 @@
                     android:text="导入配置"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
-                <ImageView
+                <ImageView 
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentEnd="true"
                     android:layout_centerVertical="true"
-                    android:background="@drawable/ic_arrow_right" />
+                    android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
             </RelativeLayout>
-        </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
     </androidx.core.widget.NestedScrollView>
 </LinearLayout>
