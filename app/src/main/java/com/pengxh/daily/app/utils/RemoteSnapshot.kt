@@ -254,7 +254,7 @@ object RemoteSnapshot {
     // ===================== 可写设置 =====================
     private fun buildSettings(): JsonArray {
         val arr = JsonArray()
-        fun add(key: String, label: String, type: String, value: Any, min: Int? = null, max: Int? = null, step: Int? = null) {
+        fun add(key: String, label: String, type: String, value: Any, min: Int? = null, max: Int? = null, step: Int? = null, options: JsonArray? = null) {
             val o = JsonObject()
             o.addProperty("key", key)
             o.addProperty("label", label)
@@ -268,6 +268,7 @@ object RemoteSnapshot {
             if (min != null) o.addProperty("min", min)
             if (max != null) o.addProperty("max", max)
             if (step != null) o.addProperty("step", step)
+            if (options != null) o.add("options", options)
             arr.add(o)
         }
         add("ps", "节能模式", "bool", AppRuntimeConfig.isPowerSaveMode())
@@ -280,8 +281,16 @@ object RemoteSnapshot {
         add("rt", "随机时间", "bool", SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true))
         add("ga", "手势识别", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
         add("bh", "返回桌面", "bool", SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false))
+        // 离散档位与控制端伪息屏延迟滑块共用，确保两端可选延迟值完全一致
+        // （非线性：时间越大档位间隔越大，缩短滑块行程），与被控端 showPseudoMaskDelayDialog 同源
+        val tmOptions = intArrayOf(
+            10, 15, 20, 25, 30, 35, 40, 45, 50,
+            60, 70, 80, 90, 100, 120, 150, 180,
+            240, 300, 420, 600, 900, 1200, 1800, 2700, 3600
+        )
+        val tmOptionsJson = JsonArray().apply { tmOptions.forEach { add(it) } }
         add("tm", "伪熄屏延迟（秒）", "int", SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600),
-            min = 10, max = 3600, step = 10)
+            min = 10, max = 3600, step = 10, options = tmOptionsJson)
         add("rh", "每日重置", "int", SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, 0).coerceIn(0, 23),
             min = 0, max = 23, step = 1)
         add("tr", "随机范围", "int", SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, 5).coerceIn(0, 60),

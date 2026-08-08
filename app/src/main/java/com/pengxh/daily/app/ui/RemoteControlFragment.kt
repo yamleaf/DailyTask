@@ -720,11 +720,11 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             ctx,
             scroll,
             title = "扫描绑定设备",
-            positiveText = "复制配对信息",
+            positiveText = "复制配对码",
             negativeText = "关闭",
             onConfirm = {
                 copyToClipboard(payloadJson)
-                "已复制配对信息到剪贴板".show(ctx)
+                "已复制配对码到剪贴板".show(ctx)
                 true
             }
         )
