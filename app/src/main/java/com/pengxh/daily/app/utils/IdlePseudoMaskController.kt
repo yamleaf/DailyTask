@@ -190,8 +190,9 @@ object IdlePseudoMaskController {
     fun onForcePseudoMaskDisabled() {
         enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
+        mainHandler.removeCallbacks(foregroundIdleRunnable)
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
-        LogFileManager.writeLog("强制伪息屏已关闭，取消后台保亮与倒计时")
+        LogFileManager.writeLog("强制伪息屏已关闭，取消后台保亮与倒计时、前台无操作计时")
     }
 
     fun cancel() {
@@ -201,24 +202,27 @@ object IdlePseudoMaskController {
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
     }
 
-    // ═══════════════════════ 前台「无操作」自动进入伪息屏 ═══════════════════════
+    // ═══════════════════════ 前台「无操作」自动进入伪熄屏 ═══════════════════════
     // 由 lite 模块 KotlinBaseActivity 经 ForegroundIdleBridge 在 DailyTaskApplication.onCreate
     // 接线：统一驱动任务页 / 远程页 / 设置页等所有前台页面的无操作计时，
-    // 复用「伪息屏增强」延时配置。前台无操作息屏为独立机制：常驻、不受「强制伪息屏」开关控制，
-    // 无论开关开否，只要 App 在前台无操作超过延时即自动进伪息屏（进入方式与后台路径一致）。
+    // 复用「伪熄屏增强」延时配置。前台无操作息屏受「伪熄屏」总开关控制：
+    // 开关开启时，App 在前台无操作超过延时即自动进伪熄屏（进入方式与后台路径一致）；
+    // 开关关闭时，前台无操作不再自动进伪熄屏。
 
     private var idleMaskContext: Context? = null
 
     private val foregroundIdleRunnable: Runnable = Runnable {
         val context = idleMaskContext ?: return@Runnable
+        if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
         if (appInBackground) return@Runnable
         if (TaskScheduler.isInActivePunch()) return@Runnable
         if (MaskOverlayHelper.isShowing()) return@Runnable
-        LogFileManager.writeLog("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪息屏")
+        LogFileManager.writeLog("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪熄屏")
         MaskOverlayHelper.show(context)
     }
 
     fun startIdleMask(context: Context) {
+        if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (MaskOverlayHelper.isShowing()) return
         idleMaskContext = context
         mainHandler.removeCallbacks(foregroundIdleRunnable)

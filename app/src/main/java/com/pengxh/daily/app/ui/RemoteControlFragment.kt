@@ -1032,7 +1032,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
 
     // ═══════════════════════ 公共 MQTT / 引导 ═══════════════════════
 
-    /** 应用临时公共 MQTT 配置：填 broker + 随机账号密码，重启服务并标记使用来源 */
+    /** 应用公共 MQTT（临时使用）配置：填 broker + 随机账号密码，重启服务并标记使用来源 */
     private fun applyPublicMqttConfig() {
         val deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "").ifBlank {
             UUID.randomUUID().toString().take(8).also { SaveKeyValues.saveString(Constant.DEVICE_ID_KEY, it) }
@@ -1050,10 +1050,10 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         reloadSettingsUI()
         restartMqttService()
-        "已配置临时公共 MQTT，正在连接…（请及时生成二维码完成绑定）".show(ctx)
+        "已配置公共 MQTT（临时使用），正在连接…（请及时生成二维码完成绑定）".show(ctx)
     }
 
-    /** 临时公共 MQTT（测试用）弹窗：信息卡 + 警告 + 建议（可点跳转配置引导） */
+    /** 公共 MQTT（临时使用）弹窗：信息卡 + 警告 + 建议（可点跳转配置引导） */
     private fun showPublicMqttDialog() {
         val dip = { px: Int -> TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, px.toFloat(), resources.displayMetrics).toInt() }
         val cInk = ContextCompat.getColor(ctx, R.color.md_onSurface)       // #1f2329
@@ -1123,7 +1123,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 addView(container)
                 setPadding(dip(20), dip(8), dip(20), dip(8))
             },
-            title = "临时公共 MQTT（测试用）",
+            title = "公共MQTT（临时使用）",
             positiveText = "一键配置",
             negativeText = "取消",
             onConfirm = {

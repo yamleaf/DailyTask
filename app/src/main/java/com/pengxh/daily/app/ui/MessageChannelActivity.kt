@@ -65,7 +65,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
     override fun initEvent() {
         binding.sendWxButton.setOnClickListener {
             if (SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)) {
-                "已关闭反馈通知，无法发送测试消息".show(this)
+                "已开启静默通知，无法发送测试消息".show(this)
                 return@setOnClickListener
             }
             val key = binding.wxKeyView.text.toString()
@@ -92,7 +92,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
 
         binding.sendEmailButton.setOnClickListener {
             if (SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)) {
-                "已关闭反馈通知，无法发送测试邮件".show(context)
+                "已开启静默通知，无法发送测试邮件".show(context)
                 return@setOnClickListener
             }
             val address = binding.emailSendAddressView.text.toString()
@@ -143,7 +143,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
         binding.feedbackNotifySwitch.setOnCheckedChangeListener { _, isChecked ->
             SaveKeyValues.saveBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, isChecked)
             if (isChecked) {
-                "已开启关闭反馈通知，将不再发送邮件/企业微信消息".show(this)
+                "已开启静默通知，将不再发送邮件/企业微信消息".show(this)
             }
             ConfigImportSignal.notifyRemoteChanged(context)
         }

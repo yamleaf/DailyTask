@@ -3,6 +3,7 @@ package com.pengxh.daily.app.ui
 import android.app.Activity
 import android.app.Dialog
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -39,8 +40,8 @@ import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.DialogSliderBinding
 import com.pengxh.daily.app.databinding.FragmentSettingsBinding
+import com.pengxh.daily.app.extensions.isApplicationExist
 import com.pengxh.daily.app.extensions.notificationEnable
-import com.pengxh.daily.app.extensions.openApplication
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
@@ -422,13 +423,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                         val cfg = com.pengxh.daily.app.utils.ConfigStore.get().load("emailConfig")
                         val inbox = cfg?.get("inbox")?.asString ?: ""
                         if (inbox.isBlank() || com.pengxh.daily.app.utils.EmailSecureConfig.loadAuthCode().isBlank()) {
-                            "通知转移依赖邮箱配置，请先完善邮箱与授权码".show(ctx)
+                            "通知转发依赖邮箱配置，请先完善邮箱与授权码".show(ctx)
                         }
                     }
 
                     1 -> {
                         if (SaveKeyValues.loadString(Constant.WX_WEB_HOOK_KEY, "").isBlank()) {
-                            "通知转移依赖企业微信配置，请先填写企业微信 Webhook".show(ctx)
+                            "通知转发依赖企业微信配置，请先填写企业微信 Webhook".show(ctx)
                         }
                     }
 
@@ -436,9 +437,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 }
             }
             ConfigImportSignal.notifyRemoteChanged(ctx)
-        }
-        binding.openTestLayout.setOnClickListener {
-            ctx.openApplication()
         }
         binding.chainStartRow.setOnClickListener { checkChainStartPermission() }
         // 电量预警分组
@@ -517,8 +515,28 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
         binding.gestureDetectSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
-            SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, checked)
-            ConfigImportSignal.notifyRemoteChanged(ctx)
+            if (!checked) {
+                SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, false)
+                ConfigImportSignal.notifyRemoteChanged(ctx)
+            } else {
+                UnifiedDialogKit.showWarning(
+                    ctx,
+                    "开启手势识别？",
+                    "开启后，双指在屏幕上滑动可开启/关闭伪熄屏：双指下滑开启伪熄屏，双指上滑关闭。\n\n" +
+                        "单指滑动不受影响，可正常操作本软件。",
+                    confirmText = "确认开启",
+                    cancelable = false,
+                    onCancel = {
+                        syncingSwitchState = true
+                        binding.gestureDetectSwitch.isChecked = false
+                        syncingSwitchState = false
+                    },
+                    onConfirm = {
+                        SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, true)
+                        ConfigImportSignal.notifyRemoteChanged(ctx)
+                    }
+                )
+            }
         }
         binding.backToHomeSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
@@ -533,7 +551,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         // 强制伪息屏主开关 + 分组开关（联动 + 确认弹窗）
         val applyForceMask = { enabled: Boolean ->
             AppRuntimeConfig.setForcePseudoMask(enabled)
-            if (enabled) "强制伪息屏已开启".show(ctx)
+            if (enabled) "伪熄屏已开启".show(ctx)
             syncingSwitchState = true
             binding.forcePseudoMaskSwitch.isChecked = enabled
             binding.pseudoMaskGroupSwitch.isChecked = enabled
@@ -546,8 +564,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             } else {
                 UnifiedDialogKit.showWarning(
                     ctx,
-                    "开启强制伪息屏？",
-                    "离开本软件超过设定时间（默认 60 秒）后将自动进入伪息屏模式。\n\n" +
+                    "开启伪熄屏？",
+                    "离开本软件超过设定时间（默认 60 秒）后，以及在本软件前台无操作超过设定时间，都将自动进入伪熄屏模式。\n\n" +
                         "⚠ 可能打断其他 App 使用；适合无人值守挂机，白天操作手机建议关闭。",
                     confirmText = "确认开启",
                     cancelable = false,
@@ -759,8 +777,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
      * Android 12+（API 31+）引入了 START_ACTIVITIES_FROM_BACKGROUND 权限限制后台启动 Activity。
      * 国产 ROM（MIUI/ColorOS/EMUI 等）还有额外的「链式启动/关联启动」系统级开关，无标准 API 可查。
      *
-     * 点击此行：先检测 API 31+ 权限，再弹引导对话框，提供「去系统设置」入口。
-     * 不自动拉起目标应用，避免打断当前界面。
+     * 点击此行：先检测 API 31+ 权限，再弹引导对话框，提供「尝试启动」按钮直接拉起目标应用验证；
+     * 拉起失败时再引导去系统设置授权。
      */
     private fun checkChainStartPermission() {
         val targetApp = Constant.getTargetApp()
@@ -801,28 +819,80 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.chainStartTipsView.text = tipText
         binding.chainStartTipsView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
 
-        // 已授权：直接提示，不再弹窗打断
+        // 已授权：直接尝试拉起一次，验证可正常启动
         if (granted) {
-            "链式启动权限已授权，可正常拉起打卡应用".show(ctx)
+            tryStartTargetApp()
             return
         }
 
-        // 待授权 / 旧系统：弹引导对话框，点击后直达本应用（DailyTask）的应用详情/权限设置页
+        // 待授权 / 旧系统：弹引导对话框，提供「尝试启动」验证；失败时再引导前往设置
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = TextView(ctx).apply {
                 text = "链式启动权限用于本应用在后台拉起打卡应用（$targetApp）。\n\n" +
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                        "系统当前未授予「后台启动其它应用」权限。点击下方按钮，将直接打开本应用的权限设置页，开启「后台启动其它应用」即可。"
+                        "系统当前未授予「后台启动其它应用」权限，尝试启动可能被系统拦截。若启动失败，请前往系统设置开启「后台启动其它应用」。"
                     else
-                        "系统低于 Android 12 无此限制，但部分国产 ROM 仍需在「自启动 / 关联启动」中允许本应用。点击下方按钮直达设置。\n\n当前状态：$statusText"
+                        "系统低于 Android 12 无此限制，但部分国产 ROM 仍需在「自启动 / 关联启动」中允许本应用。\n\n当前状态：$statusText"
                 setPadding(24, 16, 24, 16)
             },
             title = "链式启动权限",
+            positiveText = "尝试启动",
+            negativeText = "知道了",
+            onConfirm = {
+                tryStartTargetApp()
+                true
+            }
+        )
+    }
+
+    /** 尝试拉起目标打卡应用（链式启动验证）；失败时提示并引导前往系统设置 */
+    private fun tryStartTargetApp() {
+        val targetApp = Constant.getTargetApp()
+        if (targetApp.isBlank()) {
+            "请先选择目标打卡应用".show(ctx)
+            return
+        }
+        if (!ctx.isApplicationExist(targetApp)) {
+            "未安装目标应用：$targetApp".show(ctx)
+            return
+        }
+        val intent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            setPackage(targetApp)
+        }
+        val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ctx.packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+        } else {
+            ctx.packageManager.queryIntentActivities(intent, 0)
+        }
+        if (activities.isEmpty()) {
+            openChainStartFailDialog("未找到目标应用的启动入口（包名：$targetApp）")
+            return
+        }
+        val info = activities.first()
+        intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+        try {
+            ctx.startActivity(intent)
+            "已尝试启动 $targetApp，请确认是否成功打开".show(ctx)
+        } catch (e: Exception) {
+            openChainStartFailDialog("启动失败：${e.message}")
+        }
+    }
+
+    /** 链式启动尝试失败提示：说明原因并提供「前往设置」入口 */
+    private fun openChainStartFailDialog(message: String) {
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = TextView(ctx).apply {
+                text = "$message\n\n可能被系统限制后台启动。请前往本应用的系统权限页，开启「后台启动其它应用」（国产 ROM 另需允许「链式启动/关联启动」）。"
+                setPadding(24, 16, 24, 16)
+            },
+            title = "启动失败",
             positiveText = "前往设置",
             negativeText = "知道了",
             onConfirm = {
-                // 权限属于本应用（DailyTask），应打开本应用的详情/权限设置页，而非目标应用
                 openAppDetailSettings(ctx.packageName)
                 true
             }

@@ -22,6 +22,9 @@ class GestureController(
 
     private val minFlingDistance = 1000f
 
+    /** 当前手势序列中同时落下的最大手指数（ACTION_DOWN 时重置，用于双指判定） */
+    private var gesturePointerCount = 0
+
     private val gestureDetector: GestureDetector
 
     init {
@@ -31,9 +34,18 @@ class GestureController(
     /**
      * 处理触摸事件
      *
+     * 仅识别双指手势：始终把完整事件序列交给手势识别器（否则其无法感知 ACTION_DOWN，
+     * onFling 的 e1 为 null），但仅在本次手势同时落下的手指数 ≥ 2 时才触发伪熄屏。
+     * 单指滑动交给 App 自身滚动/点击逻辑处理，不触发伪熄屏。
+     *
      * @param event 触摸事件
      */
     fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> gesturePointerCount = 1
+            MotionEvent.ACTION_POINTER_DOWN -> gesturePointerCount = maxOf(gesturePointerCount, event.pointerCount)
+            else -> gesturePointerCount = maxOf(gesturePointerCount, event.pointerCount)
+        }
         return gestureDetector.onTouchEvent(event)
     }
 
@@ -48,6 +60,10 @@ class GestureController(
                 SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
             // 如果手势未启用，则不处理
             if (!isGestureEnabled) {
+                return false
+            }
+            // 仅双指手势触发伪熄屏
+            if (gesturePointerCount < 2) {
                 return false
             }
 

@@ -91,6 +91,7 @@ object RemoteSnapshot {
     // ===================== 设备信息 =====================
     private fun buildDevice(context: Context): JsonObject {
         val o = JsonObject()
+        o.addProperty("protoVer", com.yample.mqttprotocol.Protocol.PROTO_VER)
         o.addProperty("deviceId", SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "default"))
         o.addProperty("model", Build.MODEL)
         o.addProperty("brand", Build.BRAND)
@@ -118,6 +119,7 @@ object RemoteSnapshot {
         o.addProperty("forcePseudoMask", AppRuntimeConfig.isForcePseudoMask())
         o.addProperty("wifi", wifiStatus(context))
         o.addProperty("bluetooth", bluetoothStatus(context))
+        o.addProperty("screenState", screenStateText(context))
         o.addProperty("currentTime", dtf.format(LocalDateTime.now()))
         o.addProperty("nextReset", nextResetDesc())
         o.addProperty("nextResetSeconds", TaskScheduler.secondsUntilNextReset())
@@ -268,17 +270,17 @@ object RemoteSnapshot {
             if (step != null) o.addProperty("step", step)
             arr.add(o)
         }
-        add("ps", "省电模式", "bool", AppRuntimeConfig.isPowerSaveMode())
-        add("pm", "强制伪息屏", "bool", AppRuntimeConfig.isForcePseudoMask())
-        add("nc", "伪息屏隐藏时钟", "bool", SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false))
-        add("nt", "通知转移", "bool", SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false))
-        add("fd", "关闭反馈通知", "bool", SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false))
-        add("sh", "跳过节假日", "bool", SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true))
+        add("ps", "节能模式", "bool", AppRuntimeConfig.isPowerSaveMode())
+        add("pm", "伪熄屏", "bool", AppRuntimeConfig.isForcePseudoMask())
+        add("nc", "隐藏息屏时钟", "bool", SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false))
+        add("nt", "通知转发", "bool", SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false))
+        add("fd", "静默通知", "bool", SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false))
+        add("sh", "假日跳过", "bool", SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true))
         add("ar", "任务每日自动循环", "bool", SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true))
         add("rt", "随机时间", "bool", SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true))
-        add("ga", "手势检测", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
+        add("ga", "手势识别", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
         add("bh", "返回桌面", "bool", SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false))
-        add("tm", "伪息屏延时", "int", SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600),
+        add("tm", "伪熄屏延迟（秒）", "int", SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600),
             min = 10, max = 3600, step = 10)
         add("rh", "每日重置", "int", SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, 0).coerceIn(0, 23),
             min = 0, max = 23, step = 1)
@@ -286,19 +288,19 @@ object RemoteSnapshot {
             min = 0, max = 60, step = 1)
         add("ot", "超时时间", "int", SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, 30).coerceIn(0, 120),
             min = 0, max = 120, step = 1)
-        add("lb", "低电量告警阈值", "int", SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80),
+        add("lb", "低电量阈值（%）", "int", SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80),
             min = 10, max = 80, step = 1)
-        add("ba", "智能预警", "bool", SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false))
-        add("bw", "智能预警时间", "int", SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23),
+        add("ba", "电量智能提醒", "bool", SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false))
+        add("bw", "智能提醒时间", "int", SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23),
             min = 0, max = 23, step = 1)
-        add("bs", "低电量告警次数", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3),
+        add("bs", "低电量提醒次数", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3),
             min = 0, max = 3, step = 1)
-        add("br", "预警检测区间起始", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23),
+        add("br", "检测开始时间", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23),
             min = 0, max = 23, step = 1)
-        add("bd", "预警检测区间时长", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION).coerceIn(1, 24),
+        add("bd", "检测时长（小时）", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION).coerceIn(1, 24),
             min = 1, max = 24, step = 1)
         // 消息渠道 + 远程控制开关（镜像到控制端，允许控制端查看与修改）
-        add("re", "远程控制服务", "bool", SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
+        add("re", "远程控制", "bool", SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
         add("mc", "消息渠道", "int", SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, 0).coerceIn(0, 1))
         add("mt", "消息标题", "string", SaveKeyValues.loadString(Constant.MESSAGE_TITLE_KEY, "打卡结果通知"))
         val emailObj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
@@ -330,13 +332,13 @@ object RemoteSnapshot {
             else if (NotificationMonitorService.isListenerConnected()) "正常"
             else "已授权但断开"
         )
-        add("capture", "截屏服务", if (ProjectionSession.isStateActive()) "已开启" else "未开启")
+        add("capture", "截图权限", if (ProjectionSession.isStateActive()) "已开启" else "未开启")
         add(
-            "accessibility", "无障碍服务",
+            "accessibility", "无障碍权限",
             if (AutoProjectionAccessibilityService.isEnabled(context)) "已开启" else "未开启"
         )
         val src = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX)
-        add("resultSource", "结果来源", if (src == 1) "截屏" else if (src == 2) "无障碍" else "通知")
+        add("resultSource", "结果来源", if (src == 1) "截图" else if (src == 2) "无障碍" else "通知")
         return arr
     }
 
@@ -471,6 +473,26 @@ object RemoteSnapshot {
                 android.bluetooth.BluetoothAdapter.getDefaultAdapter()
             }
             if (adapter == null) "不支持" else if (adapter.isEnabled) "已开启" else "未开启"
+        } catch (_: Exception) {
+            "未知"
+        }
+    }
+
+    /** 手机屏幕状态：伪息屏 > 锁屏 > 亮屏，供控制端设备页展示 */
+    private fun screenStateText(context: Context): String {
+        return try {
+            when {
+                MaskOverlayHelper.isShowing() -> "伪息屏"
+                else -> {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+                    val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                    when {
+                        pm?.isInteractive == false -> "锁屏（灭屏）"
+                        km?.isKeyguardLocked == true -> "锁屏"
+                        else -> "亮屏"
+                    }
+                }
+            }
         } catch (_: Exception) {
             "未知"
         }

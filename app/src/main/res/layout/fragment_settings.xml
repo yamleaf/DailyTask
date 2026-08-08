@@ -485,7 +485,7 @@
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="通知转移"
+                                android:text="通知转发"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                 android:textColor="@color/md_onSurface" />
 
@@ -571,13 +571,13 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 次级权限（可选） -->
+            <!-- 功能权限（可选） -->
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/dp_4"
                 android:layout_marginBottom="@dimen/dp_4"
-                android:text="次级权限"
+                android:text="功能权限"
                 android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
                 android:textColor="@color/md_primary" />
 
@@ -796,7 +796,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="@dimen/dp_2"
                                 android:singleLine="true"
-                                android:text="智能预警 + 低电量分段告警"
+                                android:text="电量智能提醒 + 低电量分段告警"
                                 android:textSize="@dimen/sp_10" />
                         </LinearLayout>
 
@@ -850,7 +850,7 @@
                                 <com.google.android.material.textview.MaterialTextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="智能预警"
+                                    android:text="电量智能提醒"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textColor="@color/md_onSurface" />
 
@@ -1481,40 +1481,6 @@
                             android:layout_marginStart="@dimen/dp_12"
                             android:layout_weight="1"
                             android:text="@string/settings_all_commands"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <ImageView 
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/md_outlineVariant" />
-
-                    <LinearLayout
-                        android:id="@+id/openTestLayout"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <ImageView 
-                            android:layout_width="@dimen/size_28"
-                            android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_custom_app" android:contentDescription="@null" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_12"
-                            android:layout_weight="1"
-                            android:text="@string/settings_open_test"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                             android:textColor="@color/md_onSurface" />
 
