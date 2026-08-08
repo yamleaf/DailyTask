@@ -796,7 +796,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="@dimen/dp_2"
                                 android:singleLine="true"
-                                android:text="智能预警上报 + 低电量分段告警"
+                                android:text="智能预警 + 低电量分段告警"
                                 android:textSize="@dimen/sp_10" />
                         </LinearLayout>
 
@@ -850,7 +850,7 @@
                                 <com.google.android.material.textview.MaterialTextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="智能预警上报"
+                                    android:text="智能预警"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textColor="@color/md_onSurface" />
 
@@ -859,7 +859,7 @@
                                     android:layout_height="wrap_content"
                                     android:layout_marginTop="@dimen/dp_2"
                                     android:maxLines="3"
-                                    android:text="预测电量降至临界线时间，夜间前提前预警，避免睡眠期间低电量关机"
+                                    android:text="预测夜间低电量耗尽时间，在设定时间前提前预警，避免睡眠期间低电量关机"
                                     android:textSize="@dimen/sp_10" />
                             </LinearLayout>
 
@@ -984,7 +984,7 @@
                                 android:id="@+id/batteryAlertRangeValue"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="20:00~08:00"
+                                android:text="20:00起 · 12小时"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                 android:textColor="@color/md_primary" />
 

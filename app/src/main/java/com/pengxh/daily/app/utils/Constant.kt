@@ -95,8 +95,8 @@ object Constant {
     const val BATTERY_SMART_ALERT_SENT_KEY = "BATTERY_SMART_ALERT_SENT_KEY"
     /** 预警检测区间起始小时（默认 20，即 20:00） */
     const val BATTERY_ALERT_DETECTION_START_KEY = "BATTERY_ALERT_DETECTION_START_KEY"
-    /** 预警检测区间结束小时（默认 8，即次日 8:00） */
-    const val BATTERY_ALERT_DETECTION_END_KEY = "BATTERY_ALERT_DETECTION_END_KEY"
+    /** 预警检测区间时长（小时 1~24，默认 12，结束时间 = 起始 + 时长） */
+    const val BATTERY_ALERT_DETECTION_DURATION_KEY = "BATTERY_ALERT_DETECTION_DURATION_KEY"
     /** 低电量告警最多段数（0-3，默认 3，0=不发送低电量告警） */
     const val BATTERY_ALERT_MAX_STAGES_KEY = "BATTERY_ALERT_MAX_STAGES_KEY"
     /** 三段式低电量告警已提醒标记：阈值→阈值-10→阈值-20 各触发一次，充电或阈值变更后清零 */
@@ -136,6 +136,7 @@ object Constant {
     const val DEFAULT_TIME_RANGE = 5
     const val DEFAULT_OVER_TIME = 30
     const val DEFAULT_LOW_BATTERY_THRESHOLD = 30
+    const val DEFAULT_BATTERY_ALERT_DURATION = 12
     const val CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID = 1001
     const val FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID = 1002
 

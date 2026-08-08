@@ -725,8 +725,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             val warningHour = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
             binding.batteryWarningTimeValue.text = "%02d:00".format(warningHour)
             val rangeStart = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)
-            val rangeEnd = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_END_KEY, 8).coerceIn(0, 23)
-            binding.batteryAlertRangeValue.text = "%02d:00~%02d:00".format(rangeStart, rangeEnd)
+            val rangeDuration = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION).coerceIn(1, 24)
+            binding.batteryAlertRangeValue.text = batteryAlertRangeText(rangeStart, rangeDuration)
             val threshold = SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80)
             binding.batteryThresholdValue.text = "${threshold}%"
             val maxStages = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3)
@@ -861,52 +861,116 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         )
     }
 
-    /** 预警检测区间选择器（起始~结束小时） */
+    /** 预警检测区间选择器（起始时间滑块 + 区间时长滑块，实时预览完整检测区间） */
     private fun showBatteryAlertRangePicker() {
         val start = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)
-        val end = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_END_KEY, 8).coerceIn(0, 23)
+        val duration = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION).coerceIn(1, 24)
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 16, 24, 16)
         }
-        val startPicker = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
-            val cal = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, start); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
-            }
-            setDefaultValue(com.github.gzuliyujiang.wheelpicker.entity.TimeEntity.target(cal.time))
+        val startLabel = android.widget.TextView(ctx).apply { text = "起始时间" }
+        val startValue = android.widget.TextView(ctx).apply {
+            text = "%02d:00".format(start)
+            setTextColor(R.color.md_primary.convertColor(ctx))
         }
-        container.addView(android.widget.TextView(ctx).apply { text = "区间起始" })
-        container.addView(startPicker)
-        val endPicker = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
-            val cal = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, end); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
-            }
-            setDefaultValue(com.github.gzuliyujiang.wheelpicker.entity.TimeEntity.target(cal.time))
+        val startSlider = com.google.android.material.slider.Slider(ctx).apply {
+            valueFrom = 0f; valueTo = 23f; stepSize = 1f; value = start.toFloat()
         }
-        container.addView(android.widget.TextView(ctx).apply { text = "区间结束（次日）"; setPadding(0, 16, 0, 0) })
-        container.addView(endPicker)
+        container.addView(startLabel)
+        container.addView(startSlider)
+        container.addView(startValue)
+
+        val durationLabel = android.widget.TextView(ctx).apply { text = "区间时长"; setPadding(0, 20, 0, 0) }
+        val durationValue = android.widget.TextView(ctx).apply {
+            text = "%d 小时".format(duration)
+            setTextColor(R.color.md_primary.convertColor(ctx))
+        }
+        val durationSlider = com.google.android.material.slider.Slider(ctx).apply {
+            valueFrom = 1f; valueTo = 24f; stepSize = 1f; value = duration.toFloat()
+        }
+        container.addView(durationLabel)
+        container.addView(durationSlider)
+        container.addView(durationValue)
+
+        val preview = android.widget.TextView(ctx).apply {
+            setPadding(0, 20, 0, 0)
+            setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
+            textSize = 13f
+        }
+        val updatePreview = {
+            val s = startSlider.value.toInt()
+            val d = durationSlider.value.toInt().coerceIn(1, 24)
+            startValue.text = "%02d:00".format(s)
+            durationValue.text = "%d 小时".format(d)
+            preview.text = "检测区间：${batteryAlertRangePreview(s, d)}"
+        }
+        startSlider.addOnChangeListener { _, _, _ -> updatePreview() }
+        durationSlider.addOnChangeListener { _, _, _ -> updatePreview() }
+        updatePreview()
+        container.addView(preview)
+
         UnifiedDialogKit.showForm(
             ctx = ctx, contentView = container, title = "预警检测区间",
             message = "预测耗尽时间落在此区间时才触发预警，避免白天频繁误报",
             positiveText = "确定", negativeText = "取消",
             onConfirm = {
-                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, startPicker.selectedHour)
-                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_END_KEY, endPicker.selectedHour)
-                binding.batteryAlertRangeValue.text = "%02d:00~%02d:00".format(startPicker.selectedHour, endPicker.selectedHour)
+                val s = startSlider.value.toInt().coerceIn(0, 23)
+                val d = durationSlider.value.toInt().coerceIn(1, 24)
+                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, s)
+                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, d)
+                binding.batteryAlertRangeValue.text = batteryAlertRangeText(s, d)
                 true
             }
         )
     }
 
-    /** 低电量告警阈值选择器（10~80%） */
+    /** 区间行展示文案：起始时间 + 时长 */
+    private fun batteryAlertRangeText(start: Int, duration: Int): String =
+        "%02d:00起 · %d小时".format(start, duration)
+
+    /** 弹窗预览文案：完整的检测时间区间（跨天自动标注次日） */
+    private fun batteryAlertRangePreview(start: Int, duration: Int): String {
+        val end = (start + duration) % 24
+        val nextDay = start + duration >= 24
+        return "%02d:00 至%s%02d:00".format(start, if (nextDay) "次日" else "", end)
+    }
+
+    /** 低电量告警阈值选择器（10~80%，实时展示当前值与三段分段边界） */
     private fun showBatteryThresholdPicker() {
         val current = SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80)
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 16, 24, 16)
+        }
+        val valueText = android.widget.TextView(ctx).apply {
+            text = "${current}%"
+            textSize = 28f
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setTextColor(R.color.md_primary.convertColor(ctx))
+        }
         val slider = com.google.android.material.slider.Slider(ctx).apply {
             valueFrom = 10f; valueTo = 80f; stepSize = 5f; value = current.toFloat()
         }
+        val stagePreview = android.widget.TextView(ctx).apply {
+            setPadding(0, 12, 0, 0)
+            setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
+            textSize = 13f
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+        }
+        val updatePreview = {
+            val v = slider.value.toInt().coerceIn(10, 80)
+            valueText.text = "${v}%"
+            stagePreview.text = "分段：$v% → ${(v * 2 / 3).coerceAtLeast(1)}% → ${(v * 1 / 3).coerceAtLeast(1)}%"
+        }
+        slider.addOnChangeListener { _, _, _ -> updatePreview() }
+        updatePreview()
+        container.addView(valueText)
+        container.addView(slider)
+        container.addView(stagePreview)
         UnifiedDialogKit.showForm(
-            ctx = ctx, contentView = slider, title = "低电量告警阈值",
-            message = "电量低于此值时触发三段式低电量告警（各段按比例划分，最低不低于 1%）",
+            ctx = ctx, contentView = container, title = "低电量告警阈值",
+            message = "电量低于阈值时按比例分段告警（实际段数受「低电量告警次数」控制）",
             positiveText = "确定", negativeText = "取消",
             onConfirm = {
                 val v = slider.value.toInt().coerceIn(10, 80)
@@ -921,26 +985,23 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         )
     }
 
-    /** 低电量告警次数选择器（0~3） */
+    /** 低电量告警次数选择器（0~3，四选项全部展示，无需滑动） */
     private fun showBatteryStageCountPicker() {
         val current = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3)
-        val options = listOf("0 - 关闭低电量告警", "1 - 仅第一段（阈值）", "2 - 前两段", "3 - 全三段")
-        val dialogView = android.widget.ListView(ctx).apply {
-            adapter = android.widget.ArrayAdapter(ctx, android.R.layout.simple_list_item_single_choice, options)
-            choiceMode = android.widget.AbsListView.CHOICE_MODE_SINGLE
-            setItemChecked(current, true)
-        }
-        UnifiedDialogKit.showForm(
-            ctx = ctx, contentView = dialogView, title = "低电量告警次数",
-            message = "选择低电量分段告警的段数（0=关闭，3=阈值→阈值-10→阈值-20 各告警一次）",
-            positiveText = "确定", negativeText = "取消",
-            onConfirm = {
-                val checked = dialogView.checkedItemPosition
-                if (checked >= 0) {
-                    SaveKeyValues.saveInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, checked)
-                    binding.batteryStageCountValue.text = "$checked"
-                }
-                true
+        val options = listOf(
+            "0 · 关闭低电量告警",
+            "1 · 仅阈值段（如 30%）",
+            "2 · 阈值 → 2/3 阈值（30% → 20%）",
+            "3 · 阈值 → 2/3 → 1/3（30% → 20% → 10%，推荐）"
+        )
+        UnifiedDialogKit.showSingleChoice(
+            ctx = ctx,
+            title = "低电量告警次数",
+            items = options,
+            selectedIndex = current,
+            onSelect = { index ->
+                SaveKeyValues.saveInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, index)
+                binding.batteryStageCountValue.text = "$index"
             }
         )
     }
