@@ -86,8 +86,6 @@ class ForegroundRunningService : Service() {
     private val batteryManager by lazy { getSystemService(BatteryManager::class.java) }
     /** 上一次检测时的充电状态，用于仅在「刚插入充电」的瞬间触发一次「开始充电」通知 */
     private var wasCharging = false
-    /** 电量智能预警上次检测时间（节流，每 10 分钟检查一次） */
-    private var lastBatteryAlertCheckMs = 0L
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val notificationManager by lazy { getSystemService(NotificationManager::class.java) }
@@ -380,19 +378,34 @@ class ForegroundRunningService : Service() {
     }
 
     /**
-     * 电量智能预警检查（每 10 分钟节流）。
+     * 电量智能预警检查（仅在预警时间点 ±5 分钟内运行，避免提前发送）。
      *
      * 根据 BatteryPredictor 预测电量降至低电量阈值的时间，若落在检测区间内，
      * 则在预警时间前发送预警，防止用户睡眠期间低电量关机。
+     * 仅在预警时间点 ±5 分钟窗口内发送，确保只在预警时间点推送邮件。
      */
     private fun checkBatterySmartAlert() {
         try {
             if (!SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)) return
 
-            // 节流：每 10 分钟检查一次
-            val now = System.currentTimeMillis()
-            if (now - lastBatteryAlertCheckMs < 10 * 60 * 1000L) return
-            lastBatteryAlertCheckMs = now
+            // 仅在预警时间点 ±5 分钟窗口内检查
+            val warningHour = SaveKeyValues.loadInt(
+                Constant.BATTERY_WARNING_HOUR_KEY,
+                20
+            ).coerceIn(0, 23)
+            val cal = Calendar.getInstance()
+            val now = cal.timeInMillis
+            cal.set(Calendar.HOUR_OF_DAY, warningHour)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            val warningTimeMs = cal.timeInMillis
+            val windowMs = 5 * 60 * 1000L // ±5 分钟
+            if (now !in (warningTimeMs - windowMs)..(warningTimeMs + windowMs)) return
+
+            // 节流：每天只检查一次
+            val todayKey = "battery_alert_sent_${now / 86400000}"
+            if (SaveKeyValues.loadBoolean(todayKey, false)) return
 
             val result = BatteryPredictor.checkAlert(this)
             if (!result.shouldAlert) return
