@@ -875,7 +875,25 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
         try {
             ctx.startActivity(intent)
-            "已尝试启动 $targetApp，请确认是否成功打开".show(ctx)
+            "已尝试启动 $targetApp，3 秒后自动返回当前应用".show(ctx)
+            // 成功拉起目标应用后，3s 自动返回当前应用，作为链式启动权限生效的验证
+            lifecycleScope.launch {
+                delay(3000)
+                if (!isAdded) return@launch
+                try {
+                    val back = Intent(ctx, MainActivity::class.java).apply {
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        )
+                    }
+                    ctx.startActivity(back)
+                    "链式启动权限已生效，已自动返回当前应用".show(ctx)
+                } catch (e: Exception) {
+                    "自动返回当前应用失败：${e.message}".show(ctx)
+                }
+            }
         } catch (e: Exception) {
             openChainStartFailDialog("启动失败：${e.message}")
         }

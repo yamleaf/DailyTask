@@ -660,10 +660,9 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     private fun showQRDialog(bitmap: Bitmap, payloadJson: String) {
         val ctlUser = SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "")
         val ctlPass = SaveKeyValues.loadString(Constant.MQTT_CTL_PASS_KEY, "")
-        val scroll = ScrollView(ctx).apply { setPadding(40, 24, 40, 24) }
-        val container = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-        }
+        val dip = { px: Int -> TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, px.toFloat(), resources.displayMetrics).toInt() }
+        val container = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+
         val iv = ImageView(ctx).apply {
             setImageBitmap(bitmap)
             adjustViewBounds = true
@@ -674,7 +673,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             text = "用控制端 App 扫描二维码完成绑定，令牌 2 分钟有效。\n\n控制端凭证（EMQX 中建同名账户）："
             setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
             textSize = 13f
-            setPadding(0, 14, 0, 0)
+            setPadding(0, dip(14), 0, 0)
         }
         container.addView(note)
 
@@ -682,6 +681,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             text = "用户名：$ctlUser"
             setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
             textSize = 13f
+            setPadding(0, dip(4), 0, 0)
         }
         container.addView(userLine)
 
@@ -696,7 +696,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             setTextColor(ContextCompat.getColor(ctx, R.color.md_primary))
             textSize = 13f
             setTypeface(null, Typeface.BOLD)
-            setPadding(20, 0, 0, 0)
+            setPadding(dip(20), 0, 0, 0)
             setOnClickListener {
                 val showing = passLine.text.toString().startsWith("密码：$ctlPass")
                 passLine.text = if (showing) "密码：••••••••" else "密码：$ctlPass"
@@ -705,22 +705,29 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         val passRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 4, 0, 0)
+            setPadding(0, dip(4), 0, 0)
             addView(passLine)
             addView(toggle)
         }
         container.addView(passRow)
-        scroll.addView(container)
 
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle("扫描绑定设备")
-            .setView(scroll)
-            .setNeutralButton("复制配对信息") { _, _ ->
+        val scroll = ScrollView(ctx).apply {
+            addView(container)
+            setPadding(dip(20), dip(8), dip(20), dip(8))
+        }
+
+        UnifiedDialogKit.showForm(
+            ctx,
+            scroll,
+            title = "扫描绑定设备",
+            positiveText = "复制配对信息",
+            negativeText = "关闭",
+            onConfirm = {
                 copyToClipboard(payloadJson)
                 "已复制配对信息到剪贴板".show(ctx)
+                true
             }
-            .setPositiveButton("关闭", null)
-            .show()
+        )
     }
 
     /** 强制解绑：确认后清绑定态，保留 MQTT 配置 */
