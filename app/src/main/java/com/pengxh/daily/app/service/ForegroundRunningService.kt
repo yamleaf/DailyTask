@@ -382,7 +382,7 @@ class ForegroundRunningService : Service() {
     /**
      * 电量智能预警检查（每 10 分钟节流）。
      *
-     * 根据 BatteryPredictor 预测电量降至 30% 的时间，若落在预警时间（默认 20:00）之后，
+     * 根据 BatteryPredictor 预测电量降至低电量阈值的时间，若落在检测区间内，
      * 则在预警时间前发送预警，防止用户睡眠期间低电量关机。
      */
     private fun checkBatterySmartAlert() {
@@ -401,10 +401,10 @@ class ForegroundRunningService : Service() {
             val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             val targetTimeText = BatteryPredictor.formatTime(pred.targetTimeMs)
 
-            LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 30%（当前 ${battery}%），在 ${result.warningHour}:00 前提醒")
+            LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${result.warningHour}:00 前提醒")
             MessageDispatcher.sendMessage(
                 "电量智能预警",
-                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningHour),
+                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningHour, result.threshold),
                 force = true,
                 appendMeta = false
             )

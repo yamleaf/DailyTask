@@ -837,6 +837,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     /** 电量智能预警时间选择器 */
     private fun showBatteryWarningTimePicker() {
         val current = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
+        val threshold = SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80)
         val dialogView = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
             val cal = java.util.Calendar.getInstance().apply {
                 set(java.util.Calendar.HOUR_OF_DAY, current)
@@ -849,7 +850,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx = ctx,
             contentView = dialogView,
             title = "最晚预警时间",
-            message = "若预测电量在此时之后降至 30% 以下，将在此时前发送预警，避免夜间低电量关机",
+            message = "若预测电量在此时之后降至 $threshold% 以下，将在此时前发送预警，避免夜间低电量关机",
             positiveText = "确定",
             negativeText = "取消",
             onConfirm = {

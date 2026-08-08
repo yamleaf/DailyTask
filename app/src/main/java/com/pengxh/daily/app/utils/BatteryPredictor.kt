@@ -7,7 +7,7 @@ import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 /**
- * 电量智能预警：根据电池消耗速度预测电量降至 30% 的时间。
+ * 电量智能预警：根据电池消耗速度预测电量降至低电量阈值（默认 30%）的时间。
  *
  * 消耗速度计算：
  * - 从 BatteryHistory CSV 中读取最近 30 分钟 ~ 4 小时的放电段
@@ -16,12 +16,11 @@ import java.util.concurrent.TimeUnit
  *
  * 预警逻辑：
  * - 用户配置最晚预警时间（默认 20:00）
- * - 若预测电量降至 30% 的时间落在 20:00~次日 8:00 之间，
- *   则在 20:00 前发出预警，防止用户睡眠期间手机低电量关机
+ * - 若预测电量降至阈值的时间落在检测区间内（默认 20:00~次日 8:00），
+ *   则在预警时间前发出预警，防止用户睡眠期间手机低电量关机
  */
 object BatteryPredictor {
 
-    private const val TARGET_LEVEL = 30
     private const val DEFAULT_WARNING_HOUR = 20
     private const val MIN_SAMPLES = 3
     private const val MIN_WINDOW_MIN = 30L   // 最短统计窗口（30 分钟）
@@ -30,8 +29,8 @@ object BatteryPredictor {
     /** 预测结果 */
     data class Prediction(
         val ratePerHour: Float,         // 每小时掉电百分比
-        val minutesToTarget: Long,      // 预计到达 30% 的分钟数
-        val targetTimeMs: Long,         // 预计到达 30% 的时间戳
+        val minutesToTarget: Long,      // 预计到达阈值水平的分钟数
+        val targetTimeMs: Long,         // 预计到达阈值水平的时间戳
         val sampleCount: Int,           // 参与计算的样本数
         val isCharging: Boolean         // 当前是否充电中
     )
@@ -41,6 +40,7 @@ object BatteryPredictor {
         val shouldAlert: Boolean,       // 是否需要在 warningHour 前预警
         val prediction: Prediction?,    // 预测详情
         val warningHour: Int,           // 用户配置的预警时间
+        val threshold: Int,             // 当前低电量告警阈值（预测目标）
         val reason: String              // 原因说明
     )
 
@@ -108,11 +108,14 @@ object BatteryPredictor {
      *
      * 条件：
      * 1. 有可用的预测数据
-     * 2. 预测到达 30% 的时间在 warningHour:00 ~ 次日 8:00 之间
-     * 3. 当前时间在 warningHour 之前
+     * 2. 预测到达阈值的时间在检测区间内
+     * 3. 当前时间在预警时间之前
      * 4. 本次预警尚未发送过（避免重复推送）
      */
     fun checkAlert(ctx: Context): AlertCheck {
+        val threshold = SaveKeyValues.loadInt(
+            Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
+        ).coerceIn(10, 80)
         val warningHour = SaveKeyValues.loadInt(
             Constant.BATTERY_WARNING_HOUR_KEY,
             DEFAULT_WARNING_HOUR
@@ -126,12 +129,12 @@ object BatteryPredictor {
         val rangeEnd = (rangeStart + rangeDuration) % 24
         val rangeEndNextDay = rangeStart + rangeDuration >= 24
 
-        val prediction = predict(ctx) ?: return AlertCheck(
-            false, null, warningHour, "数据不足或充电中，无法预测"
+        val prediction = predict(ctx, threshold) ?: return AlertCheck(
+            false, null, warningHour, threshold, "数据不足或充电中，无法预测"
         )
 
         if (prediction.isCharging) return AlertCheck(
-            false, prediction, warningHour, "充电中，无需预警"
+            false, prediction, warningHour, threshold, "充电中，无需预警"
         )
 
         val cal = Calendar.getInstance()
@@ -172,7 +175,7 @@ object BatteryPredictor {
             todayEndMs = cal.timeInMillis
         }
 
-        // 判断预测到达 30% 的时间是否在检测区间内
+        // 判断预测到达阈值水平的时间是否在检测区间内
         val targetInDangerZone = prediction.targetTimeMs in todayStartMs..todayEndMs
 
         // 当前时间在预警时间之前
@@ -186,12 +189,12 @@ object BatteryPredictor {
 
         val reason = when {
             alreadySent -> "今日已预警过，跳过重复推送"
-            !targetInDangerZone -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 30%，不在检测区间内"
+            !targetInDangerZone -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 $threshold%，不在检测区间内"
             !nowBeforeWarning -> "已过 ${warningHour}:00，无法在预警前推送"
-            else -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 30%，需在 ${warningHour}:00 前预警"
+            else -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 $threshold%，需在 ${warningHour}:00 前预警"
         }
 
-        return AlertCheck(shouldAlert, prediction, warningHour, reason)
+        return AlertCheck(shouldAlert, prediction, warningHour, threshold, reason)
     }
 
     /**
