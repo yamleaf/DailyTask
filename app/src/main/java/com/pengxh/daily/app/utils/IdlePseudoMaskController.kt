@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -306,31 +305,30 @@ object IdlePseudoMaskController {
             val view = View(appCtx).apply {
                 setBackgroundColor(Color.TRANSPARENT)
             }
+            // 极小 1x1dp 透明窗口保亮：FLAG_KEEP_SCREEN_ON 是窗口级属性，窗口可见即保亮，无需全屏。
+            // 原全屏 MATCH_PARENT overlay 在安卓12 覆盖含手势导航区的整屏后（即使带 FLAG_NOT_TOUCHABLE）
+            // 实测吞掉桌面/系统输入 → 「退到桌面即锁死」（关闭悬浮窗权限即恢复，已实锤）。
+            // 改 1x1dp 后不再覆盖任何交互区域，锁死根除，保亮/不锁屏行为不变。
+            val size = (1 * appCtx.resources.displayMetrics.density).toInt().coerceAtLeast(1)
             val flags = (WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                     or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                size,
+                size,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 flags,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                width = WindowManager.LayoutParams.MATCH_PARENT
-                height = WindowManager.LayoutParams.MATCH_PARENT
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    layoutInDisplayCutoutMode =
-                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                }
+                x = 0
+                y = 0
             }
             try {
                 windowManager.addView(view, params)
                 keepAwakeView = view
-                LogFileManager.writeLog("透明保亮层已开启")
+                LogFileManager.writeLog("透明保亮层已开启（1x1dp）")
             } catch (e: Exception) {
                 LogFileManager.writeLog("透明保亮层失败: ${e.message}")
             }
