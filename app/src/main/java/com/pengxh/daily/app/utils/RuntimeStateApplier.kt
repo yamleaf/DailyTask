@@ -8,6 +8,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.service.MqttAgentService
+import com.pengxh.daily.app.utils.MessageDispatcher
 import com.yample.mqttprotocol.MqttPacket
 import com.yample.mqttprotocol.PacketValue
 import com.yample.mqttprotocol.Protocol
@@ -204,9 +205,14 @@ object RuntimeStateApplier {
             val json = SecretBox.open(session, payload)
             val obj = JsonParser.parseString(json).asJsonObject
             val app = DailyTaskApplication.get()
+            var hasWxKey = false
+            var hasEmailConfig = false
             if (obj.has("wxKey")) {
                 val k = obj.get("wxKey").asString
-                if (k.isNotBlank()) SaveKeyValues.saveString(Constant.WX_WEB_HOOK_KEY, k)
+                if (k.isNotBlank()) {
+                    SaveKeyValues.saveString(Constant.WX_WEB_HOOK_KEY, k)
+                    hasWxKey = true
+                }
             }
             if (obj.has("emailOutbox") || obj.has("emailInbox")) {
                 // 合并写入：只覆盖控制端本次下发的字段，保留本机既有的其他键值
@@ -224,6 +230,7 @@ object RuntimeStateApplier {
                     if (inbox.isNotBlank()) cache.addProperty("inbox", inbox)
                 }
                 ConfigStore.get().save(Constant.EMAIL_CONFIG_KEY, cache)
+                hasEmailConfig = true
             }
             if (obj.has("emailAuth")) {
                 val a = obj.get("emailAuth").asString
@@ -232,6 +239,23 @@ object RuntimeStateApplier {
             if (obj.has("messageTitle")) {
                 val t = obj.get("messageTitle").asString
                 if (t.isNotBlank()) SaveKeyValues.saveString(Constant.MESSAGE_TITLE_KEY, t)
+            }
+            // 新需求：根据下发的配置自动切换消息渠道并发送测试消息
+            val targetChannel = if (hasWxKey) 1 else if (hasEmailConfig) 0 else -1
+            if (targetChannel != -1) {
+                SaveKeyValues.saveInt(Constant.MSG_CHANNEL_KEY, targetChannel)
+                // 发送测试消息验证配置
+                val testTitle = "配置测试"
+                val testContent = "这是一条测试消息，验证 ${if (targetChannel == 1) "企业微信" else "邮箱"} 配置是否生效。"
+                MessageDispatcher.sendMessage(
+                    title = testTitle,
+                    content = testContent,
+                    channelOverride = targetChannel,
+                    force = true,
+                    appendMeta = false,
+                    onSuccess = { Log.d("RuntimeStateApplier", "测试消息发送成功: ${if (targetChannel == 1) "企业微信" else "邮箱"}") },
+                    onFailure = { err -> Log.e("RuntimeStateApplier", "测试消息发送失败: $err") }
+                )
             }
             ConfigImportSignal.notifyRemoteChanged(app)
         } catch (_: Exception) {
