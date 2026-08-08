@@ -14,6 +14,7 @@ import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.kt.lite.base.ForegroundIdleBridge
+import com.yample.mqttprotocol.dialog.DialogIdleBridge
 import com.pengxh.daily.app.utils.EmailManager
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
@@ -74,6 +75,9 @@ class DailyTaskApplication : Application() {
         ForegroundIdleBridge.onResume = { IdlePseudoMaskController.startIdleMask(it) }
         ForegroundIdleBridge.onPause = { IdlePseudoMaskController.stopIdleMask() }
         ForegroundIdleBridge.onUserInteraction = { IdlePseudoMaskController.notifyUserActivity(it) }
+        // 弹窗是独立 Window，触摸不经过 Activity；经桥接器把弹窗内触摸重置到前台无操作计时，
+        // 保证「弹窗内操作不盖屏、弹窗内无操作超时照常进伪息屏」。
+        DialogIdleBridge.onInteraction = { IdlePseudoMaskController.notifyUserActivity(it) }
         MessageDispatcher.initialize(this)
         EmailManager.initialize(this)
         LogFileManager.initLogFile(this)

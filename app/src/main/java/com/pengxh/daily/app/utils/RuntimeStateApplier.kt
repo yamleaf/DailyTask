@@ -7,8 +7,6 @@ import android.util.Log
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.DailyTaskApplication
-import com.pengxh.daily.app.service.ForegroundRunningService
-import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
 import com.yample.mqttprotocol.MqttPacket
 import com.yample.mqttprotocol.PacketValue
@@ -86,11 +84,6 @@ object RuntimeStateApplier {
                     SaveKeyValues.saveBoolean(Constant.BACK_TO_HOME_KEY, v)
                     true
                 }
-                Protocol.FIELD_KEEP_ALIVE -> {
-                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
-                    applyKeepAlive(v)
-                    true
-                }
                 Protocol.FIELD_RESET_HOUR -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: 0
                     SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, v.coerceIn(0, 23))
@@ -166,6 +159,18 @@ object RuntimeStateApplier {
                     ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
                     true
                 }
+                Protocol.FIELD_BATTERY_ALERT_RANGE_START -> {
+                    val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
+                    SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, v.coerceIn(0, 23))
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_BATTERY_ALERT_RANGE_DURATION -> {
+                    val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
+                    SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, v.coerceIn(1, 24))
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
                 "ax", "cx" -> false // 权限类开关，拒绝执行
                 else -> false
             }
@@ -179,18 +184,6 @@ object RuntimeStateApplier {
             MqttAgentService.publishAck(packet.rid, ackMsg)
             
             Log.d(TAG, "Apply success: ${packet.f}, Ack sent: $ackMsg")
-        }
-    }
-
-    /** 后台保活：开启 = 拉起前台服务 + 注册保活闹钟；关闭 = 取消闹钟（前台服务仍驻留，不杀进程） */
-    private fun applyKeepAlive(on: Boolean) {
-        SaveKeyValues.saveBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, on)
-        val app = DailyTaskApplication.get()
-        if (on) {
-            app.startForegroundService(Intent(app, ForegroundRunningService::class.java))
-            KeepAliveReceiver.schedule(app)
-        } else {
-            KeepAliveReceiver.cancel(app)
         }
     }
 

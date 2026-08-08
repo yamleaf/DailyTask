@@ -42,8 +42,6 @@
     <string name="message_channel_feedback_off_title">关闭反馈通知</string>
     <string name="message_channel_feedback_off_tip">开启后将不再发送邮件/企业微信消息（默认关闭）</string>
     <string name="settings_back_home_tip">开启后，打卡倒计时结束，会先退回桌面再启动本软件</string>
-    <string name="settings_keep_alive_title">后台自启</string>
-    <string name="settings_keep_alive_tip">重启后自动运行并保活，避免后台被杀导致漏打卡</string>
     <string name="settings_all_commands">全部指令</string>
     <string name="settings_open_test">唤起测试</string>
     <string name="settings_capture_test">截屏测试</string>

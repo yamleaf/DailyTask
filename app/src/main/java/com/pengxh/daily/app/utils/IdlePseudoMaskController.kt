@@ -202,13 +202,13 @@ object IdlePseudoMaskController {
     // ═══════════════════════ 前台「无操作」自动进入伪息屏 ═══════════════════════
     // 由 lite 模块 KotlinBaseActivity 经 ForegroundIdleBridge 在 DailyTaskApplication.onCreate
     // 接线：统一驱动任务页 / 远程页 / 设置页等所有前台页面的无操作计时，
-    // 复用「伪息屏增强」配置（总开关 + 延时），进入方式与后台路径一致（MaskOverlayHelper 蒙层）。
+    // 复用「伪息屏增强」延时配置。前台无操作息屏为独立机制：常驻、不受「强制伪息屏」开关控制，
+    // 无论开关开否，只要 App 在前台无操作超过延时即自动进伪息屏（进入方式与后台路径一致）。
 
     private var idleMaskContext: Context? = null
 
     private val foregroundIdleRunnable: Runnable = Runnable {
         val context = idleMaskContext ?: return@Runnable
-        if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
         if (appInBackground) return@Runnable
         if (TaskScheduler.isInActivePunch()) return@Runnable
         if (MaskOverlayHelper.isShowing()) return@Runnable
@@ -217,7 +217,6 @@ object IdlePseudoMaskController {
     }
 
     fun startIdleMask(context: Context) {
-        if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (MaskOverlayHelper.isShowing()) return
         idleMaskContext = context
         mainHandler.removeCallbacks(foregroundIdleRunnable)

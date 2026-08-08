@@ -337,7 +337,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
 
         if (!applyMaskCommandFromIntent(intent)) {
-            if (IdlePseudoMaskController.wasAppInBackground()) {
+            // 从后台返回恢复蒙层：受「强制伪息屏」开关控制（机制约定）
+            if (AppRuntimeConfig.isForcePseudoMask() && IdlePseudoMaskController.wasAppInBackground()) {
                 if (!maskViewController.isMaskVisible()) {
                     maskViewController.showMaskView()
                 }

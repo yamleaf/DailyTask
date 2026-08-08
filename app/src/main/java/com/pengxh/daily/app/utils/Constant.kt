@@ -44,9 +44,6 @@ object Constant {
     /** 伪息屏：关闭时钟显示（Boolean，默认 false=显示时钟）。开启后伪息屏只显示黑屏，更省电 */
     const val PSEUDO_MASK_NO_CLOCK_KEY = "PSEUDO_MASK_NO_CLOCK_KEY" // Boolean
 
-    /** 后台保活：开机自启 + 进程被杀后由精确闹钟兜底重启前台服务(Boolean) */
-    const val BACKGROUND_KEEP_ALIVE_KEY = "BACKGROUND_KEEP_ALIVE_KEY"
-
     // ===== 远程控制 MQTT 配置（被控端持久化；解绑时【不】清除，下次绑定无需重输）=====
     const val MQTT_BROKER_KEY = "MQTT_BROKER_KEY"       // EMQX broker 地址(含端口)，如 xxx.emqx.com:8883
     const val MQTT_USER_KEY = "MQTT_USER_KEY"           // 被控端 DEV 账户（设备自用，【不】进二维码）

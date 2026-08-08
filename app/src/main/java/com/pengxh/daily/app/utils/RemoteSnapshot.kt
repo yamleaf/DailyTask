@@ -278,7 +278,6 @@ object RemoteSnapshot {
         add("rt", "随机时间", "bool", SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true))
         add("ga", "手势检测", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
         add("bh", "返回桌面", "bool", SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false))
-        add("ka", "后台保活", "bool", SaveKeyValues.loadBoolean(Constant.BACKGROUND_KEEP_ALIVE_KEY, true))
         add("tm", "伪息屏延时", "int", SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600),
             min = 10, max = 3600, step = 10)
         add("rh", "每日重置", "int", SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, 0).coerceIn(0, 23),
@@ -294,6 +293,10 @@ object RemoteSnapshot {
             min = 0, max = 23, step = 1)
         add("bs", "低电量告警次数", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3),
             min = 0, max = 3, step = 1)
+        add("br", "预警检测区间起始", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23),
+            min = 0, max = 23, step = 1)
+        add("bd", "预警检测区间时长", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION).coerceIn(1, 24),
+            min = 1, max = 24, step = 1)
         // 消息渠道 + 远程控制开关（镜像到控制端，允许控制端查看与修改）
         add("re", "远程控制服务", "bool", SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
         add("mc", "消息渠道", "int", SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, 0).coerceIn(0, 1))

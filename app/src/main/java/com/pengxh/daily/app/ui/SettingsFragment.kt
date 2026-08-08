@@ -801,21 +801,29 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.chainStartTipsView.text = tipText
         binding.chainStartTipsView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
 
-        // 弹引导对话框：说明 + 去系统设置
+        // 已授权：直接提示，不再弹窗打断
+        if (granted) {
+            "链式启动权限已授权，可正常拉起打卡应用".show(ctx)
+            return
+        }
+
+        // 待授权 / 旧系统：弹引导对话框，点击后直达本应用（DailyTask）的应用详情/权限设置页
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = TextView(ctx).apply {
                 text = "链式启动权限用于本应用在后台拉起打卡应用（$targetApp）。\n\n" +
-                    "标准判断：Android 12+ 需授予「后台启动其它应用」权限；\n" +
-                    "国产 ROM（小米/OPPO/vivo/华为等）还可能有独立的「链式启动/关联启动/自启动」开关。\n\n" +
-                    "当前状态：$statusText"
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                        "系统当前未授予「后台启动其它应用」权限。点击下方按钮，将直接打开本应用的权限设置页，开启「后台启动其它应用」即可。"
+                    else
+                        "系统低于 Android 12 无此限制，但部分国产 ROM 仍需在「自启动 / 关联启动」中允许本应用。点击下方按钮直达设置。\n\n当前状态：$statusText"
                 setPadding(24, 16, 24, 16)
             },
-            title = "链式启动权限检测",
-            positiveText = "去系统设置",
+            title = "链式启动权限",
+            positiveText = "前往设置",
             negativeText = "知道了",
             onConfirm = {
-                openAppDetailSettings(targetApp)
+                // 权限属于本应用（DailyTask），应打开本应用的详情/权限设置页，而非目标应用
+                openAppDetailSettings(ctx.packageName)
                 true
             }
         )

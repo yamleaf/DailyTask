@@ -7,8 +7,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.app.KeyguardManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.DailyTaskApplication
@@ -182,6 +184,7 @@ object StatusReporter {
             appendLine("· 今日：${buildTodayTextNote(d.cal)}")
             appendLine()
             appendLine("【设备信息】")
+            appendLine("· 手机状态：${deviceScreenStateText(context)}")
             appendLine("· 当前时间：${Date().formatDateTime()}")
             appendLine("· 当前电量：${if (d.battery >= 0) "${d.battery}%" else "未知"}")
             appendLine("· 充电状态：${batterySnap.chargingStatus}")
@@ -894,6 +897,7 @@ object StatusReporter {
 
             // 设备信息
             append(section("📱 设备信息",
+                row("手机状态", deviceScreenStateText(context)),
                 row("当前时间", Date().formatDateTime()),
                 row("充电状态", batterySnap.chargingStatus),
                 row("电池电流", batterySnap.currentText),
@@ -1363,6 +1367,29 @@ object StatusReporter {
             BatterySnapshot(chargingStatus, currentText, healthText, temperatureText)
         } catch (_: Exception) {
             BatterySnapshot("未知", "未知", "未知", "未知")
+        }
+    }
+
+    /**
+     * 手机屏幕状态：亮屏 / 伪息屏 / 锁屏。
+     * 优先级：伪息屏（黑屏蒙层悬浮窗在显示）> 锁屏（灭屏或锁屏界面）> 亮屏。
+     */
+    private fun deviceScreenStateText(context: Context): String {
+        return try {
+            when {
+                MaskOverlayHelper.isShowing() -> "伪息屏"
+                else -> {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val km = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                    when {
+                        pm?.isInteractive == false -> "锁屏（灭屏）"
+                        km?.isKeyguardLocked == true -> "锁屏"
+                        else -> "亮屏"
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            "未知"
         }
     }
 
