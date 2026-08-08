@@ -15,13 +15,13 @@ import java.util.concurrent.TimeUnit
  * - 充电中 / 数据不足时返回 null
  *
  * 预警逻辑：
- * - 用户配置最晚预警时间（默认 20:00）
+ * - 用户配置最晚预警时间（默认 20:00，存储为分钟数 0-1439）
  * - 若预测电量降至阈值的时间落在检测区间内（默认 20:00~次日 8:00），
  *   则在预警时间前发出预警，防止用户睡眠期间手机低电量关机
  */
 object BatteryPredictor {
 
-    private const val DEFAULT_WARNING_HOUR = 20
+    private const val DEFAULT_WARNING_MINUTE = 20 * 60  // 20:00 = 1200 分钟
     private const val MIN_SAMPLES = 3
     private const val MIN_WINDOW_MIN = 30L   // 最短统计窗口（30 分钟）
     private const val MAX_WINDOW_MIN = 240L  // 最长统计窗口（4 小时）
@@ -39,10 +39,17 @@ object BatteryPredictor {
     data class AlertCheck(
         val shouldAlert: Boolean,       // 是否需要在 warningHour 前预警
         val prediction: Prediction?,    // 预测详情
-        val warningHour: Int,           // 用户配置的预警时间
+        val warningMinute: Int,         // 用户配置的预警时间（分钟数 0-1439）
         val threshold: Int,             // 当前低电量告警阈值（预测目标）
         val reason: String              // 原因说明
     )
+
+    /** 将分钟数格式化为 HH:mm 字符串 */
+    fun formatWarningMinute(minute: Int): String {
+        val hour = minute / 60
+        val min = minute % 60
+        return "%02d:%02d".format(hour, min)
+    }
 
     /**
      * 计算当前电池消耗速度并预测到达 targetLevel 的时间。
@@ -116,10 +123,10 @@ object BatteryPredictor {
         val threshold = SaveKeyValues.loadInt(
             Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
         ).coerceIn(10, 80)
-        val warningHour = SaveKeyValues.loadInt(
+        val warningMinute = SaveKeyValues.loadInt(
             Constant.BATTERY_WARNING_HOUR_KEY,
-            DEFAULT_WARNING_HOUR
-        ).coerceIn(0, 23)
+            DEFAULT_WARNING_MINUTE
+        ).coerceIn(0, 1439)
         val rangeStart = SaveKeyValues.loadInt(
             Constant.BATTERY_ALERT_DETECTION_START_KEY, 20
         ).coerceIn(0, 23)
@@ -130,25 +137,24 @@ object BatteryPredictor {
         val rangeEndNextDay = rangeStart + rangeDuration >= 24
 
         val prediction = predict(ctx, threshold) ?: return AlertCheck(
-            false, null, warningHour, threshold, "数据不足或充电中，无法预测"
+            false, null, warningMinute, threshold, "数据不足或充电中，无法预测"
         )
 
         if (prediction.isCharging) return AlertCheck(
-            false, prediction, warningHour, threshold, "充电中，无需预警"
+            false, prediction, warningMinute, threshold, "充电中，无需预警"
         )
 
         val cal = Calendar.getInstance()
         val now = cal.timeInMillis
 
-        // 计算当天的预警时间
-        cal.set(Calendar.HOUR_OF_DAY, warningHour)
-        cal.set(Calendar.MINUTE, 0)
+        // 计算当天的预警时间（精确到分钟）
+        cal.set(Calendar.HOUR_OF_DAY, warningMinute / 60)
+        cal.set(Calendar.MINUTE, warningMinute % 60)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         val warningTimeMs = cal.timeInMillis
 
         // 计算检测区间的起始和结束时间
-        // 起始 + 时长 >= 24 说明结束在次日
         val todayStartMs: Long
         val todayEndMs: Long
         cal.timeInMillis = now
@@ -159,14 +165,12 @@ object BatteryPredictor {
         todayStartMs = cal.timeInMillis
 
         if (!rangeEndNextDay) {
-            // 当天结束
             cal.set(Calendar.HOUR_OF_DAY, rangeEnd)
             cal.set(Calendar.MINUTE, 0)
             cal.set(Calendar.SECOND, 0)
             cal.set(Calendar.MILLISECOND, 0)
             todayEndMs = cal.timeInMillis
         } else {
-            // 次日结束
             cal.add(Calendar.DATE, 1)
             cal.set(Calendar.HOUR_OF_DAY, rangeEnd)
             cal.set(Calendar.MINUTE, 0)
@@ -190,11 +194,11 @@ object BatteryPredictor {
         val reason = when {
             alreadySent -> "今日已预警过，跳过重复推送"
             !targetInDangerZone -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 $threshold%，不在检测区间内"
-            !nowBeforeWarning -> "已过 ${warningHour}:00，无法在预警前推送"
-            else -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 $threshold%，需在 ${warningHour}:00 前预警"
+            !nowBeforeWarning -> "已过 ${formatWarningMinute(warningMinute)}，无法在预警前推送"
+            else -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 $threshold%，需在 ${formatWarningMinute(warningMinute)} 前预警"
         }
 
-        return AlertCheck(shouldAlert, prediction, warningHour, threshold, reason)
+        return AlertCheck(shouldAlert, prediction, warningMinute, threshold, reason)
     }
 
     /**

@@ -20,6 +20,7 @@ import com.pengxh.daily.app.utils.BatteryHistory
 import com.pengxh.daily.app.utils.BatteryPredictor
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
+import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
@@ -155,10 +156,11 @@ class ForegroundRunningService : Service() {
             }
         }
 
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_TIME_TICK) // 每分钟广播
-            addAction(Intent.ACTION_BATTERY_CHANGED) // 电池状态改变广播
-            addAction(Intent.ACTION_SCREEN_OFF) // 系统灭屏时尽量转入伪息屏
+val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIME_TICK)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(systemBroadcastReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -181,20 +183,19 @@ class ForegroundRunningService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         checkLowBattery()
         KeepAliveReceiver.schedule(this)
-        // 无论是否收到重置广播，每次服务启动都确保每日重置闹钟已调度（幂等）
         KeepAliveReceiver.scheduleResetAlarm(this)
-        // 重启 / 复活后恢复远程控制 MQTT 代理：开机自启与保活心跳都经本服务进入，
-        // 在此统一拉起 MQTT，否则手机重启后 MqttAgentService 永不启动、控制端命令下发失效
+        KeepAliveReceiver.scheduleBatteryAlert(this)
         KeepAliveReceiver.startMqttAgentIfEnabled(this)
-        // 由每日重置闹钟触发：到点后启动任务调度
         if (intent?.action == KeepAliveReceiver.ACTION_RESET_TASK) {
             if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
                 && !TaskScheduler.isRunning()
             ) {
                 TaskScheduler.startTask()
             }
-            // 重置点顺手清理临时诊断文件（诊断报告 txt + 截屏兜底 png），防止长期累积占用存储
             cleanupTempDiagnosticFiles()
+        }
+        if (intent?.action == KeepAliveReceiver.ACTION_BATTERY_ALERT) {
+            checkBatterySmartAlert()
         }
         return START_STICKY
     }
@@ -214,6 +215,10 @@ class ForegroundRunningService : Service() {
 
                     Intent.ACTION_SCREEN_OFF -> {
                         IdlePseudoMaskController.onSystemScreenOff(this@ForegroundRunningService)
+                    }
+
+                    ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED -> {
+                        KeepAliveReceiver.scheduleBatteryAlert(this@ForegroundRunningService)
                     }
                 }
             }
@@ -389,14 +394,14 @@ class ForegroundRunningService : Service() {
             if (!SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)) return
 
             // 仅在预警时间点 ±5 分钟窗口内检查
-            val warningHour = SaveKeyValues.loadInt(
+            val warningMinute = SaveKeyValues.loadInt(
                 Constant.BATTERY_WARNING_HOUR_KEY,
-                20
-            ).coerceIn(0, 23)
+                20 * 60
+            ).coerceIn(0, 1439)
             val cal = Calendar.getInstance()
             val now = cal.timeInMillis
-            cal.set(Calendar.HOUR_OF_DAY, warningHour)
-            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.HOUR_OF_DAY, warningMinute / 60)
+            cal.set(Calendar.MINUTE, warningMinute % 60)
             cal.set(Calendar.SECOND, 0)
             cal.set(Calendar.MILLISECOND, 0)
             val warningTimeMs = cal.timeInMillis
@@ -414,10 +419,10 @@ class ForegroundRunningService : Service() {
             val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             val targetTimeText = BatteryPredictor.formatTime(pred.targetTimeMs)
 
-            LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${result.warningHour}:00 前提醒")
+            LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${BatteryPredictor.formatWarningMinute(result.warningMinute)} 前提醒")
             MessageDispatcher.sendMessage(
                 "电量智能预警",
-                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningHour, result.threshold, pred),
+                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningMinute, result.threshold, pred),
                 force = true,
                 appendMeta = false
             )
@@ -426,7 +431,7 @@ class ForegroundRunningService : Service() {
                     put("type", "battery_smart_alert")
                     put("battery", battery)
                     put("predictedTime", targetTimeText)
-                    put("warningHour", result.warningHour)
+                    put("warningMinute", result.warningMinute)
                 }.toString()
             )
             BatteryPredictor.markAlertSent(this)

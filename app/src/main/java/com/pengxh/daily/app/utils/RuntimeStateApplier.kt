@@ -150,7 +150,7 @@ object RuntimeStateApplier {
                 }
                 Protocol.FIELD_BATTERY_WARNING_HOUR -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
-                    SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, v.coerceIn(0, 23))
+                    SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, v.coerceIn(0, 1439))
                     ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
                     true
                 }

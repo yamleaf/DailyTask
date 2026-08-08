@@ -32,8 +32,10 @@ class KeepAliveReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_RESURRECT = "com.pengxh.daily.action.RESURRECT"
         const val ACTION_RESET_TASK = "com.pengxh.daily.action.RESET_TASK"
+        const val ACTION_BATTERY_ALERT = "com.pengxh.daily.action.BATTERY_ALERT"
         private const val ALARM_REQUEST_CODE = 1003
         private const val RESET_ALARM_REQUEST_CODE = 1004
+        private const val BATTERY_ALARM_REQUEST_CODE = 1005
         private const val INTERVAL_MS = 15 * 60 * 1000L
 
         private fun resurrectIntent(context: Context): Intent =
@@ -41,6 +43,9 @@ class KeepAliveReceiver : BroadcastReceiver() {
 
         private fun resetIntent(context: Context): Intent =
             Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_RESET_TASK }
+
+        private fun batteryAlertIntent(context: Context): Intent =
+            Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_BATTERY_ALERT }
 
         private fun pendingIntent(context: Context): PendingIntent =
             PendingIntent.getBroadcast(
@@ -55,6 +60,14 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 context,
                 RESET_ALARM_REQUEST_CODE,
                 resetIntent(context),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+        private fun batteryAlertPendingIntent(context: Context): PendingIntent =
+            PendingIntent.getBroadcast(
+                context,
+                BATTERY_ALARM_REQUEST_CODE,
+                batteryAlertIntent(context),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
@@ -160,6 +173,41 @@ class KeepAliveReceiver : BroadcastReceiver() {
             alarmManager.cancel(resetPendingIntent(context))
         }
 
+        /**
+         * 调度电量智能预警闹钟：精确到配置的预警时间（含分钟），触发 ACTION_BATTERY_ALERT。
+         * 背景：ACTION_TIME_TICK 在 Doze/息屏下会被延迟或丢弃，导致到点不触发预警检测。
+         * 用精确闹钟(RTC_WAKEUP)在预警时刻唤醒并执行 checkBatterySmartAlert，
+         * 确保即使设备休眠也能在预警时间点准点检测并发邮件。
+         * 智能预警开关关闭时取消闹钟。
+         */
+        fun scheduleBatteryAlert(context: Context) {
+            if (!SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)) {
+                cancelBatteryAlert(context)
+                return
+            }
+            val warningMinute = SaveKeyValues.loadInt(
+                Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60
+            ).coerceIn(0, 1439)
+            val pi = batteryAlertPendingIntent(context)
+            val target = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, warningMinute / 60)
+                set(Calendar.MINUTE, warningMinute % 60)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            // 若今天的预警时间已过，排到明天同一时间
+            if (target.timeInMillis <= System.currentTimeMillis()) {
+                target.add(Calendar.DATE, 1)
+            }
+            setExactAlarm(context, target.timeInMillis, pi)
+        }
+
+        /** 取消电量智能预警闹钟 */
+        fun cancelBatteryAlert(context: Context) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            alarmManager.cancel(batteryAlertPendingIntent(context))
+        }
+
         private const val ALARM_GUIDE_NOTIFICATION_ID = 9001
         private const val ALARM_GUIDE_PREF = "alarm_guide"
         private const val ALARM_GUIDE_LAST_TS = "last_ts"
@@ -229,8 +277,6 @@ class KeepAliveReceiver : BroadcastReceiver() {
             }
             ACTION_RESET_TASK -> {
                 if (!SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) return
-                // 拉起/触发前台服务，由服务内部启动任务调度；比直接 startTask 更稳妥，
-                // 因为服务可能尚未启动，需要它先初始化协程作用域。
                 val serviceIntent = Intent(context, ForegroundRunningService::class.java).apply {
                     action = ACTION_RESET_TASK
                 }
@@ -239,10 +285,20 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 } catch (e: Exception) {
                     Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
                 }
-                // 顺手确保 MQTT 代理在运行（每日重置点同样是恢复远程的兜底时机）
                 startMqttAgentIfEnabled(context)
-                // 立即安排明天的重置闹钟，避免今天任务结束后循环不再设置
                 scheduleResetAlarm(context)
+            }
+            ACTION_BATTERY_ALERT -> {
+                val serviceIntent = Intent(context, ForegroundRunningService::class.java).apply {
+                    action = ACTION_BATTERY_ALERT
+                }
+                try {
+                    context.startForegroundService(serviceIntent)
+                } catch (e: Exception) {
+                    Log.e(javaClass.simpleName, "KeepAliveReceiver 启动前台服务失败", e)
+                }
+                // 排明天的预警闹钟
+                scheduleBatteryAlert(context)
             }
         }
     }

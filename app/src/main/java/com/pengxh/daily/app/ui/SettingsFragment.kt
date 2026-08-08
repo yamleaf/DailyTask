@@ -443,11 +443,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.batteryAlertGroupSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
             SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
+            com.pengxh.daily.app.service.KeepAliveReceiver.scheduleBatteryAlert(ctx)
         }
         binding.batterySmartAlertSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
             SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
             binding.batteryAlertGroupSwitch.isChecked = checked
+            com.pengxh.daily.app.service.KeepAliveReceiver.scheduleBatteryAlert(ctx)
         }
         binding.batteryWarningTimeRow.setOnClickListener { showBatteryWarningTimePicker() }
         binding.batteryAlertRangeRow.setOnClickListener { showBatteryAlertRangePicker() }
@@ -740,8 +742,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             val alertEnabled = SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
             binding.batteryAlertGroupSwitch.isChecked = alertEnabled
             binding.batterySmartAlertSwitch.isChecked = alertEnabled
-            val warningHour = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
-            binding.batteryWarningTimeValue.text = "%02d:00".format(warningHour)
+            val warningMinute = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60).coerceIn(0, 1439)
+            binding.batteryWarningTimeValue.text = String.format("%02d:%02d", warningMinute / 60, warningMinute % 60)
             val rangeStart = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)
             val rangeDuration = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION).coerceIn(1, 24)
             binding.batteryAlertRangeValue.text = batteryAlertRangeText(rangeStart, rangeDuration)
@@ -930,14 +932,14 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
     }
 
-    /** 电量智能预警时间选择器 */
+    /** 电量智能预警时间选择器（精确到分钟） */
     private fun showBatteryWarningTimePicker() {
-        val current = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20).coerceIn(0, 23)
+        val currentMinute = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60).coerceIn(0, 1439)
         val threshold = SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80)
         val dialogView = com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout(ctx).apply {
             val cal = java.util.Calendar.getInstance().apply {
-                set(java.util.Calendar.HOUR_OF_DAY, current)
-                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.HOUR_OF_DAY, currentMinute / 60)
+                set(java.util.Calendar.MINUTE, currentMinute % 60)
                 set(java.util.Calendar.SECOND, 0)
             }
             setDefaultValue(com.github.gzuliyujiang.wheelpicker.entity.TimeEntity.target(cal.time))
@@ -950,9 +952,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             positiveText = "确定",
             negativeText = "取消",
             onConfirm = {
-                val hour = dialogView.selectedHour
-                SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, hour)
-                binding.batteryWarningTimeValue.text = "%02d:00".format(hour)
+                val minute = dialogView.selectedHour * 60 + dialogView.selectedMinute
+                SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, minute.coerceIn(0, 1439))
+                binding.batteryWarningTimeValue.text = String.format("%02d:%02d", minute / 60, minute % 60)
+                // 本地变更后重新调度预警闹钟
+                try {
+                    com.pengxh.daily.app.service.KeepAliveReceiver.scheduleBatteryAlert(ctx)
+                } catch (_: Exception) {}
                 true
             }
         )
