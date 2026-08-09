@@ -128,8 +128,6 @@ android {
         }
     }
 
-    flavorDimensions += 'versionCode'
-
     signingConfigs {
         release {
             storeFile file('DailyTask.jks')
@@ -147,13 +145,6 @@ android {
             signingConfig signingConfigs.release
         }
     }
-
-//    GString id = "com.alibaba.android.${randomCode()}"
-//    productFlavors {
-//        daily {
-//            applicationId = id
-//        }
-//    }
 
     packagingOptions {
         exclude 'META-INF/NOTICE.md'
@@ -188,27 +179,12 @@ android {
     }
 }
 
-static def randomCode() {
-    String alphabetsInLowerCase = 'abcdefghijklmnopqrstuvwxyz'
-    String randomString = ""
-    for (i in 0..5) {
-        int randomIndex = Math.random() * alphabetsInLowerCase.length()
-        randomString += alphabetsInLowerCase[randomIndex]
-    }
-    return randomString
-}
-
-static def getBuildDate() {
-    SimpleDateFormat dateFormat = new SimpleDateFormat('yyyyMMdd', Locale.CHINA)
-    return dateFormat.format(System.currentTimeMillis())
-}
-
 dependencies {
     implementation project(':protocol')
     implementation project(':lite')
     implementation 'androidx.core:core-ktx:1.17.0'
     implementation 'androidx.appcompat:appcompat:1.7.1'
-    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     //数据库框架
     implementation 'androidx.room:room-runtime:2.8.2'
