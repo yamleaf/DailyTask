@@ -263,19 +263,6 @@ object IdlePseudoMaskController {
     }
 
     // ═══════════════════════ 打卡返回即息屏 ═══════════════════════
-    /**
-     * 打卡动作完成后「返回即息屏」：与手动离开路径完全一致地进入伪息屏。
-     * 仅当「强制伪息屏」开启时生效；开启「返回桌面」时同样先 HOME 再拉回本 App 显示蒙层。
-     * 关闭伪息屏时由调用方退化为普通返回（按返回桌面开关），本方法直接返回。
-     */
-    fun enterPseudoMaskAfterPunch(context: Context) {
-        if (!AppRuntimeConfig.isForcePseudoMask()) return
-        // 打卡结束：应用应处于后台（目标 App 在前台），确保与手动离开路径的进入条件一致
-        appInBackground = true
-        releaseKeepAwakeForPunch(context)
-        enterPseudoMask(context)
-    }
-
     /** 黑屏蒙层被关掉后，若仍在外部且开关开启，则继续透明保亮并重新计时 */
     fun onBlackMaskHidden(context: Context) {
         enteringMask = false

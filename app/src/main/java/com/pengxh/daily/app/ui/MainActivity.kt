@@ -27,6 +27,7 @@ import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.R
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import com.pengxh.daily.app.databinding.ActivityMainBinding
+import com.pengxh.daily.app.extensions.bringDailyTaskToFront
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
@@ -488,11 +489,24 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     fun backToMainActivity(isPunchReturn: Boolean = false) {
         switchToTaskTab()
-        // 打卡动作完成且开启「强制伪息屏」：与手动离开路径一致地返回本 App 并进入伪息屏
-        // （开启「返回桌面」时同样先 HOME 再拉回，由 IdlePseudoMaskController 内部处理）。
-        // 关闭伪息屏时退化为按「返回桌面」开关返回。
-        if (isPunchReturn && AppRuntimeConfig.isForcePseudoMask()) {
-            IdlePseudoMaskController.enterPseudoMaskAfterPunch(this)
+        // 打卡返回行为：
+        // - 伪息屏开启：回到桌面（App 转入后台，由后台伪息屏倒计时接管）
+        // - 伪息屏关闭且开启「返回桌面」：先回桌面，再从桌面拉起本 App 正常界面（任务页）
+        // - 伪息屏关闭且关闭「返回桌面」：不操作
+        if (isPunchReturn) {
+            if (AppRuntimeConfig.isForcePseudoMask()) {
+                // 模拟点击Home键
+                startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
+            } else if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)) {
+                // 模拟点击Home键
+                startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
+                // 等桌面切换稳定后再从桌面拉起本 App，避免直接从打卡软件跳回造成界面闪烁
+                mainHandler.postDelayed({
+                    if (!TaskScheduler.isInActivePunch()) {
+                        bringDailyTaskToFront()
+                    }
+                }, 800L)
+            }
             return
         }
         if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)) {
