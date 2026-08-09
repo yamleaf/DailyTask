@@ -278,7 +278,7 @@ class MqttAgentService : Service() {
                     }
                     publishStatus("online")
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "caught exception", e)
                     "MQTT 订阅/状态上报失败：${e.message}".showToast()
                 }
             }
@@ -297,11 +297,11 @@ class MqttAgentService : Service() {
                 }
                 publishStatus("online")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "caught exception", e)
                 "MQTT 订阅/状态上报失败：${e.message}".showToast()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "caught exception", e)
             onDisconnected()
             "MQTT 连接失败：${e.message}".showToast()
             // 连接失败也安排复活闹钟（如网络未就绪时），带退避避免失败态持续耗电
@@ -323,7 +323,7 @@ class MqttAgentService : Service() {
                 else -> { /* 其它命令暂忽略 */ }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "caught exception", e)
         }
     }
 
@@ -373,7 +373,7 @@ class MqttAgentService : Service() {
                     Log.d(TAG, "快照已返回 rid=${packet.rid} size=${json.length}")
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "caught exception", e)
                 Log.e(TAG, "快照构建/发送异常 rid=${packet.rid}", e)
                 doPublishAck(packet.rid, "SNAPSHOT_FAIL")
             }
@@ -580,7 +580,7 @@ class MqttAgentService : Service() {
             MqttQuota.add(this, 1, 0)
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "caught exception", e)
             false
         }
     }
@@ -742,7 +742,7 @@ class MqttAgentService : Service() {
                 MqttQuota.add(this@MqttAgentService, 1, 0)
                 Log.d(TAG, "增量推送 delta -> ${topicPush()} sections=$sections size=${json.length}")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "caught exception", e)
             }
         }
     }
@@ -839,11 +839,11 @@ class MqttAgentService : Service() {
                 }
                 publishStatus("online")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "caught exception", e)
                 "MQTT 重连后订阅失败：${e.message}".showToast()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "caught exception", e)
             onDisconnected()
             scheduleResurrectWithBackoff()
         }
@@ -888,7 +888,7 @@ class MqttAgentService : Service() {
                 MqttQuota.add(this@MqttAgentService, 1, 0)
                 Log.d(TAG, "告警推送 alert -> ${topicAlert()} $json")
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "caught exception", e)
             }
         }
     }
@@ -915,7 +915,7 @@ class MqttAgentService : Service() {
                 true
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "caught exception", e)
             Log.w(TAG, "订阅异常: $topic ${e.message}")
             false
         }
@@ -960,7 +960,7 @@ class MqttAgentService : Service() {
                 alarmManager.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "caught exception", e)
         }
     }
 

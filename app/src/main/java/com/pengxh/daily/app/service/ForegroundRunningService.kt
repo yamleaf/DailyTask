@@ -413,7 +413,10 @@ val filter = IntentFilter().apply {
             if (SaveKeyValues.loadBoolean(todayKey, false)) return
 
             val result = BatteryPredictor.checkAlert(this)
-            if (!result.shouldAlert) return
+            if (!result.shouldAlert) {
+                Log.d(javaClass.simpleName, "电量智能预警未触发：${result.reason}")
+                return
+            }
 
             val pred = result.prediction ?: return
             val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)

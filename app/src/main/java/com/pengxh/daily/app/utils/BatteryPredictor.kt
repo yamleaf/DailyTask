@@ -182,8 +182,9 @@ object BatteryPredictor {
         // 判断预测到达阈值水平的时间是否在检测区间内
         val targetInDangerZone = prediction.targetTimeMs in todayStartMs..todayEndMs
 
-        // 当前时间在预警时间之前
-        val nowBeforeWarning = now < warningTimeMs
+        // 当前时间在预警时间之前（外层 checkBatterySmartAlert 已用 ±5 分钟窗口门禁，
+        // 此处放宽到 warningTimeMs+5min，避免丢弃 ±窗口后半段导致仅在 19:55~20:00 触发）
+        val nowBeforeWarning = now <= warningTimeMs + 5 * 60 * 1000L
 
         // 检查是否已预警过（每日一次）
         val todayKey = "battery_alert_sent_${now / 86400000}"
@@ -233,7 +234,13 @@ object BatteryPredictor {
 
     private fun fmtTime(ms: Long): String {
         val cal = Calendar.getInstance().apply { timeInMillis = ms }
-        return "%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        // 带日期，避免跨午夜时仅显示 HH:mm 而无日期导致"不进位"
+        return "%02d-%02d %02d:%02d".format(
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH),
+            cal.get(Calendar.HOUR_OF_DAY),
+            cal.get(Calendar.MINUTE)
+        )
     }
 
     /** 将时间戳格式化为 HH:mm（供外部展示预测时间） */
