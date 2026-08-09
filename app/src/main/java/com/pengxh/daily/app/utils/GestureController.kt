@@ -13,6 +13,10 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
  * 2. 根据手势操作控制蒙层显示/隐藏
  * 3. 提供手势开关配置
  *
+ * 手势规则：
+ * - 双指下滑：进入伪息屏
+ * - 单指 / 双指上滑：解除伪息屏
+ *
  * @param context 上下文
  * @param maskViewController 蒙层视图控制器
  */
@@ -34,9 +38,11 @@ class GestureController(
     /**
      * 处理触摸事件
      *
-     * 仅识别双指手势：始终把完整事件序列交给手势识别器（否则其无法感知 ACTION_DOWN，
-     * onFling 的 e1 为 null），但仅在本次手势同时落下的手指数 ≥ 2 时才触发伪熄屏。
-     * 单指滑动交给 App 自身滚动/点击逻辑处理，不触发伪熄屏。
+     * 始终把完整事件序列交给手势识别器（否则其无法感知 ACTION_DOWN，
+     * onFling 的 e1 为 null）。
+     * - 下滑进入伪息屏：仅在本次手势同时落下的手指数 ≥ 2 时触发（双指下滑）。
+     * - 上滑解除伪息屏：单指 / 双指均可触发。
+     * 其余单指滑动交给 App 自身滚动/点击逻辑处理。
      *
      * @param event 触摸事件
      */
@@ -62,20 +68,18 @@ class GestureController(
             if (!isGestureEnabled) {
                 return false
             }
-            // 仅双指手势触发伪熄屏
-            if (gesturePointerCount < 2) {
-                return false
-            }
 
             val deltaY = calculateDeltaY(e1, e2)
 
-            if (isSwipeDown(deltaY, e1, e2)) {
-                handleShowMask()
+            // 上滑解除伪息屏：单指 / 双指均可
+            if (isSwipeUp(deltaY, e1, e2)) {
+                handleHideMask()
                 return true
             }
 
-            if (isSwipeUp(deltaY, e1, e2)) {
-                handleHideMask()
+            // 下滑进入伪息屏：仅双指触发
+            if (gesturePointerCount >= 2 && isSwipeDown(deltaY, e1, e2)) {
+                handleShowMask()
                 return true
             }
 
@@ -91,7 +95,7 @@ class GestureController(
     }
 
     /**
-     * 判断是否为向下滑动手势
+     * 判断是否为向下滑动手势（进入伪息屏，仅双指）
      */
     private fun isSwipeDown(deltaY: Float, e1: MotionEvent?, e2: MotionEvent): Boolean {
         return deltaY > minFlingDistance
@@ -100,7 +104,7 @@ class GestureController(
     }
 
     /**
-     * 判断是否为向上滑动手势
+     * 判断是否为向上滑动手势（解除伪息屏，单指 / 双指均可）
      */
     private fun isSwipeUp(deltaY: Float, e1: MotionEvent?, e2: MotionEvent): Boolean {
         return deltaY > minFlingDistance

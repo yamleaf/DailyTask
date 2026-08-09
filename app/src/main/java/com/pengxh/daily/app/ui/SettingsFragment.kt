@@ -445,31 +445,34 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
         binding.chainStartRow.setOnClickListener { checkChainStartPermission() }
-        // 电量预警分组
+        // 电量预警分组：分组开关仅控制子项展开/收起，功能开关保留在子项内
+        val applyBatteryGroupExpand = { expanded: Boolean ->
+            binding.batteryAlertGroupContent.visibility = if (expanded) View.VISIBLE else View.GONE
+            binding.batteryAlertGroupArrow.animate()
+                .rotation(if (expanded) 180f else 0f)
+                .setDuration(200)
+                .start()
+        }
         binding.batteryAlertGroupSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
-            SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
-            com.pengxh.daily.app.service.KeepAliveReceiver.scheduleBatteryAlert(ctx)
+            applyBatteryGroupExpand(checked)
+        }
+        binding.batteryAlertGroupHeader.setOnClickListener {
+            val expand = !binding.batteryAlertGroupSwitch.isChecked
+            syncingSwitchState = true
+            binding.batteryAlertGroupSwitch.isChecked = expand
+            syncingSwitchState = false
+            applyBatteryGroupExpand(expand)
         }
         binding.batterySmartAlertSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
             SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
-            binding.batteryAlertGroupSwitch.isChecked = checked
             com.pengxh.daily.app.service.KeepAliveReceiver.scheduleBatteryAlert(ctx)
         }
         binding.batteryWarningTimeRow.setOnClickListener { showBatteryWarningTimePicker() }
         binding.batteryAlertRangeRow.setOnClickListener { showBatteryAlertRangePicker() }
         binding.batteryThresholdRow.setOnClickListener { showBatteryThresholdPicker() }
         binding.batteryStageCountRow.setOnClickListener { showBatteryStageCountPicker() }
-        var batteryGroupExpanded = false
-        binding.batteryAlertGroupHeader.setOnClickListener {
-            batteryGroupExpanded = !batteryGroupExpanded
-            binding.batteryAlertGroupContent.visibility = if (batteryGroupExpanded) View.VISIBLE else View.GONE
-            binding.batteryAlertGroupArrow.animate()
-                .rotation(if (batteryGroupExpanded) 180f else 0f)
-                .setDuration(200)
-                .start()
-        }
         binding.captureTestLayout.setOnClickListener {
             val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, -1)
             lifecycleScope.launch {
@@ -530,8 +533,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 UnifiedDialogKit.showWarning(
                     ctx,
                     "开启手势识别？",
-                    "开启后，双指在屏幕上滑动可开启/关闭伪熄屏：双指下滑开启伪熄屏，双指上滑关闭。\n\n" +
-                        "单指滑动不受影响，可正常操作本软件。",
+                    "开启后，在屏幕上滑动可控制伪熄屏：双指下滑开启伪熄屏，单指/双指上滑关闭。\n\n" +
+                        "单指下滑不受影响，可正常操作本软件。",
                     confirmText = "确认开启",
                     cancelable = false,
                     onCancel = {
@@ -556,13 +559,12 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             AppRuntimeConfig.setPowerSaveMode(checked)
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
-        // 强制伪息屏主开关 + 分组开关（联动 + 确认弹窗）
+        // 强制伪息屏功能开关（子项内）：确认弹窗 + 应用状态
         val applyForceMask = { enabled: Boolean ->
             AppRuntimeConfig.setForcePseudoMask(enabled)
             if (enabled) "伪熄屏已开启".show(ctx)
             syncingSwitchState = true
             binding.forcePseudoMaskSwitch.isChecked = enabled
-            binding.pseudoMaskGroupSwitch.isChecked = enabled
             syncingSwitchState = false
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
@@ -574,16 +576,26 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                     ctx,
                     "开启伪熄屏？",
                     "离开本软件超过设定时间（默认 60 秒）后，以及在本软件前台无操作超过设定时间，都将自动进入伪熄屏模式。\n\n" +
+                        "将同时开启手势识别，便于随时退出：双指下滑进入伪熄屏，单指/双指上滑退出。\n\n" +
                         "⚠ 可能打断其他 App 使用；适合无人值守挂机，白天操作手机建议关闭。",
                     confirmText = "确认开启",
                     cancelable = false,
                     onCancel = {
                         syncingSwitchState = true
                         binding.forcePseudoMaskSwitch.isChecked = false
-                        binding.pseudoMaskGroupSwitch.isChecked = false
                         syncingSwitchState = false
                     },
-                    onConfirm = { onConfirm(true) }
+                    onConfirm = {
+                        // 开启伪熄屏时联动打开手势识别，保证有便捷退出途径
+                        if (!SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)) {
+                            SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, true)
+                            ConfigImportSignal.notifyRemoteChanged(ctx)
+                            syncingSwitchState = true
+                            binding.gestureDetectSwitch.isChecked = true
+                            syncingSwitchState = false
+                        }
+                        onConfirm(true)
+                    }
                 )
             }
         }
@@ -591,9 +603,24 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             if (syncingSwitchState) return@setOnCheckedChangeListener
             confirmForceMask(checked, applyForceMask)
         }
+        // 伪息屏增强分组开关：仅控制子项展开/收起，功能开关保留在子项内（forcePseudoMaskSwitch）
+        val applyPseudoMaskGroupExpand = { expanded: Boolean ->
+            binding.pseudoMaskGroupContent.visibility = if (expanded) View.VISIBLE else View.GONE
+            binding.pseudoMaskGroupArrow.animate()
+                .rotation(if (expanded) 180f else 0f)
+                .setDuration(200)
+                .start()
+        }
         binding.pseudoMaskGroupSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
-            confirmForceMask(checked, applyForceMask)
+            applyPseudoMaskGroupExpand(checked)
+        }
+        binding.pseudoMaskGroupHeader.setOnClickListener {
+            val expand = !binding.pseudoMaskGroupSwitch.isChecked
+            syncingSwitchState = true
+            binding.pseudoMaskGroupSwitch.isChecked = expand
+            syncingSwitchState = false
+            applyPseudoMaskGroupExpand(expand)
         }
         binding.pseudoMaskNoClockSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
@@ -605,16 +632,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
         binding.pseudoMaskDelayLayout.setOnClickListener {
             showPseudoMaskDelayDialog(SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600))
-        }
-        // 伪息屏分组折叠
-        var groupExpanded = false
-        binding.pseudoMaskGroupHeader.setOnClickListener {
-            groupExpanded = !groupExpanded
-            binding.pseudoMaskGroupContent.visibility = if (groupExpanded) View.VISIBLE else View.GONE
-            binding.pseudoMaskGroupArrow.animate()
-                .rotation(if (groupExpanded) 180f else 0f)
-                .setDuration(200)
-                .start()
         }
         binding.introduceLayout.setOnClickListener {
             ctx.startActivity(Intent(ctx, QuestionAndAnswerActivity::class.java))
@@ -741,7 +758,10 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.backToHomeSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
-            binding.pseudoMaskGroupSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
+            // 分组开关仅控制展开，默认展开便于查看子项；内容显隐随开关
+            binding.pseudoMaskGroupSwitch.isChecked = true
+            binding.pseudoMaskGroupContent.visibility = View.VISIBLE
+            binding.pseudoMaskGroupArrow.rotation = 180f
             val delay = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600)
             binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
             binding.pseudoMaskNoClockSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
@@ -751,8 +771,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.chainStartStatusView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
             // 电量智能预警
             val alertEnabled = SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
-            binding.batteryAlertGroupSwitch.isChecked = alertEnabled
             binding.batterySmartAlertSwitch.isChecked = alertEnabled
+            // 分组开关仅控制展开，默认展开便于查看子项；内容显隐随开关
+            binding.batteryAlertGroupSwitch.isChecked = true
+            binding.batteryAlertGroupContent.visibility = View.VISIBLE
+            binding.batteryAlertGroupArrow.rotation = 180f
             val warningMinute = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60).coerceIn(0, 1439)
             binding.batteryWarningTimeValue.text = String.format("%02d:%02d", warningMinute / 60, warningMinute % 60)
             val rangeStart = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)
