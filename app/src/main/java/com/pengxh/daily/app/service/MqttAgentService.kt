@@ -61,7 +61,10 @@ class MqttAgentService : Service() {
         }
 
         fun isRunning(): Boolean = instance != null
-        fun isConnected(): Boolean = instance?._connected ?: false
+        /** 连接态须同时满足「开关开启」，否则关闭开关到 onDestroy 执行之间存在窗口，
+         * 期间 instance 未置空、_connected 仍为 true，UI 会短暂残留「已连接」。 */
+        fun isConnected(): Boolean =
+            instance?._connected == true && SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
         fun isBound(): Boolean = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
 
         /**
@@ -1011,6 +1014,7 @@ class MqttAgentService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         try { unregisterReceiver(remoteChangedReceiver) } catch (_: Exception) { }
+        _connected = false
         instance = null
         stateListener = null
         bindingStateListener = null

@@ -888,16 +888,10 @@
                             android:focusable="true"
                             android:background="?attr/selectableItemBackground">
 
-                            <ImageView
-                                android:layout_width="@dimen/size_28"
-                                android:layout_height="@dimen/size_28"
-                                android:layout_marginStart="@dimen/dp_28"
-                                android:src="@drawable/ic_guide" android:contentDescription="@null" />
-
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="@dimen/dp_12"
+                                android:layout_marginStart="@dimen/dp_28"
                                 android:layout_weight="1"
                                 android:orientation="vertical">
 
@@ -951,16 +945,10 @@
                             android:focusable="true"
                             android:background="?attr/selectableItemBackground">
 
-                            <ImageView
-                                android:layout_width="@dimen/size_28"
-                                android:layout_height="@dimen/size_28"
-                                android:layout_marginStart="@dimen/dp_28"
-                                android:src="@drawable/ic_settings_toggle" android:contentDescription="@null" />
-
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="@dimen/dp_12"
+                                android:layout_marginStart="@dimen/dp_28"
                                 android:layout_weight="1"
                                 android:orientation="vertical">
 
@@ -1014,16 +1002,10 @@
                             android:focusable="true"
                             android:background="?attr/selectableItemBackground">
 
-                            <ImageView
-                                android:layout_width="@dimen/size_28"
-                                android:layout_height="@dimen/size_28"
-                                android:layout_marginStart="@dimen/dp_28"
-                                android:src="@drawable/ic_remote_service" android:contentDescription="@null" />
-
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="@dimen/dp_12"
+                                android:layout_marginStart="@dimen/dp_28"
                                 android:layout_weight="1"
                                 android:orientation="vertical">
 
@@ -1077,16 +1059,10 @@
                             android:focusable="true"
                             android:background="?attr/selectableItemBackground">
 
-                            <ImageView
-                                android:layout_width="@dimen/size_28"
-                                android:layout_height="@dimen/size_28"
-                                android:layout_marginStart="@dimen/dp_28"
-                                android:src="@drawable/ic_settings_general" android:contentDescription="@null" />
-
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="@dimen/dp_12"
+                                android:layout_marginStart="@dimen/dp_28"
                                 android:layout_weight="1"
                                 android:orientation="vertical">
 
