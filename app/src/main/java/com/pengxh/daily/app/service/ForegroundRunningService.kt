@@ -417,6 +417,21 @@ val filter = IntentFilter().apply {
             val flowKey = "battery_alert_flow_$dayKey"    // 窗口命中（流程启动）标记
             val resultKey = "battery_alert_logged_$dayKey" // 结果（触发/未触发/已发过）标记
 
+            // 预警时间变更检测：本地/远程修改预警时间后，重置当日流程/结果标记，
+            // 保证改动后到点必然重新检测并落日志（否则当日标记已置位会吞掉改动后的检测，
+            // 造成「改时间后到点无日志」的假象）。不重置 sentKey，避免已发送时重复发邮件。
+            val warningMinuteKey = "battery_alert_warning_minute_$dayKey"
+            val lastMinute = SaveKeyValues.loadInt(warningMinuteKey, -1)
+            if (lastMinute != warningMinute && SaveKeyValues.containsKey(warningMinuteKey)) {
+                SaveKeyValues.removeKey(flowKey)
+                SaveKeyValues.removeKey(resultKey)
+                LogFileManager.action(
+                    "电量智能预警：预警时间变更（${BatteryPredictor.formatWarningMinute(lastMinute)} → " +
+                        "${BatteryPredictor.formatWarningMinute(warningMinute)}），重置当日检测标记"
+                )
+            }
+            SaveKeyValues.saveInt(warningMinuteKey, warningMinute)
+
             if (SaveKeyValues.loadBoolean(sentKey, false)) {
                 // 今日已成功发送过：跳过检测，但仍留一条记录，避免“到点无日志”盲区
                 if (!SaveKeyValues.loadBoolean(resultKey, false)) {
