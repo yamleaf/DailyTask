@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.TransitionDrawable
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.text.TextUtils
@@ -30,6 +31,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -63,8 +65,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Credentials
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
@@ -413,6 +418,11 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     false
                 } else {
                     SaveKeyValues.saveString(key, value)
+                    // 密码需同步写入加密存储：连接时优先读 MqttSecureConfig（mqtt_dev_pass），
+                    // 否则旧加密值会一直覆盖新改的明文，导致「后台账户正确但连接提示用户名或密码错误」。
+                    if (key == Constant.MQTT_PASS_KEY) {
+                        MqttSecureConfig.savePass(value)
+                    }
                     target.text = if (isSecret) "已设置" else value
                     ConfigImportSignal.notifyRemoteChanged(ctx)
                     "已保存".show(ctx)
@@ -911,74 +921,121 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
     }
 
-    private fun fetchApiClients(
+    private data class ApiClientInfo(
+        val clientId: String,
+        val username: String,
+        val ip: String,
+        val port: String,
+        val protoVer: String,
+        val keepalive: String,
+        val connected: Boolean,
+        val connectedAt: String,
+        val disconnectedAt: String,
+        val subscriptionsCnt: Int,
+        val recvPkt: Long,
+        val sendPkt: Long,
+        val recvMsg: Long,
+        val sendMsg: Long
+    )
+
+    private var apiClientsCache: List<ApiClientInfo> = emptyList()
+
+    private val dip = { px: Int ->
+        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, px.toFloat(), resources.displayMetrics).toInt()
+    }
+
+    /** 通用 Serverless API 请求 */
+    private fun apiCall(
         baseUrl: String,
         auth: String,
-        dialog: AlertDialog,
-        onResult: (String, List<String>) -> Unit
+        path: String,
+        method: String = "GET",
+        jsonBody: String? = null,
+        onDone: (Boolean, String, JSONObject?) -> Unit
     ) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                val builder = Request.Builder()
+                    .url("$baseUrl$path")
+                    .header("Authorization", auth)
+                    .header("Accept", "application/json")
+                val body = jsonBody?.let {
+                    it.toRequestBody("application/json; charset=utf-8".toMediaType())
+                }
+                when (method) {
+                    "GET" -> builder.get()
+                    "DELETE" -> builder.delete(body)
+                    else -> builder.post(body ?: ByteArray(0).toRequestBody())
+                }
                 val client = OkHttpClient.Builder()
                     .connectTimeout(10, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.SECONDS)
                     .build()
-                val request = Request.Builder()
-                    .url("$baseUrl/clients?limit=100")
-                    .header("Authorization", auth)
-                    .header("Accept", "application/json")
-                    .get()
-                    .build()
-                client.newCall(request).execute().use { resp ->
-                    val body = resp.body?.string().orEmpty()
+                client.newCall(builder.build()).execute().use { resp ->
+                    val respBody = resp.body?.string().orEmpty()
                     if (resp.code in 200..299) {
-                        val array = JSONObject(body).optJSONArray("data")
-                        val list = mutableListOf<String>()
-                        if (array != null) {
-                            for (i in 0 until array.length()) {
-                                val obj = array.optJSONObject(i)
-                                val clientId = obj?.optString("clientid") ?: ""
-                                val ip = obj?.optString("ip_address") ?: ""
-                                if (clientId.isNotBlank()) list.add("$clientId|$ip")
-                            }
-                        }
-                        val title = "在线客户端（${list.size}）"
-                        withContext(Dispatchers.Main) {
-                            onResult(title, list)
-                        }
+                        val json = if (respBody.isBlank()) null else JSONObject(respBody)
+                        withContext(Dispatchers.Main) { onDone(true, "", json) }
                     } else {
-                        withContext(Dispatchers.Main) {
-                            onResult("API 请求失败：HTTP ${resp.code}", emptyList())
-                        }
+                        val msg = runCatching {
+                            JSONObject(respBody).optString("message", "").ifBlank { "HTTP ${resp.code}" }
+                        }.getOrDefault("HTTP ${resp.code}")
+                        withContext(Dispatchers.Main) { onDone(false, msg, null) }
                     }
                 }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    onResult("API 请求异常：${e.message}", emptyList())
-                }
+                withContext(Dispatchers.Main) { onDone(false, e.message ?: "请求异常", null) }
             }
         }
     }
 
-    private fun kickApiClient(baseUrl: String, clientId: String, auth: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val client = OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(10, TimeUnit.SECONDS)
-                    .build()
-                val request = Request.Builder()
-                    .url("$baseUrl/clients/${android.net.Uri.encode(clientId)}")
-                    .header("Authorization", auth)
-                    .header("Accept", "application/json")
-                    .delete()
-                    .build()
-                client.newCall(request).execute().use { resp ->
-                    val msg = if (resp.code in 200..299) "已下线客户端 $clientId" else "下线失败：HTTP ${resp.code}"
-                    withContext(Dispatchers.Main) { msg.show(ctx) }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { "下线异常：${e.message}".show(ctx) }
+    private fun fetchApiClients(
+        baseUrl: String,
+        auth: String,
+        onResult: (String, List<ApiClientInfo>) -> Unit
+    ) {
+        apiCall(baseUrl, auth, "/clients?limit=100") { ok, msg, json ->
+            if (!ok) {
+                onResult("API 请求失败：$msg", emptyList())
+                return@apiCall
+            }
+            val array = json?.optJSONArray("data") ?: JSONArray()
+            val list = mutableListOf<ApiClientInfo>()
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val clientId = obj.optString("clientid")
+                if (clientId.isBlank()) continue
+                list.add(
+                    ApiClientInfo(
+                        clientId = clientId,
+                        username = obj.optString("username"),
+                        ip = obj.optString("ip_address"),
+                        port = obj.opt("port")?.toString() ?: "",
+                        protoVer = obj.opt("proto_ver")?.toString() ?: "",
+                        keepalive = obj.opt("keepalive")?.toString() ?: "",
+                        connected = obj.optBoolean("connected", true),
+                        connectedAt = obj.optString("connected_at"),
+                        disconnectedAt = obj.optString("disconnected_at"),
+                        subscriptionsCnt = obj.optInt("subscriptions_cnt", 0),
+                        recvPkt = obj.optLong("recv_pkt", 0),
+                        sendPkt = obj.optLong("send_pkt", 0),
+                        recvMsg = obj.optLong("recv_msg", 0),
+                        sendMsg = obj.optLong("send_msg", 0)
+                    )
+                )
+            }
+            onResult("在线客户端（${list.size}）", list)
+        }
+    }
+
+    private fun kickApiClient(baseUrl: String, clientId: String, auth: String, onDone: ((Boolean) -> Unit)? = null) {
+        apiCall(baseUrl, auth, "/clients/${Uri.encode(clientId)}", "DELETE") { ok, msg, _ ->
+            if (ok) {
+                "已下线客户端 $clientId".show(ctx)
+                onDone?.invoke(true)
+            } else {
+                "下线失败：$msg".show(ctx)
+                onDone?.invoke(false)
             }
         }
     }
@@ -986,80 +1043,330 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     private fun showApiClients() {
         val config = loadApiConfig() ?: return
         val (baseUrl, auth) = config
-        val dialog = MaterialAlertDialogBuilder(ctx)
-            .setTitle("在线客户端")
-            .setMessage("正在查询…")
-            .setPositiveButton("刷新", null)
-            .setNegativeButton("关闭", null)
-            .create()
-        dialog.show()
-        fetchApiClients(baseUrl, auth, dialog) { title, clients ->
-            renderApiClients(dialog, title, clients, baseUrl, auth)
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
+        }
+        val titleView = TextView(ctx).apply {
+            text = "正在查询…"
+            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            textSize = 14f
+            setPadding(0, 0, 0, dip(8))
+        }
+        container.addView(titleView)
+        val filterEdit = EditText(ctx).apply {
+            hint = "过滤：用户名 / IP / 客户端ID"
+            textSize = 13f
+            maxLines = 1
+            visibility = View.GONE
+        }
+        filterEdit.doOnTextChanged { text, _, _, _ ->
+            renderApiClientList(container, baseUrl, auth, text?.toString()?.trim().orEmpty())
+        }
+        container.addView(filterEdit)
+        val listHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(listHost)
+        val scroll = ScrollView(ctx).apply { addView(container) }
+        UnifiedDialogKit.showForm(
+            ctx,
+            scroll,
+            title = "在线客户端",
+            positiveText = "刷新",
+            negativeText = "关闭",
+            onConfirm = {
+                refreshApiClients(container, baseUrl, auth)
+                false
+            }
+        )
+        refreshApiClients(container, baseUrl, auth)
+    }
+
+    private fun refreshApiClients(container: LinearLayout, baseUrl: String, auth: String) {
+        val titleView = container.getChildAt(0) as TextView
+        fetchApiClients(baseUrl, auth) { title, clients ->
+            apiClientsCache = clients
+            titleView.text = title
+            val filterEdit = container.getChildAt(1) as EditText
+            filterEdit.visibility = if (clients.isNotEmpty()) View.VISIBLE else View.GONE
+            renderApiClientList(container, baseUrl, auth, filterEdit.text.toString().trim())
         }
     }
 
-    private fun renderApiClients(
-        dialog: AlertDialog,
-        title: String,
-        clients: List<String>,
-        baseUrl: String,
-        auth: String
-    ) {
-        val container = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 12, 24, 12)
+    private fun renderApiClientList(container: LinearLayout, baseUrl: String, auth: String, keyword: String) {
+        val listHost = container.getChildAt(2) as LinearLayout
+        listHost.removeAllViews()
+        val filtered = apiClientsCache.filter {
+            keyword.isBlank() ||
+                it.clientId.contains(keyword, ignoreCase = true) ||
+                it.username.contains(keyword, ignoreCase = true) ||
+                it.ip.contains(keyword, ignoreCase = true)
         }
-        container.addView(TextView(ctx).apply {
-            text = title
-            setTextColor(resources.getColor(R.color.text_hint_color, theme))
-            textSize = 14f
-            setPadding(0, 0, 0, 8)
-        })
-        if (clients.isEmpty()) {
-            container.addView(TextView(ctx).apply {
-                text = if (title.contains("无在线客户端")) "当前没有在线客户端" else "无客户端信息"
+        if (filtered.isEmpty()) {
+            listHost.addView(TextView(ctx).apply {
+                text = if (apiClientsCache.isEmpty()) "当前没有在线客户端" else "没有匹配的客户端"
                 setTextColor(resources.getColor(R.color.text_hint_color, theme))
                 textSize = 13f
-                setPadding(0, 8, 0, 0)
+                setPadding(0, dip(8), 0, 0)
             })
-        } else {
-            clients.forEach { entry ->
-                val parts = entry.split("|")
-                val clientId = parts.getOrElse(0) { entry }
-                val ip = parts.getOrElse(1) { "" }
+            return
+        }
+        filtered.forEach { client ->
+            listHost.addView(buildClientRow(container, baseUrl, auth, client))
+        }
+    }
+
+    private fun buildClientRow(container: LinearLayout, baseUrl: String, auth: String, client: ApiClientInfo): View {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dip(6), 0, dip(6))
+        }
+        val dot = View(ctx).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (client.connected) Color.GREEN else Color.GRAY)
+            }
+            layoutParams = LinearLayout.LayoutParams(dip(8), dip(8))
+        }
+        row.addView(dot)
+        val mid = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dip(8), 0, 0, 0)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        mid.addView(TextView(ctx).apply {
+            text = client.clientId
+            setTextColor(resources.getColor(R.color.text_default_color, theme))
+            textSize = 13f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+        })
+        val sub = buildString {
+            if (client.username.isNotBlank()) {
+                append(client.username); append("  ")
+            }
+            if (client.ip.isNotBlank()) append("${client.ip}${if (client.port.isNotBlank()) ":${client.port}" else ""}")
+            append("  订阅${client.subscriptionsCnt}")
+        }.trim()
+        mid.addView(TextView(ctx).apply {
+            text = sub
+            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            textSize = 12f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+        })
+        row.addView(mid)
+        row.setOnClickListener { showClientDetail(baseUrl, auth, client, container) }
+        row.addView(TextView(ctx).apply {
+            text = "下线"
+            setTextColor(R.color.red.convertColor(ctx))
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dip(16), 0, 0, 0)
+            setOnClickListener {
+                UnifiedDialogKit.showWarning(
+                    ctx,
+                    "下线客户端",
+                    "确定下线客户端 ${client.clientId}？下线会终结其连接与会话。",
+                    confirmText = "下线"
+                ) {
+                    kickApiClient(baseUrl, client.clientId, auth) { refreshApiClients(container, baseUrl, auth) }
+                }
+            }
+        })
+        return row
+    }
+
+    private fun showClientDetail(baseUrl: String, auth: String, client: ApiClientInfo, container: LinearLayout) {
+        val detail = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        fun addRow(k: String, v: String) {
+            if (v.isBlank()) return
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dip(4), 0, dip(4))
+            }
+            row.addView(TextView(ctx).apply {
+                text = k
+                setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(dip(76), ViewGroup.LayoutParams.WRAP_CONTENT)
+            })
+            row.addView(TextView(ctx).apply {
+                text = v
+                setTextColor(resources.getColor(R.color.text_default_color, theme))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            detail.addView(row)
+        }
+        addRow("客户端ID", client.clientId)
+        addRow("用户名", client.username)
+        addRow("地址", "${client.ip}${if (client.port.isNotBlank()) ":${client.port}" else ""}")
+        addRow("协议", "MQTT v${client.protoVer}")
+        addRow("保活间隔", "${client.keepalive}s")
+        addRow("连接状态", if (client.connected) "在线" else "离线")
+        addRow("连接时间", client.connectedAt)
+        addRow("离线时间", client.disconnectedAt)
+        addRow("订阅数", "${client.subscriptionsCnt}")
+        addRow("收/发报文", "${client.recvPkt} / ${client.sendPkt}")
+        addRow("收/发消息", "${client.recvMsg} / ${client.sendMsg}")
+        val scroll = ScrollView(ctx).apply { addView(detail) }
+        UnifiedDialogKit.showForm(
+            ctx,
+            scroll,
+            title = "客户端详情",
+            positiveText = "订阅管理",
+            negativeText = "关闭",
+            onConfirm = {
+                showClientSubscriptions(baseUrl, auth, client.clientId)
+                true
+            }
+        )
+    }
+
+    private fun showClientSubscriptions(baseUrl: String, auth: String, clientId: String) {
+        val subContainer = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val statusView = TextView(ctx).apply {
+            text = "正在查询订阅…"
+            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            textSize = 13f
+            setPadding(0, 0, 0, dip(4))
+        }
+        subContainer.addView(statusView)
+        val listHost = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        subContainer.addView(listHost)
+        val topicEdit = EditText(ctx).apply {
+            hint = "订阅主题，如 sensor/+/data"
+            textSize = 13f
+            maxLines = 1
+        }
+        subContainer.addView(
+            topicEdit,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = dip(6)
+            }
+        )
+        subContainer.addView(TextView(ctx).apply {
+            text = "＋ 新增订阅"
+            setTextColor(ContextCompat.getColor(ctx, R.color.md_primary))
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dip(6), 0, 0)
+            setOnClickListener {
+                val topic = topicEdit.text.toString().trim()
+                if (topic.isBlank()) {
+                    "请输入订阅主题".show(ctx)
+                    return@setOnClickListener
+                }
+                subscribeClientTopic(baseUrl, auth, clientId, topic, 0) {
+                    if (it) fetchClientSubscriptions(baseUrl, auth, clientId, statusView, listHost)
+                }
+            }
+        })
+        val scroll = ScrollView(ctx).apply { addView(subContainer) }
+        UnifiedDialogKit.showForm(
+            ctx,
+            scroll,
+            title = "订阅管理 · $clientId",
+            positiveText = "刷新",
+            negativeText = "关闭",
+            onConfirm = {
+                fetchClientSubscriptions(baseUrl, auth, clientId, statusView, listHost)
+                false
+            }
+        )
+        fetchClientSubscriptions(baseUrl, auth, clientId, statusView, listHost)
+    }
+
+    private fun fetchClientSubscriptions(
+        baseUrl: String,
+        auth: String,
+        clientId: String,
+        statusView: TextView,
+        listHost: LinearLayout
+    ) {
+        apiCall(baseUrl, auth, "/clients/${Uri.encode(clientId)}/subscriptions") { ok, msg, json ->
+            listHost.removeAllViews()
+            if (!ok) {
+                statusView.text = "查询失败：$msg"
+                return@apiCall
+            }
+            val array = json?.optJSONArray("data") ?: JSONArray()
+            statusView.text = "订阅主题（${array.length()}）"
+            if (array.length() == 0) {
+                listHost.addView(TextView(ctx).apply {
+                    text = "该客户端暂无订阅"
+                    setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                    textSize = 13f
+                    setPadding(0, dip(4), 0, 0)
+                })
+                return@apiCall
+            }
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val topic = obj.optString("topic")
+                val qos = obj.optInt("qos", 0)
                 val row = LinearLayout(ctx).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, 6, 0, 6)
+                    setPadding(0, dip(5), 0, dip(5))
                 }
                 row.addView(TextView(ctx).apply {
-                    text = clientId
+                    text = "$topic（QoS$qos）"
                     setTextColor(resources.getColor(R.color.text_default_color, theme))
                     textSize = 13f
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.MIDDLE
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 })
-                if (ip.isNotBlank()) {
-                    row.addView(TextView(ctx).apply {
-                        text = ip
-                        setTextColor(resources.getColor(R.color.text_hint_color, theme))
-                        textSize = 12f
-                    })
-                }
                 row.addView(TextView(ctx).apply {
-                    text = "下线"
+                    text = "退订"
                     setTextColor(R.color.red.convertColor(ctx))
                     textSize = 13f
                     setTypeface(null, Typeface.BOLD)
-                    setPadding(16, 0, 0, 0)
-                    setOnClickListener { kickApiClient(baseUrl, clientId, auth) }
+                    setPadding(dip(16), 0, 0, 0)
+                    setOnClickListener {
+                        UnifiedDialogKit.showWarning(
+                            ctx,
+                            "退订主题",
+                            "确定取消客户端对 $topic 的订阅？",
+                            confirmText = "退订"
+                        ) {
+                            unsubscribeClientTopic(baseUrl, auth, clientId, topic) {
+                                if (it) fetchClientSubscriptions(baseUrl, auth, clientId, statusView, listHost)
+                            }
+                        }
+                    }
                 })
-                container.addView(row)
+                listHost.addView(row)
             }
         }
-        dialog.setView(container)
-        dialog.setTitle("在线客户端")
+    }
+
+    private fun subscribeClientTopic(baseUrl: String, auth: String, clientId: String, topic: String, qos: Int, onDone: (Boolean) -> Unit) {
+        val body = JSONObject().put("topic", topic).put("qos", qos).toString()
+        apiCall(baseUrl, auth, "/clients/${Uri.encode(clientId)}/subscribe", "POST", body) { ok, msg, _ ->
+            if (ok) {
+                "已订阅 $topic".show(ctx)
+                onDone(true)
+            } else {
+                "订阅失败：$msg".show(ctx)
+                onDone(false)
+            }
+        }
+    }
+
+    private fun unsubscribeClientTopic(baseUrl: String, auth: String, clientId: String, topic: String, onDone: (Boolean) -> Unit) {
+        val body = JSONObject().put("topic", topic).toString()
+        apiCall(baseUrl, auth, "/clients/${Uri.encode(clientId)}/unsubscribe", "POST", body) { ok, msg, _ ->
+            if (ok) {
+                "已取消订阅 $topic".show(ctx)
+                onDone(true)
+            } else {
+                "退订失败：$msg".show(ctx)
+                onDone(false)
+            }
+        }
     }
 
     // ═══════════════════════ 公共 MQTT / 引导 ═══════════════════════
@@ -1430,7 +1737,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 positiveText = "关闭",
                 negativeText = "跳转 EMQX",
                 onCancel = {
-                    openUrl("https://www.emqx.com/zh/free-trial")
+                    openUrl("https://www.emqx.com/zh")
                     onOk?.invoke()
                     true
                 },
