@@ -266,6 +266,9 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     private fun updateHeroUI() {
         val enabled = SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
         val connected = MqttAgentService.isConnected()
+        // 状态标签与图标必须同源同刻刷新：仅依赖 stateListener 回调时，若回调在 onPause 期间到达
+        // （listener 已置 null）或被丢弃，heroConnStatus 会永久停留在旧值，直到切 Tab 才纠正
+        updateStatusUI(connected)
         binding.root.removeCallbacks(retryRunnable)
         val retrying = enabled && !connected
         val nextReconnectIn = ((MqttAgentService.nextReconnectAtMs - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
@@ -974,7 +977,12 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 client.newCall(builder.build()).execute().use { resp ->
                     val respBody = resp.body?.string().orEmpty()
                     if (resp.code in 200..299) {
-                        val json = if (respBody.isBlank()) null else JSONObject(respBody)
+                        // 兼容两种响应形态：{"data":[...]} 对象，或 /clients/{id}/subscriptions 直接返回裸数组
+                        val json = when {
+                            respBody.isBlank() -> null
+                            respBody.trimStart().startsWith("[") -> JSONObject().put("data", JSONArray(respBody))
+                            else -> JSONObject(respBody)
+                        }
                         withContext(Dispatchers.Main) { onDone(true, "", json) }
                     } else {
                         val msg = runCatching {
@@ -1049,7 +1057,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         val titleView = TextView(ctx).apply {
             text = "正在查询…"
-            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
             textSize = 14f
             setPadding(0, 0, 0, dip(8))
         }
@@ -1104,7 +1112,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         if (filtered.isEmpty()) {
             listHost.addView(TextView(ctx).apply {
                 text = if (apiClientsCache.isEmpty()) "当前没有在线客户端" else "没有匹配的客户端"
-                setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
                 textSize = 13f
                 setPadding(0, dip(8), 0, 0)
             })
@@ -1150,7 +1158,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }.trim()
         mid.addView(TextView(ctx).apply {
             text = sub
-            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
             textSize = 12f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.MIDDLE
@@ -1187,13 +1195,13 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             }
             row.addView(TextView(ctx).apply {
                 text = k
-                setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
                 textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(dip(76), ViewGroup.LayoutParams.WRAP_CONTENT)
             })
             row.addView(TextView(ctx).apply {
                 text = v
-                setTextColor(resources.getColor(R.color.text_default_color, theme))
+                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
                 textSize = 13f
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
@@ -1228,7 +1236,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val subContainer = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         val statusView = TextView(ctx).apply {
             text = "正在查询订阅…"
-            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
             textSize = 13f
             setPadding(0, 0, 0, dip(4))
         }
@@ -1296,7 +1304,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             if (array.length() == 0) {
                 listHost.addView(TextView(ctx).apply {
                     text = "该客户端暂无订阅"
-                    setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                    setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
                     textSize = 13f
                     setPadding(0, dip(4), 0, 0)
                 })

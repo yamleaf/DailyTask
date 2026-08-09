@@ -1514,13 +1514,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 addView(TextView(ctx).apply {
                     text = key
                     textSize = 14f
-                    setTextColor(resources.getColor(R.color.text_hint_color, theme))
+                    setTextColor(resources.getColor(R.color.md_onSurfaceVariant, theme))
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.5f)
                 })
                 addView(TextView(ctx).apply {
                     text = value
                     textSize = 14f
-                    setTextColor(resources.getColor(R.color.text_default_color, theme))
+                    setTextColor(resources.getColor(R.color.md_onSurface, theme))
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 })
             })
