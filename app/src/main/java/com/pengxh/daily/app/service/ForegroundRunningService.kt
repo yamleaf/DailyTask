@@ -411,18 +411,35 @@ val filter = IntentFilter().apply {
             val windowMs = 5 * 60 * 1000L // ±5 分钟
             if (now !in (warningTimeMs - windowMs)..(warningTimeMs + windowMs)) return
 
-            // 节流：每天只处理/记录一次预警流程
+            // 每日流程标记：用于区分「检测流程是否执行过」与「执行了但未触发」
             val dayKey = now / 86400000
             val sentKey = "battery_alert_sent_$dayKey"
-            val loggedKey = "battery_alert_logged_$dayKey"
-            if (SaveKeyValues.loadBoolean(sentKey, false)) return
+            val flowKey = "battery_alert_flow_$dayKey"    // 窗口命中（流程启动）标记
+            val resultKey = "battery_alert_logged_$dayKey" // 结果（触发/未触发/已发过）标记
+
+            if (SaveKeyValues.loadBoolean(sentKey, false)) {
+                // 今日已成功发送过：跳过检测，但仍留一条记录，避免“到点无日志”盲区
+                if (!SaveKeyValues.loadBoolean(resultKey, false)) {
+                    LogFileManager.action("电量智能预警：今日已发送过，跳过检测")
+                    SaveKeyValues.saveBoolean(resultKey, true)
+                }
+                return
+            }
+
+            // 窗口命中即记录“流程已启动”，证明检测代码在到点时确实执行过；
+            // 若文件日志里连这一行都没有，说明 checkBatterySmartAlert 在 16:30 根本没被调用
+            // （多半是 ForegroundRunningService 已被系统回收 / 精确闹钟未触发 / 开关被关）。
+            if (!SaveKeyValues.loadBoolean(flowKey, false)) {
+                LogFileManager.action("电量智能预警检测窗口命中（预警时间 ${BatteryPredictor.formatWarningMinute(warningMinute)}），开始检测")
+                SaveKeyValues.saveBoolean(flowKey, true)
+            }
 
             val result = BatteryPredictor.checkAlert(this)
             if (!result.shouldAlert) {
                 // 到点未触发：记录原因（每天一条），便于排查“到点无邮件”
-                if (!SaveKeyValues.loadBoolean(loggedKey, false)) {
+                if (!SaveKeyValues.loadBoolean(resultKey, false)) {
                     LogFileManager.action("电量智能预警未触发：${result.reason}")
-                    SaveKeyValues.saveBoolean(loggedKey, true)
+                    SaveKeyValues.saveBoolean(resultKey, true)
                 }
                 return
             }
@@ -447,7 +464,7 @@ val filter = IntentFilter().apply {
                 }.toString()
             )
             BatteryPredictor.markAlertSent(this)
-            SaveKeyValues.saveBoolean(loggedKey, true)
+            SaveKeyValues.saveBoolean(resultKey, true)
         } catch (e: Exception) {
             LogFileManager.error("电量智能预警检查失败：${e.message}")
             Log.e(javaClass.simpleName, "电量智能预警检查失败", e)
