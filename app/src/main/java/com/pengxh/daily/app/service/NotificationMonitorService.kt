@@ -513,6 +513,7 @@ class NotificationMonitorService : NotificationListenerService() {
 
                             delay(minOf(1000L, remaining).coerceAtLeast(1))
                         }
+                        FloatingWindowController.stopFloatSession()
                         // 倒计时结束：关闭文本检测，先取截图（目标 App 还在前台时），
                         // 然后再返回主页。避免回到桌面/本 App 后再截图截到桌面。
                         AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
@@ -580,6 +581,8 @@ class NotificationMonitorService : NotificationListenerService() {
                             }
                         }
                     } finally {
+                        // 异常路径兜底：确保悬浮窗一定收起
+                        FloatingWindowController.stopFloatSession()
                         if (maskWasShowing) {
                             LogFileManager.writeLog("远程打卡结束，恢复伪息屏蒙层")
                             withContext(Dispatchers.Main) {

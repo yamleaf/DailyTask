@@ -431,6 +431,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                  *   6. 发送通知
                  */
                 lifecycleScope.launch {
+                    try {
                     val countdownTarget = SystemClock.elapsedRealtime() + 10_000L
                     while (isActive) {
                         val remaining = countdownTarget - SystemClock.elapsedRealtime()
@@ -469,6 +470,10 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                             StatusReporter.buildScreenshotResultHtml(true, "截图已发送，请查看附件"),
                             imagePath
                         )
+                    }
+                    } finally {
+                        // 遥控截屏会话结束：无论正常完成还是异常，统一收起悬浮窗倒计时
+                        FloatingWindowController.stopFloatSession()
                     }
                 }
             }

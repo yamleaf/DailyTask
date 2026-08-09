@@ -43,7 +43,12 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     private var initialTouchY = 0f
     private var memoryMonitorJob: Job? = null
     private var lastMemoryAlertAt = 0L
-    private var floatingVisible = true
+    // 悬浮窗可见性由两个独立维度决定：
+    // 1) floatSessionActive —— 是否处于「被控端主动跳到目标 App」的操作会话中（由 openApplication 统一 start、各操作结束 stop）
+    // 2) visibilityAllowed —— 蒙层是否未遮挡（由 show/hide 控制，蒙层显示时临时隐藏避免截到黑屏）
+    // 最终可见 = floatSessionActive && visibilityAllowed
+    private var floatSessionActive = false
+    private var visibilityAllowed = true
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
@@ -82,10 +87,10 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
 
         // 收集悬浮窗控制事件
+        // 倒计时数字只负责刷新文本；是否可见由 recomputeVisibility() 统一决定（打卡中且蒙层未遮挡）
         launch {
             FloatingWindowController.timeTick.collect { tick ->
                 binding.timeView.text = "${tick}s"
-                binding.root.alpha = if (tick < 1) 0.0f else 1.0f
             }
         }
         launch {
@@ -94,20 +99,24 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
         launch {
-            FloatingWindowController.visibility.collect { visible ->
-                floatingVisible = visible
-                if (visible) {
-                    binding.root.alpha = 1.0f
+            FloatingWindowController.visibility.collect { allowed ->
+                visibilityAllowed = allowed
+                recomputeVisibility()
+            }
+        }
+        launch {
+            FloatingWindowController.floatSessionActive.collect { active ->
+                floatSessionActive = active
+                if (active) {
                     val time = SaveKeyValues.loadInt(
                         Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
                     )
                     binding.timeView.text = "${time}s"
-                    applyWaveAnimation()
                 } else {
-                    binding.root.alpha = 0.0f
                     binding.timeView.text = "0s"
                     binding.waveProgressView.stopWaveAnimation()
                 }
+                recomputeVisibility()
             }
         }
         launch {
@@ -117,7 +126,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
 
-        // 初始隐藏，只在打卡倒计时时显示
+        // 初始隐藏，仅在被控端主动跳到目标 App 操作期间显示
         binding.root.alpha = 0.0f
         binding.timeView.text = "0s"
 
@@ -130,11 +139,18 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
 
     private fun applyWaveAnimation() {
         if (!::binding.isInitialized) return
-        if (floatingVisible && !AppRuntimeConfig.isPowerSaveMode()) {
+        if (floatSessionActive && visibilityAllowed && !AppRuntimeConfig.isPowerSaveMode()) {
             binding.waveProgressView.startWaveAnimation()
         } else {
             binding.waveProgressView.stopWaveAnimation()
         }
+    }
+
+    // 统一计算悬浮窗可见性：仅当「目标 App 操作会话中」且「蒙层未遮挡」时显示
+    private fun recomputeVisibility() {
+        val show = floatSessionActive && visibilityAllowed
+        binding.root.alpha = if (show) 1.0f else 0.0f
+        if (show) applyWaveAnimation() else binding.waveProgressView.stopWaveAnimation()
     }
 
     private fun restartMemoryMonitoring() {

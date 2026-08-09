@@ -4,34 +4,59 @@
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_gravity="center"
-    app:cardBackgroundColor="@color/black"
-    app:cardCornerRadius="@dimen/dp_16">
+    app:cardBackgroundColor="#26263A"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="10dp"
+    app:strokeColor="@color/theme_color"
+    app:strokeWidth="1.5dp">
 
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="@dimen/dp_6"
-        android:paddingVertical="@dimen/dp_4">
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp">
+
+        <ImageView
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginEnd="10dp"
+            android:src="@drawable/ic_clock"
+            app:tint="@color/theme_color" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="打卡倒计时"
+                android:textColor="#B9B9D6"
+                android:textSize="10sp" />
+
+            <com.google.android.material.textview.MaterialTextView
+                android:id="@+id/timeView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="30s"
+                android:textColor="@android:color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:layout_marginHorizontal="10dp"
+            android:layout_marginVertical="4dp"
+            android:background="#4A4A66" />
 
         <com.pengxh.daily.app.widget.WaveProgressView
             android:id="@+id/waveProgressView"
-            android:layout_width="@dimen/dp_24"
-            android:layout_height="@dimen/dp_24" />
-
-        <View
-            android:layout_width="@dimen/dividerLine"
-            android:layout_height="match_parent"
-            android:layout_marginHorizontal="@dimen/dp_6"
-            android:layout_marginVertical="@dimen/dp_4"
-            android:background="@color/white" />
-
-        <com.google.android.material.textview.MaterialTextView
-            android:id="@+id/timeView"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="30s"
-            android:textColor="@color/white" />
+            android:layout_width="26dp"
+            android:layout_height="26dp" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

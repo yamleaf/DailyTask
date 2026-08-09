@@ -17,8 +17,20 @@ object FloatingWindowController {
     private val _visibility = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 1)
     val visibility = _visibility.asSharedFlow()
 
+    // 目标 App 操作会话：被控端主动跳到目标 App 期间显示悬浮窗（打卡/遥控截屏等），与蒙层遮挡状态（visibility）解耦
+    private val _floatSessionActive = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 1)
+    val floatSessionActive = _floatSessionActive.asSharedFlow()
+
     fun updateTime(tick: Int) {
         _timeTick.tryEmit(tick)
+    }
+
+    fun startFloatSession() {
+        _floatSessionActive.tryEmit(true)
+    }
+
+    fun stopFloatSession() {
+        _floatSessionActive.tryEmit(false)
     }
 
     fun setOvertime(seconds: Int) {

@@ -251,25 +251,30 @@ object TaskScheduler {
             var hasCaptured = false
             var captureDeferred: CompletableDeferred<String?>? = null
             val timeoutJob = launch {
-                updateCountdownWithNotification(timeoutSeconds * 1000L) { remaining ->
-                    val tick = (remaining / 1000).toInt()
-                    FloatingWindowController.updateTime(tick)
+                try {
+                    updateCountdownWithNotification(timeoutSeconds * 1000L) { remaining ->
+                        val tick = (remaining / 1000).toInt()
+                        FloatingWindowController.updateTime(tick)
 
-                    // 最后 5 秒兜底截屏（只触发一次）
-                    if (tick <= 5 && !hasCaptured) {
-                        if (resultSource == 1) {
-                            // 截屏模式：MediaProjection
-                            hasCaptured = true
-                            captureDeferred = CaptureImageService.requestCaptureScreen()
-                        } else if (resultSource == 2) {
-                            // 无障碍模式（文本/截屏反馈）：AccessibilityService.takeScreenshot 兜底截屏。
-                            // 文本反馈模式下识别不到成功结果时，也截一张发过去，作为“看不到文本”时的兜底。
-                            hasCaptured = true
-                            val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
-                            captureDeferred = a11yDeferred
-                                ?: CompletableDeferred<String?>().apply { complete("") }
+                        // 最后 5 秒兜底截屏（只触发一次）
+                        if (tick <= 5 && !hasCaptured) {
+                            if (resultSource == 1) {
+                                // 截屏模式：MediaProjection
+                                hasCaptured = true
+                                captureDeferred = CaptureImageService.requestCaptureScreen()
+                            } else if (resultSource == 2) {
+                                // 无障碍模式（文本/截屏反馈）：AccessibilityService.takeScreenshot 兜底截屏。
+                                // 文本反馈模式下识别不到成功结果时，也截一张发过去，作为“看不到文本”时的兜底。
+                                hasCaptured = true
+                                val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
+                                captureDeferred = a11yDeferred
+                                    ?: CompletableDeferred<String?>().apply { complete("") }
+                            }
                         }
                     }
+                } finally {
+                    // 倒计时无论正常结束、打卡成功取消、还是异常，统一收起悬浮窗
+                    FloatingWindowController.stopFloatSession()
                 }
             }
 

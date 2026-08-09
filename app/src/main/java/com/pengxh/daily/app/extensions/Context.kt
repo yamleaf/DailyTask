@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.extensions.show
@@ -66,6 +67,8 @@ fun Context.openApplication(onOpened: (() -> Unit)? = null) {
         val info = activities.first()
         intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
         startActivity(intent)
+        // 被控端主动跳到目标 App：开启悬浮窗倒计时会话（统一收口，所有跳转自动覆盖，无需逐个调用方接入）
+        FloatingWindowController.startFloatSession()
         onOpened?.invoke()
     } else {
         TaskScheduler.requestStopDueToError("未找到目标应用的 Launcher Activity，包名：$targetApp")
