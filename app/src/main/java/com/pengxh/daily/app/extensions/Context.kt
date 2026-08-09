@@ -100,6 +100,6 @@ fun Context.bringDailyTaskToFront(showMask: Boolean = false) {
         startActivity(intent)
     } catch (e: Exception) {
         Log.w("Ex-Context", "bringDailyTaskToFront failed: ${e.message}")
-        LogFileManager.writeLog("拉起主界面失败（蒙层仍可能已通过悬浮窗显示）: ${e.message}")
+        LogFileManager.error("拉起主界面失败（蒙层仍可能已通过悬浮窗显示）: ${e.message}")
     }
 }

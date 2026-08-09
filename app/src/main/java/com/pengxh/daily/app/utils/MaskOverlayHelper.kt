@@ -66,7 +66,7 @@ object MaskOverlayHelper {
         mainHandler.post {
             if (rootView != null) return@post
             if (!Settings.canDrawOverlays(appCtx)) {
-                LogFileManager.writeLog("伪息屏失败：无悬浮窗权限")
+                LogFileManager.error("伪息屏失败：无悬浮窗权限")
                 return@post
             }
             val windowManager = appCtx.getSystemService(WindowManager::class.java) ?: return@post
@@ -134,9 +134,9 @@ object MaskOverlayHelper {
                 rootView = frame
                 acquireKeepAwake(appCtx)
                 FloatingWindowController.hide()
-                LogFileManager.writeLog("伪息屏蒙层已显示（微亮不锁屏）")
+                LogFileManager.action("伪息屏蒙层已显示（微亮不锁屏）")
             } catch (e: Exception) {
-                LogFileManager.writeLog("伪息屏蒙层显示失败: ${e.message}")
+                LogFileManager.error("伪息屏蒙层显示失败: ${e.message}")
             }
         }
     }

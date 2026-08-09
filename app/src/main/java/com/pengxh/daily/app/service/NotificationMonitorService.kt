@@ -290,7 +290,7 @@ class NotificationMonitorService : NotificationListenerService() {
 
         when {
             command.contains("执行任务") -> {
-                LogFileManager.writeLog("收到执行任务指令")
+                LogFileManager.action("收到执行任务指令")
                 emitMonitorEvent(MonitorEvent.StartTaskCommand)
             }
 
@@ -351,12 +351,12 @@ class NotificationMonitorService : NotificationListenerService() {
                             "状态查询通知", content, force = true, appendMeta = false,
                             onFailure = { err ->
                                 Log.e(kTag, "状态查询邮件发送失败: $err")
-                                LogFileManager.writeLog("状态查询邮件发送失败: $err")
+                                LogFileManager.error("状态查询邮件发送失败: $err")
                             }
                         )
                     } catch (e: Exception) {
                         Log.e(kTag, "状态查询处理失败", e)
-                        LogFileManager.writeLog("状态查询处理失败: ${e.message}")
+                        LogFileManager.error("状态查询处理失败: ${e.message}")
                         MessageDispatcher.sendMessage(
                             "状态查询通知",
                             StatusReporter.buildTimeoutAlertHtml("状态查询失败", e.message ?: "未知错误"),
@@ -393,7 +393,7 @@ class NotificationMonitorService : NotificationListenerService() {
             }
 
             command.contains("开启远程") -> {
-                LogFileManager.writeLog("收到开启远程指令")
+                LogFileManager.action("收到开启远程指令")
                 SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, true)
                 val intent = Intent(this, MqttAgentService::class.java)
                 val valid = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "").isNotBlank()
@@ -412,7 +412,7 @@ class NotificationMonitorService : NotificationListenerService() {
             }
 
             command.contains("关闭远程") -> {
-                LogFileManager.writeLog("收到关闭远程指令")
+                LogFileManager.action("收到关闭远程指令")
                 SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, false)
                 stopService(Intent(this, MqttAgentService::class.java))
                 MessageDispatcher.sendMessage(
@@ -438,7 +438,7 @@ class NotificationMonitorService : NotificationListenerService() {
      * → 经消息渠道回传结果。供 DT# 指令与 MQTT 动作命令共用。
      */
     fun performRemotePunch(keyword: String = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")) {
-        LogFileManager.writeLog("收到远程打卡指令（关键词=$keyword）")
+        LogFileManager.action("收到远程打卡指令（关键词=$keyword）")
         // 遥控"打卡"：一次性，只唤起目标 App 并倒计时，不关联任务调度
         val timeoutSeconds = SaveKeyValues.loadInt(
             Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
@@ -577,7 +577,7 @@ class NotificationMonitorService : NotificationListenerService() {
                                     force = true,
                                     appendMeta = false
                                 )
-                                LogFileManager.writeLog("远程打卡结果：无可用截屏权限，已发文字提醒")
+                                LogFileManager.error("远程打卡结果：无可用截屏权限，已发文字提醒")
                             }
                         }
                     } finally {
@@ -594,7 +594,7 @@ class NotificationMonitorService : NotificationListenerService() {
             }
         } catch (e: Exception) {
             Log.e(kTag, "远程打卡启动失败", e)
-            LogFileManager.writeLog("远程打卡启动失败: ${e.message}")
+            LogFileManager.error("远程打卡启动失败: ${e.message}")
             MessageDispatcher.sendMessage(
                 "远程打卡通知",
                 StatusReporter.buildTimeoutAlertHtml("远程打卡失败", e.message ?: "未知错误"),
@@ -612,7 +612,7 @@ class NotificationMonitorService : NotificationListenerService() {
 
     /** 导出当天考勤记录（对应 DT#考勤记录 / 控制端动作 attendance），经消息渠道回传 */
     fun performAttendanceExport() {
-        LogFileManager.writeLog("收到考勤记录指令")
+        LogFileManager.action("收到考勤记录指令")
         launchOrWarn("考勤记录") {
             val notices = try {
                 DatabaseWrapper.loadCurrentDayNotice()
@@ -648,7 +648,7 @@ class NotificationMonitorService : NotificationListenerService() {
 
     /** 截取目标应用画面（对应 DT#截屏 / 控制端动作 screenshot），经消息渠道回传 */
     fun performScreenshot() {
-        LogFileManager.writeLog("收到截屏指令")
+        LogFileManager.action("收到截屏指令")
         val resultSource = SaveKeyValues.loadInt(
             Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
         )
@@ -684,7 +684,7 @@ class NotificationMonitorService : NotificationListenerService() {
     private fun launchOrWarn(tag: String, block: suspend CoroutineScope.() -> Unit) {
         if (!serviceScope.isActive) {
             Log.w(kTag, "serviceScope 已取消，无法处理指令: $tag")
-            LogFileManager.writeLog("serviceScope 已取消，$tag 指令丢弃")
+            LogFileManager.error("serviceScope 已取消，$tag 指令丢弃")
             return
         }
         serviceScope.launch {
@@ -692,7 +692,7 @@ class NotificationMonitorService : NotificationListenerService() {
                 block()
             } catch (e: Exception) {
                 Log.e(kTag, "$tag 处理异常", e)
-                LogFileManager.writeLog("$tag 处理异常: ${e.message}")
+                LogFileManager.error("$tag 处理异常: ${e.message}")
             }
         }
     }
@@ -713,7 +713,7 @@ class NotificationMonitorService : NotificationListenerService() {
             startActivity(intent)
         } catch (e: Exception) {
             Log.w(kTag, "bringMainActivityForMask failed: ${e.message}")
-            LogFileManager.writeLog("拉起主界面失败（蒙层仍可能已通过悬浮窗显示）: ${e.message}")
+            LogFileManager.error("拉起主界面失败（蒙层仍可能已通过悬浮窗显示）: ${e.message}")
         }
     }
 

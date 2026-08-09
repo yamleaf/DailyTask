@@ -164,7 +164,7 @@ object EmailManager {
             )
             try {
                 Transport.send(message)
-                LogFileManager.writeLog("邮件发送成功: ${message.subject}")
+                LogFileManager.action("邮件发送成功: ${message.subject}")
                 withContext(Dispatchers.Main) {
                     onSuccess?.invoke()
                 }
@@ -179,7 +179,7 @@ object EmailManager {
                     else -> "邮件发送失败: ${e.javaClass.simpleName} - ${e.message}"
                 }
                 Log.e(kTag, errorMessage, e)
-                LogFileManager.writeLog(errorMessage)
+                LogFileManager.error(errorMessage)
 
                 withContext(Dispatchers.Main) {
                     onFailure?.invoke(errorMessage)

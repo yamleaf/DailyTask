@@ -50,7 +50,6 @@ class MaskViewController(
         // 伪息屏隐藏时钟：开启后只显示黑屏，不显示/不启动时钟动画（省电）
         if (SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)) {
             binding.clockView.visibility = View.GONE
-            LogFileManager.writeLog("伪息屏：已隐藏时钟（仅黑屏）")
         } else {
             binding.clockView.visibility = View.VISIBLE
             startClockAnimation()

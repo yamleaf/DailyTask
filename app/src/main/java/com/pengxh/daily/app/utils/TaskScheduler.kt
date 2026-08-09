@@ -113,7 +113,7 @@ object TaskScheduler {
 
         val currentScope = scope
         if (currentScope == null) {
-            LogFileManager.writeLog("TaskScheduler scope 未初始化")
+            LogFileManager.error("TaskScheduler scope 未初始化")
             return
         }
 
@@ -134,7 +134,7 @@ object TaskScheduler {
                 if (schedule.isEmpty()) {
                     LogFileManager.writeLog("任务列表为空，进入等待期")
                 } else {
-                    LogFileManager.writeLog("开始执行本轮任务（${scheduleDate}），共 ${schedule.size} 个")
+                    LogFileManager.action("开始执行本轮任务（${scheduleDate}），共 ${schedule.size} 个")
                     executeSchedule(schedule)
                 }
 
@@ -327,7 +327,7 @@ object TaskScheduler {
                     // force=true：关键告警跳过去重，保证一定送达
                     // appendMeta=false：failTip 为 HTML，避免被纯文本壳包裹导致邮箱显示原始 HTML 源码
                     MessageDispatcher.sendMessage("任务执行结果通知", failTip, force = true, appendMeta = false)
-                    LogFileManager.writeLog("任务执行结果：无可截屏权限")
+                    LogFileManager.error("任务执行结果：无可截屏权限")
                 }
                 // 记录打卡超时到通知表：供状态查询日历标记"超时未确认" + "考勤记录"远程指令使用。
                 // 与成功路径（MainActivity.onClockInSuccess 写"考勤打卡成功"）对称，message 含"考勤打卡超时"子串。
@@ -342,13 +342,13 @@ object TaskScheduler {
                         })
                     } catch (e: Exception) {
                         // 写入失败不影响超时兜底邮件发送，但需记录以便排查（曾因主线程写库被 Room 静默拒绝而丢失超时记录）
-                        LogFileManager.writeLog("写入打卡超时记录失败: ${e.message}")
+                        LogFileManager.error("写入打卡超时记录失败: ${e.message}")
                     }
                 }
             }
 
             if (maskWasShowing) {
-                LogFileManager.writeLog("定时任务结束，恢复伪息屏蒙层")
+                LogFileManager.action("定时任务结束，恢复伪息屏蒙层")
                 withContext(Dispatchers.Main) {
                     MaskOverlayHelper.show(DailyTaskApplication.get())
                 }
@@ -406,7 +406,7 @@ object TaskScheduler {
                 withTimeout(waitSeconds * 1000L) { signal.await() }
             } catch (_: TimeoutCancellationException) {
                 // 自然到达重置点，交给外层循环重排下一轮任务
-                LogFileManager.writeLog("到达重置时间点，重排下一轮任务")
+                LogFileManager.action("到达重置时间点，重排下一轮任务")
                 return
             } finally {
                 pendingResetSignal = null
@@ -449,7 +449,7 @@ object TaskScheduler {
             return runCatching { withTimeout(8000) { deferred.await() } }.getOrNull() ?: ""
         }
         // 都没有可用权限 → 截屏失败
-        LogFileManager.writeLog("超时兜底：无障碍与截屏服务均不可用，截屏失败")
+        LogFileManager.error("超时兜底：无障碍与截屏服务均不可用，截屏失败")
         return ""
     }
 
@@ -470,7 +470,7 @@ object TaskScheduler {
             return
         }
 
-        LogFileManager.writeLog("停止执行每日任务")
+        LogFileManager.action("停止执行每日任务")
         job?.cancel()
         job = null
         _isRunning.value = false
@@ -488,7 +488,7 @@ object TaskScheduler {
      *   requestStopDueToError() — 系统错误停止，不发消息通知，只重置调度器
      */
     fun requestStopDueToError(reason: String) {
-        LogFileManager.writeLog("因错误请求停止：$reason")
+        LogFileManager.error("因错误请求停止：$reason")
         job?.cancel()
         job = null
         _isRunning.value = false

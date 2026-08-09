@@ -80,7 +80,7 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
          */
         fun requestCaptureScreen(): CompletableDeferred<String?> {
             if (!ProjectionSession.isStateActive()) {
-                LogFileManager.writeLog("requestCaptureScreen: 截屏权限未授权（state=${ProjectionSession.getState()}），拒绝触发")
+                LogFileManager.error("requestCaptureScreen: 截屏权限未授权（state=${ProjectionSession.getState()}），拒绝触发")
                 return CompletableDeferred<String?>().apply { complete("") }
             }
             _captureScreenRequest.tryEmit(Unit)
@@ -143,7 +143,7 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
             && checkSelfPermission(android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            LogFileManager.writeLog("onCreate: 缺少 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限，截屏服务无法启动")
+            LogFileManager.error("onCreate: 缺少 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限，截屏服务无法启动")
             stopSelf()
             return
         }
@@ -173,7 +173,7 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
             && checkSelfPermission(android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            LogFileManager.writeLog("onStartCommand: 缺少 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限，拒绝启动截屏服务")
+            LogFileManager.error("onStartCommand: 缺少 FOREGROUND_SERVICE_MEDIA_PROJECTION 运行时权限，拒绝启动截屏服务")
             emitProjectionEvent(ProjectionEvent.Failed)
             stopSelf()
             return START_NOT_STICKY
@@ -363,7 +363,7 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
 
                 val imagePath = "${createImageFileDir()}/${Date().format("yyyyMMdd_HHmmss")}.png"
                 finalBitmap.saveImage(imagePath)
-                LogFileManager.writeLog("截屏成功: $imagePath")
+                LogFileManager.action("截屏成功: $imagePath")
                 emitCaptureResult(imagePath)
 
                 if (maskShowing) {

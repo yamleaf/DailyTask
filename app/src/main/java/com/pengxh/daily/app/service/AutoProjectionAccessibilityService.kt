@@ -215,7 +215,6 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         val isKeyguardLocked = keyguardManager?.isKeyguardLocked == true
         val maskShowing = MaskOverlayHelper.isShowing()
         Log.d(TAG, "截图前状态: isScreenOn=$isScreenOn, isKeyguardLocked=$isKeyguardLocked, maskShowing=$maskShowing")
-        LogFileManager.writeLog("截图前状态: isScreenOn=$isScreenOn, isKeyguardLocked=$isKeyguardLocked, maskShowing=$maskShowing")
 
         // 屏幕关闭时先 WakeLock 强制点亮，否则 takeScreenshot 会截到息屏/AOD 黑屏
         if (!isScreenOn && powerManager != null) {
@@ -227,11 +226,10 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                     PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
                 )
                 activeWakeLock = wakeLock
-                Log.d(TAG, "屏幕关闭，已请求 WakeLock 点亮")
-                LogFileManager.writeLog("屏幕关闭，已请求 WakeLock 点亮")
+            Log.d(TAG, "屏幕关闭，已请求 WakeLock 点亮")
             } catch (e: Exception) {
                 Log.e(TAG, "WakeLock 点亮屏幕失败: ${e.message}", e)
-                LogFileManager.writeLog("WakeLock 点亮屏幕失败: ${e.message}")
+                LogFileManager.error("WakeLock 点亮屏幕失败: ${e.message}")
             }
         }
 
@@ -277,7 +275,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                         softwareBitmap.saveImage(imagePath)
                         softwareBitmap.recycle()
 
-                        LogFileManager.writeLog("无障碍截屏成功: $imagePath")
+                        LogFileManager.action("无障碍截屏成功: $imagePath")
                         Log.d(TAG, "截屏成功: $imagePath")
                         deferred.complete(imagePath)
                     } catch (e: Exception) {
@@ -433,7 +431,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             if (accepted) {
                 textDetected = true
                 val diffMs = candidateMillis?.let { kotlin.math.abs(now - it) } ?: -1L
-                LogFileManager.writeLog("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，diff=${diffMs}ms，groupIsToday=$groupIsToday）")
+                LogFileManager.action("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，diff=${diffMs}ms，groupIsToday=$groupIsToday）")
                 val snippet = extractSnippet(text, matchedKeyword)
                 handleTextDetected(snippet, matchedKeyword, packageName, candidateMillis)
             } else {
@@ -517,7 +515,6 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         }
         val line = sb.toString()
         Log.d(TAG, line)
-        LogFileManager.writeLog(line)
     }
 
     /**

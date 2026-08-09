@@ -481,6 +481,10 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, checked)
             com.pengxh.daily.app.service.KeepAliveReceiver.scheduleBatteryAlert(ctx)
         }
+        binding.logRecordSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncingSwitchState) return@setOnCheckedChangeListener
+            SaveKeyValues.saveBoolean(Constant.LOG_ENABLED_KEY, checked)
+        }
         binding.batteryWarningTimeRow.setOnClickListener { showBatteryWarningTimePicker() }
         binding.batteryAlertRangeRow.setOnClickListener { showBatteryAlertRangePicker() }
         binding.batteryThresholdRow.setOnClickListener { showBatteryThresholdPicker() }
@@ -784,6 +788,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             // 电量智能预警
             val alertEnabled = SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
             binding.batterySmartAlertSwitch.isChecked = alertEnabled
+            // 运行时日志总开关（默认开启）
+            binding.logRecordSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true)
             // 分组开关仅控制展开，默认展开便于查看子项；内容显隐随开关
             binding.batteryAlertGroupSwitch.isChecked = true
             binding.batteryAlertGroupContent.visibility = View.VISIBLE

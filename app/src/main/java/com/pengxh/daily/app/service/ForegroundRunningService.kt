@@ -294,7 +294,7 @@ val filter = IntentFilter().apply {
             val chargeNotified = SaveKeyValues.loadBoolean(Constant.LOW_BATTERY_CHARGE_NOTIFIED_KEY, false)
             if (battery < threshold) {
                 if (!chargeNotified) {
-                    LogFileManager.writeLog("设备开始充电：当前 ${battery}% < 阈值 ${threshold}%，发送低电量告警取消通知")
+                    LogFileManager.action("设备开始充电：当前 ${battery}% < 阈值 ${threshold}%，发送低电量告警取消通知")
                     MessageDispatcher.sendMessage(
                         "电量开始充电",
                         StatusReporter.buildChargingResumedContentHtml(battery),
@@ -323,7 +323,7 @@ val filter = IntentFilter().apply {
                 val fullNotified = SaveKeyValues.loadBoolean(Constant.BATTERY_FULL_NOTIFIED_KEY, false)
                 if (!fullNotified) {
                     SaveKeyValues.saveBoolean(Constant.BATTERY_FULL_NOTIFIED_KEY, true)
-                    LogFileManager.writeLog("电量已充满：当前 ${battery}%，发送充满通知")
+                    LogFileManager.action("电量已充满：当前 ${battery}%，发送充满通知")
                     MessageDispatcher.sendMessage(
                         "电量已充满",
                         StatusReporter.buildBatteryFullContentHtml(battery),
@@ -361,7 +361,7 @@ val filter = IntentFilter().apply {
                 // 跌破任一档边界即说明当前电量低于阈值（重新进入低电量状态），
                 // 允许下次充电时再报一次取消通知（清零「已报」标记）
                 SaveKeyValues.saveBoolean(Constant.LOW_BATTERY_CHARGE_NOTIFIED_KEY, false)
-                LogFileManager.writeLog("低电量提醒（第${stage}档，阈值<${bound}%）：当前 ${battery}%，发送通知")
+                LogFileManager.action("低电量提醒（第${stage}档，阈值<${bound}%）：当前 ${battery}%，发送通知")
                 MessageDispatcher.sendMessage(
                     "低电量提醒（第${stage}档）",
                     StatusReporter.buildLowBatteryContentHtml(battery, threshold, stage),
@@ -388,6 +388,9 @@ val filter = IntentFilter().apply {
      * 根据 BatteryPredictor 预测电量降至低电量阈值的时间，若落在检测区间内，
      * 则在预警时间前发送预警，防止用户睡眠期间低电量关机。
      * 仅在预警时间点 ±5 分钟窗口内发送，确保只在预警时间点推送邮件。
+     *
+     * 日志：无论最终是否触发，均在到点时落一条关键动作日志（成功或原因），
+     * 便于排查“到点无邮件”类问题（Release 下普通日志不落文件，故用 action）。
      */
     private fun checkBatterySmartAlert() {
         try {
@@ -408,13 +411,19 @@ val filter = IntentFilter().apply {
             val windowMs = 5 * 60 * 1000L // ±5 分钟
             if (now !in (warningTimeMs - windowMs)..(warningTimeMs + windowMs)) return
 
-            // 节流：每天只检查一次
-            val todayKey = "battery_alert_sent_${now / 86400000}"
-            if (SaveKeyValues.loadBoolean(todayKey, false)) return
+            // 节流：每天只处理/记录一次预警流程
+            val dayKey = now / 86400000
+            val sentKey = "battery_alert_sent_$dayKey"
+            val loggedKey = "battery_alert_logged_$dayKey"
+            if (SaveKeyValues.loadBoolean(sentKey, false)) return
 
             val result = BatteryPredictor.checkAlert(this)
             if (!result.shouldAlert) {
-                Log.d(javaClass.simpleName, "电量智能预警未触发：${result.reason}")
+                // 到点未触发：记录原因（每天一条），便于排查“到点无邮件”
+                if (!SaveKeyValues.loadBoolean(loggedKey, false)) {
+                    LogFileManager.action("电量智能预警未触发：${result.reason}")
+                    SaveKeyValues.saveBoolean(loggedKey, true)
+                }
                 return
             }
 
@@ -422,7 +431,7 @@ val filter = IntentFilter().apply {
             val battery = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
             val targetTimeText = BatteryPredictor.formatTime(pred.targetTimeMs)
 
-            LogFileManager.writeLog("电量智能预警：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${BatteryPredictor.formatWarningMinute(result.warningMinute)} 前提醒")
+            LogFileManager.action("电量智能预警已触发：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${BatteryPredictor.formatWarningMinute(result.warningMinute)} 前提醒")
             MessageDispatcher.sendMessage(
                 "电量智能预警",
                 StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningMinute, result.threshold, pred),
@@ -438,7 +447,9 @@ val filter = IntentFilter().apply {
                 }.toString()
             )
             BatteryPredictor.markAlertSent(this)
+            SaveKeyValues.saveBoolean(loggedKey, true)
         } catch (e: Exception) {
+            LogFileManager.error("电量智能预警检查失败：${e.message}")
             Log.e(javaClass.simpleName, "电量智能预警检查失败", e)
         }
     }
@@ -504,7 +515,7 @@ val filter = IntentFilter().apply {
 
                 LogFileManager.writeLog("重置点已自动清理临时诊断文件（diagnostic_*.txt / *.png）")
             } catch (e: Exception) {
-                LogFileManager.writeLog(LogLevel.W, "重置点清理临时诊断文件失败：${e.message}")
+                LogFileManager.error("重置点清理临时诊断文件失败：${e.message}")
             }
         }
     }
