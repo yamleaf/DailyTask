@@ -42,6 +42,8 @@ object IdlePseudoMaskController {
     private var pendingReturnFromBackground = false
     /** 是否正处于「进入伪息屏」的过渡中（离开超时后到蒙层真正显示前），用于阻止倒计时被重复重置 */
     private var enteringMask = false
+    /** 打卡期间伪息屏被延后的日志每轮只报一次，避免高频重复写日志 */
+    private var punchIdlePostponeNotified = false
     private var keepAwakeView: View? = null
 
     /** 离开本软件多少秒后进入伪息屏（可配置，默认 60s，范围 10~3600s） */
@@ -56,13 +58,18 @@ object IdlePseudoMaskController {
         if (!appInBackground) return@Runnable
         if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
         if (TaskScheduler.isInActivePunch()) {
-            LogFileManager.writeLog("打卡进行中，延后伪息屏")
+            // 打卡进行中：绝不盖黑屏 / 强制返回桌面。延后日志每轮只报一次，避免高频重复写。
+            if (!punchIdlePostponeNotified) {
+                LogFileManager.writeLog("打卡进行中，延后伪息屏")
+                punchIdlePostponeNotified = true
+            }
             mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
             return@Runnable
         }
+        punchIdlePostponeNotified = false
         val context = DailyTaskApplication.get()
         if (MaskOverlayHelper.isShowing()) return@Runnable
-        LogFileManager.writeLog("强制伪息屏：离开本软件超时，进入伪息屏流程")
+        LogFileManager.action("强制伪息屏：离开本软件超时，进入伪息屏流程")
         enterPseudoMask(context)
     }
 
@@ -81,6 +88,7 @@ object IdlePseudoMaskController {
      * 全程不影响远程打卡：打卡复原路径使用独立的 bringMainActivityForMask，不经此方法。
      */
     private fun enterPseudoMask(context: Context) {
+        if (enteringMask) return
         if (!appInBackground) {
             LogFileManager.writeLog("强制伪息屏：已进入前台，跳过蒙层")
             return
@@ -105,9 +113,9 @@ object IdlePseudoMaskController {
                     }
                 )
             } catch (e: Exception) {
-                LogFileManager.writeLog("强制伪息屏：返回桌面失败: ${e.message}")
+                LogFileManager.error("强制伪息屏：返回桌面失败: ${e.message}")
             }
-            LogFileManager.writeLog("强制伪息屏：已退回桌面，稍后跳回 DailyTask 显示蒙层")
+            LogFileManager.action("强制伪息屏：已退回桌面，稍后跳回 DailyTask 显示蒙层")
             // 串行化：等桌面切换稳定后再拉起本 App，避免两个 Intent 抢前台导致蒙层闪退
             mainHandler.postDelayed({
                 if (!appInBackground || !enteringMask) return@postDelayed
@@ -116,7 +124,7 @@ object IdlePseudoMaskController {
             }, HOME_TO_APP_DELAY_MS)
         } else {
             // 步骤1 关闭：直接跳回本 App 再显示蒙层
-            LogFileManager.writeLog("强制伪息屏：直接跳回 DailyTask 显示蒙层（未开启返回桌面）")
+            LogFileManager.action("强制伪息屏：直接跳回 DailyTask 显示蒙层（未开启返回桌面）")
             context.bringDailyTaskToFront(true)
         }
     }
@@ -132,6 +140,7 @@ object IdlePseudoMaskController {
         appInBackground = true
         pendingReturnFromBackground = true
         enteringMask = false
+        punchIdlePostponeNotified = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         if (!AppRuntimeConfig.isForcePseudoMask()) {
             LogFileManager.writeLog("已离开本软件（强制伪息屏未开启，跳过保亮/倒计时）")
@@ -216,7 +225,7 @@ object IdlePseudoMaskController {
         if (appInBackground) return@Runnable
         if (TaskScheduler.isInActivePunch()) return@Runnable
         if (MaskOverlayHelper.isShowing()) return@Runnable
-        LogFileManager.writeLog("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪熄屏")
+        LogFileManager.action("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪熄屏")
         MaskOverlayHelper.show(context)
     }
 
@@ -252,28 +261,34 @@ object IdlePseudoMaskController {
     }
 
     // ═══════════════════════ 打卡返回即息屏 ═══════════════════════
-    /** 「打卡动作完成 → 返回本 App 立即进入伪息屏」的请求标志（主线程使用） */
-    private var punchReturnMaskRequested = false
-
-    fun requestPunchReturnMask() {
-        punchReturnMaskRequested = true
-    }
-
-    fun consumePunchReturnMask(): Boolean {
-        if (!punchReturnMaskRequested) return false
-        punchReturnMaskRequested = false
-        return true
+    /**
+     * 打卡动作完成后「返回即息屏」：与手动离开路径完全一致地进入伪息屏。
+     * 仅当「强制伪息屏」开启时生效；开启「返回桌面」时同样先 HOME 再拉回本 App 显示蒙层。
+     * 关闭伪息屏时由调用方退化为普通返回（按返回桌面开关），本方法直接返回。
+     */
+    fun enterPseudoMaskAfterPunch(context: Context) {
+        if (!AppRuntimeConfig.isForcePseudoMask()) return
+        // 打卡结束：应用应处于后台（目标 App 在前台），确保与手动离开路径的进入条件一致
+        appInBackground = true
+        releaseKeepAwakeForPunch(context)
+        enterPseudoMask(context)
     }
 
     /** 黑屏蒙层被关掉后，若仍在外部且开关开启，则继续透明保亮并重新计时 */
     fun onBlackMaskHidden(context: Context) {
-        if (!appInBackground) return
-        if (!AppRuntimeConfig.isForcePseudoMask()) return
         enteringMask = false
-        ensureKeepAwake(context)
-        mainHandler.removeCallbacks(upgradeToMaskRunnable)
-        mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
-        LogFileManager.writeLog("伪息屏已解除但仍在外部，重新开启透明保亮与倒计时")
+        if (!AppRuntimeConfig.isForcePseudoMask()) return
+        if (appInBackground) {
+            // 后台解除：仍在外部，重新保亮并计时，超时再次进入伪息屏
+            ensureKeepAwake(context)
+            mainHandler.removeCallbacks(upgradeToMaskRunnable)
+            mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
+            LogFileManager.writeLog("伪息屏已解除但仍在外部，重新开启透明保亮与倒计时")
+        } else {
+            // 前台手动取消：重新启动前台无操作计时，超时后再次自动进入伪息屏（修复取消后不再自动进入）
+            startIdleMask(idleMaskContext ?: context)
+            LogFileManager.writeLog("伪息屏已解除（前台），重新启动无操作计时")
+        }
     }
 
     /**
@@ -284,11 +299,11 @@ object IdlePseudoMaskController {
     fun onForegroundTaskChanged() {
         if (!appInBackground) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
+        if (TaskScheduler.isInActivePunch()) return  // 打卡期间不重置/触发伪息屏计时（同时避免高频日志）
         if (enteringMask) return
         if (MaskOverlayHelper.isShowing()) return
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
-        LogFileManager.writeLog("前台任务切换，伪息屏倒计时已重置（${idleToMaskMs() / 1000}s）")
     }
 
     private fun ensureKeepAwake(context: Context) {
@@ -298,7 +313,7 @@ object IdlePseudoMaskController {
             if (MaskOverlayHelper.isShowing()) return@post
             if (keepAwakeView != null) return@post
             if (!Settings.canDrawOverlays(appCtx)) {
-                LogFileManager.writeLog("透明保亮失败：无悬浮窗权限")
+                LogFileManager.error("透明保亮失败：无悬浮窗权限")
                 return@post
             }
             val windowManager = appCtx.getSystemService(WindowManager::class.java) ?: return@post
@@ -330,7 +345,7 @@ object IdlePseudoMaskController {
                 keepAwakeView = view
                 LogFileManager.writeLog("透明保亮层已开启（1x1dp）")
             } catch (e: Exception) {
-                LogFileManager.writeLog("透明保亮层失败: ${e.message}")
+                LogFileManager.error("透明保亮层失败: ${e.message}")
             }
         }
     }
@@ -355,7 +370,7 @@ object IdlePseudoMaskController {
                 PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
             )
         } catch (e: Exception) {
-            LogFileManager.writeLog("wakeScreen 失败: ${e.message}")
+            LogFileManager.error("wakeScreen 失败: ${e.message}")
         }
     }
 }

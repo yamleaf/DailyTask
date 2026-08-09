@@ -183,7 +183,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 订阅通知监听事件（远程指令；单条异常不得取消整个订阅）
         lifecycleScope.launch(CoroutineExceptionHandler { _, e ->
             Log.e(kTag, "通知事件订阅协程异常", e)
-            LogFileManager.writeLog("通知事件订阅协程异常: ${e.message}")
+            LogFileManager.error("通知事件订阅协程异常: ${e.message}")
         }) {
             NotificationMonitorService.events
                 .collect { event ->
@@ -191,7 +191,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                         handleMonitorEvent(event)
                     } catch (e: Exception) {
                         Log.e(kTag, "处理通知事件失败，已跳过: $event", e)
-                        LogFileManager.writeLog("处理通知事件失败: ${e.message}")
+                        LogFileManager.error("处理通知事件失败: ${e.message}")
                     }
                 }
         }
@@ -301,8 +301,6 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         applyMaskCommandFromIntent(intent)
-        // 打卡动作完成返回本 App 时，立即进入伪息屏（若未因 Intent 指令显式控制蒙层）
-        maybeShowPunchReturnMask()
         if (MaskOverlayHelper.isShowing() && !maskViewController.isMaskVisible()) {
             maskViewController.showMaskView()
         }
@@ -329,7 +327,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         if (ProjectionSession.isStateActive()) {
             LogFileManager.writeLog("截屏服务正常：MediaProjection 有效")
         } else {
-            LogFileManager.writeLog("截屏服务异常：MediaProjection 已失效")
+            LogFileManager.error("截屏服务异常：MediaProjection 已失效")
             if (SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX) == 1) {
                 "截屏服务已断开，请重新授权".show(this)
                 SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
@@ -489,28 +487,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     fun backToMainActivity(isPunchReturn: Boolean = false) {
-        // 仅「打卡动作完成」引发的返回才标记「返回即息屏」
-        if (isPunchReturn) {
-            IdlePseudoMaskController.requestPunchReturnMask()
-        }
         switchToTaskTab()
+        // 打卡动作完成且开启「强制伪息屏」：与手动离开路径一致地返回本 App 并进入伪息屏
+        // （开启「返回桌面」时同样先 HOME 再拉回，由 IdlePseudoMaskController 内部处理）。
+        // 关闭伪息屏时退化为按「返回桌面」开关返回。
+        if (isPunchReturn && AppRuntimeConfig.isForcePseudoMask()) {
+            IdlePseudoMaskController.enterPseudoMaskAfterPunch(this)
+            return
+        }
         if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)) {
             // 模拟点击Home键
             startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
         }
-    }
-
-    /**
-     * 消费「打卡返回即息屏」请求：打卡动作完成后 DailyTask 回到前台时立即进入伪息屏。
-     */
-    private fun maybeShowPunchReturnMask() {
-        if (!IdlePseudoMaskController.consumePunchReturnMask()) return
-        if (!AppRuntimeConfig.isForcePseudoMask()) return
-        if (TaskScheduler.isInActivePunch()) return
-        if (MaskOverlayHelper.isShowing() || maskViewController.isMaskVisible()) return
-        LogFileManager.writeLog("打卡动作完成返回本 App，立即进入伪息屏")
-        IdlePseudoMaskController.releaseKeepAwakeForPunch(this)
-        maskViewController.showMaskView()
     }
 
     /**
