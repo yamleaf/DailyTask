@@ -134,6 +134,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                     } else {
                         Log.d(kTag, "MediaProjection already active, skipping creation")
                     }
+                    // 授权成功：立即同步开关与提示，避免 UI 显示"未开启"导致用户重复点击误关闭服务
+                    binding.captureSwitch.isChecked = true
+                    binding.captureTipsView.visibility = View.GONE
                 } else {
                     "授权失败".show(ctx)
                 }
