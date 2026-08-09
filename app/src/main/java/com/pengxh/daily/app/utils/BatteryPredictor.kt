@@ -133,8 +133,6 @@ object BatteryPredictor {
         val rangeDuration = SaveKeyValues.loadInt(
             Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, Constant.DEFAULT_BATTERY_ALERT_DURATION
         ).coerceIn(1, 24)
-        val rangeEnd = (rangeStart + rangeDuration) % 24
-        val rangeEndNextDay = rangeStart + rangeDuration >= 24
 
         val prediction = predict(ctx, threshold) ?: return AlertCheck(
             false, null, warningMinute, threshold, "数据不足或充电中，无法预测"
@@ -154,16 +152,19 @@ object BatteryPredictor {
         cal.set(Calendar.MILLISECOND, 0)
         val warningTimeMs = cal.timeInMillis
 
-        // 计算检测区间的起始和结束时间
-        val todayStartMs: Long
-        val todayEndMs: Long
+        // 检测区间完全由配置决定（起始时间 + 时长），与"预警上报时间"无关。
+        // 预警上报时间仅用于定时触发本检测流程（见 ForegroundRunningService.checkBatterySmartAlert 的 ±5 分钟门禁）。
+        val rangeEnd = (rangeStart + rangeDuration) % 24
+        val rangeEndNextDay = rangeStart + rangeDuration >= 24
+
         cal.timeInMillis = now
         cal.set(Calendar.HOUR_OF_DAY, rangeStart)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
-        todayStartMs = cal.timeInMillis
+        val todayStartMs = cal.timeInMillis
 
+        val todayEndMs: Long
         if (!rangeEndNextDay) {
             cal.set(Calendar.HOUR_OF_DAY, rangeEnd)
             cal.set(Calendar.MINUTE, 0)
