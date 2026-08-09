@@ -59,6 +59,11 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         // 浮动窗口由 Service 上下文 inflate；Service 不会自动套用 App 的 Material 主题，
         // 必须用 ContextThemeWrapper 显式包一层 Theme.DailyTask，否则 MaterialCardView/MaterialTextView 会 inflate 崩溃。
         binding = WindowFloatingBinding.inflate(LayoutInflater.from(ContextThemeWrapper(this, R.style.Theme_DailyTask)))
+        // 默认贴右边缘、垂直居中显示。
+        // 用 Gravity.END 锚定右缘，不依赖视图测量宽度——
+        // 避免 addView 后首帧未测量导致 width=0、被推到屏幕外不可见的旧 bug。
+        // x 为相对 END 锚点的偏移：负值=向左留间隙，窗口整体贴边且完全可见。
+        val edgeMarginPx = (10 * resources.displayMetrics.density).toInt()
         floatViewParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -66,24 +71,10 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            x = -edgeMarginPx
         }.also {
             windowManager.addView(binding.root, it)
-        }
-
-        // 布局完成后，将悬浮窗移动到屏幕右侧垂直居中
-        binding.root.post {
-            val displayMetrics = resources.displayMetrics
-            val screenWidth = displayMetrics.widthPixels
-            val screenHeight = displayMetrics.heightPixels
-            val viewWidth = binding.root.width
-            val viewHeight = binding.root.height
-
-            floatViewParams?.let {
-                it.x = screenWidth - viewWidth
-                it.y = (screenHeight - viewHeight) / 2
-                windowManager.updateViewLayout(binding.root, it)
-            }
         }
 
         // 收集悬浮窗控制事件
@@ -126,7 +117,11 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
 
-        // 初始隐藏，仅在被控端主动跳到目标 App 操作期间显示
+        // 初始隐藏，仅在被控端主动跳到目标 App 操作期间显示。
+        // 必须用 View.GONE 而非纯 alpha=0：alpha=0 的 VISIBLE 窗口仍会接收触摸事件，
+        // 在非打卡期间会截获落在该区域的点击（尤其是贴边后稳定显示在屏幕内），
+        // 导致后台操作其他 App 时点击没反应；GONE 不绘制也不接收触摸，点击正常穿透。
+        binding.root.visibility = View.GONE
         binding.root.alpha = 0.0f
         binding.timeView.text = "0s"
 
@@ -146,9 +141,12 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
     }
 
-    // 统一计算悬浮窗可见性：仅当「目标 App 操作会话中」且「蒙层未遮挡」时显示
+    // 统一计算悬浮窗可见性：仅当「目标 App 操作会话中」且「蒙层未遮挡」时显示。
+    // show=false 时用 View.GONE：GONE 的窗口不参与绘制与 hit-test，
+    // 触摸事件正常穿透到下层 App，避免在屏幕内隐藏时仍截获点击（参见 onCreate 说明）。
     private fun recomputeVisibility() {
         val show = floatSessionActive && visibilityAllowed
+        binding.root.visibility = if (show) View.VISIBLE else View.GONE
         binding.root.alpha = if (show) 1.0f else 0.0f
         if (show) applyWaveAnimation() else binding.waveProgressView.stopWaveAnimation()
     }
