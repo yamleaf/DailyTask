@@ -197,12 +197,21 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 }
             }
         }
-        // 截屏服务事件 → 失败时回切通知源
+        // 截屏服务事件 → Ready 同步开关打开（服务真正初始化完成后，避免授权回调过早被 refreshUi 覆盖）；
+        //                   Failed 时回切通知源并同步开关关闭
         lifecycleScope.launch {
             CaptureImageService.projectionEvents.collect { event ->
                 when (event) {
-                    is ProjectionEvent.Ready -> Unit
+                    is ProjectionEvent.Ready -> {
+                        binding.captureSwitch.isChecked = true
+                        binding.captureTipsView.visibility = View.GONE
+                    }
+
                     is ProjectionEvent.Failed -> {
+                        binding.captureSwitch.isChecked = false
+                        binding.captureTipsView.visibility = View.VISIBLE
+                        binding.captureTipsView.text = "截屏服务未开启，无法获取打卡结果"
+                        binding.captureTipsView.setTextColor(android.graphics.Color.RED)
                         if (SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, -1) == 1) {
                             SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)
                             updateResultSourceView()
