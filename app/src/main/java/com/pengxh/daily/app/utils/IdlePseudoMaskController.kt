@@ -226,7 +226,9 @@ object IdlePseudoMaskController {
         if (TaskScheduler.isInActivePunch()) return@Runnable
         if (MaskOverlayHelper.isShowing()) return@Runnable
         LogFileManager.action("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪熄屏")
-        MaskOverlayHelper.show(context)
+        // 与后台「离开超时」路径一致：拉起 MainActivity 由 MaskViewController 接管，
+        // 隐藏系统栏 + 屏幕亮度置 0 + activity 黑屏 + overlay，实现真正彻底黑（而非仅 overlay 一层）。
+        context.bringDailyTaskToFront(true)
     }
 
     fun startIdleMask(context: Context) {
