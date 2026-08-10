@@ -266,7 +266,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             // Boolean
             exportData.isDetectGesture =
                 SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
-            exportData.isBackToHome = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
+            exportData.isBackToHome = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
             exportData.isAutoRecycle =
                 SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
             exportData.isRandomTime = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)

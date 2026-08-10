@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
 import com.pengxh.daily.app.extensions.openApplication
+import com.pengxh.daily.app.extensions.bringDailyTaskToFront
 import com.pengxh.daily.app.extensions.resolveExecutionTime
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
@@ -227,11 +228,13 @@ object TaskScheduler {
             val maskWasShowing = MaskOverlayHelper.isShowing()
             if (maskWasShowing) {
                 LogFileManager.writeLog("定时任务：伪息屏蒙层显示中，临时移除")
+                // 先唤醒并保持亮屏（持有独立 WakeLock），再移除蒙层：
+                // 蒙层 hide 会释放 SCREEN_DIM_WAKE_LOCK，若先 hide 后保活，释放瞬间系统可能按屏幕超时休眠锁屏
+                // （真机复现：打卡瞬间 goToSleep + keyguard + 指纹图标，打卡界面被锁屏挡住空跑）。
+                IdlePseudoMaskController.keepAwakeForPunch(DailyTaskApplication.get())
                 withContext(Dispatchers.Main) {
                     MaskOverlayHelper.hide(DailyTaskApplication.get())
                 }
-                // 蒙层移除后屏幕可能休眠，打卡窗口内需保活背光，避免打卡失败（问题2 修复防回归）
-                IdlePseudoMaskController.keepAwakeForPunch(DailyTaskApplication.get())
             }
 
             DailyTaskApplication.get().openApplication()
@@ -349,9 +352,13 @@ object TaskScheduler {
 
             if (maskWasShowing) {
                 LogFileManager.action("定时任务结束，恢复伪息屏蒙层")
+                // 走完整伪息屏：先盖 overlay 保证 SCREEN_DIM 锁不间断（无空窗），
+                // 再拉起 MainActivity 由 MaskViewController 接管（隐藏系统栏 + activity 黑屏），
+                // 而非仅悬浮窗黑屏盖一层（那样状态栏仍显示）。
                 withContext(Dispatchers.Main) {
                     MaskOverlayHelper.show(DailyTaskApplication.get())
                 }
+                DailyTaskApplication.get().bringDailyTaskToFront(true)
                 // 蒙层已恢复（无 FLAG_KEEP_SCREEN_ON），释放打卡保活，让屏幕自然熄灭回到省电伪息屏
                 IdlePseudoMaskController.releaseKeepAwakeForPunch(DailyTaskApplication.get())
             }

@@ -281,7 +281,7 @@ object RemoteSnapshot {
         add("ar", "任务每日自动循环", "bool", SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true))
         add("rt", "随机时间", "bool", SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true))
         add("ga", "手势识别", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
-        add("bh", "返回桌面", "bool", SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false))
+        add("bh", "返回桌面", "bool", SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT))
         // 离散档位与控制端伪息屏延迟滑块共用，确保两端可选延迟值完全一致
         // （非线性：时间越大档位间隔越大，缩短滑块行程），与被控端 showPseudoMaskDelayDialog 同源
         val tmOptions = intArrayOf(

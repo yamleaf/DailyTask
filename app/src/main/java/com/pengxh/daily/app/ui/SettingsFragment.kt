@@ -813,7 +813,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         syncingSwitchState = true
         try {
             binding.gestureDetectSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
-            binding.backToHomeSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
+            binding.backToHomeSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
             // 分组开关仅控制展开，默认展开便于查看子项；内容显隐随开关

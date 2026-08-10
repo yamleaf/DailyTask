@@ -494,7 +494,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             if (AppRuntimeConfig.isForcePseudoMask()) {
                 // 模拟点击Home键
                 startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
-            } else if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)) {
+            } else if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)) {
                 // 模拟点击Home键
                 startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
                 // 等桌面切换稳定后再从桌面拉起本 App，避免直接从打卡软件跳回造成界面闪烁
@@ -506,7 +506,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
             return
         }
-        if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)) {
+        if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)) {
             // 模拟点击Home键
             startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
         }

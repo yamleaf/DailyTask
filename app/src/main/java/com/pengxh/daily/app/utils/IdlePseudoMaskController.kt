@@ -42,6 +42,8 @@ object IdlePseudoMaskController {
     private var pendingReturnFromBackground = false
     /** 是否正处于「进入伪息屏」的过渡中（离开超时后到蒙层真正显示前），用于阻止倒计时被重复重置 */
     private var enteringMask = false
+    /** 打卡期间持有的独立保亮 WakeLock：唤醒并保持屏幕亮，避免蒙层移除释放 SCREEN_DIM 后系统休眠锁屏 */
+    private var punchWakeLock: PowerManager.WakeLock? = null
     /** 打卡期间伪息屏被延后的日志每轮只报一次，避免高频重复写日志 */
     private var punchIdlePostponeNotified = false
     private var keepAwakeView: View? = null
@@ -100,7 +102,7 @@ object IdlePseudoMaskController {
             return
         }
         if (MaskOverlayHelper.isShowing()) return
-        val backToHome = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, false)
+        val backToHome = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
         enteringMask = true
         removeKeepAwake(context)
         if (backToHome) {
@@ -195,18 +197,30 @@ object IdlePseudoMaskController {
     }
 
     /**
-     * 打卡期间保活屏幕：确保透明保亮层存在，避免蒙层被临时移除后屏幕休眠导致打卡失败。
-     * 仅当之前确实处于伪息屏（maskWasShowing）时由 TaskScheduler 调用。
+     * 打卡期间保活屏幕：
+     * 1. 同步获取并持有带 ACQUIRE_CAUSES_WAKEUP 的屏幕 WakeLock，立即唤醒并保持亮屏；
+     * 2. 另加 1x1dp FLAG_KEEP_SCREEN_ON 透明窗口兜底。
+     *
+     * 必须在【移除蒙层之前】调用：蒙层隐藏时会释放 SCREEN_DIM_WAKE_LOCK（MaskOverlayHelper.releaseKeepAwake），
+     * 若先移除蒙层再保活，会形成「最后一个保亮锁已释放、新锁未建立」的空窗，系统按自身屏幕超时立即休眠锁屏
+     * （真机复现：打卡瞬间 goToSleep + show keyguard + 指纹图标）。先唤醒保亮、再移除蒙层，彻底消除竞态。
      */
     fun keepAwakeForPunch(context: Context) {
+        punchWakeLock = context.acquireWakeLock(
+            PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+            "DailyTask:PunchKeepAwake",
+            extraFlags = PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
+        )
         ensureKeepAwake(context)
-        LogFileManager.writeLog("打卡期间：开启透明保亮，防止屏幕休眠")
+        LogFileManager.writeLog("打卡期间：唤醒并保持亮屏，防止屏幕休眠")
     }
 
     /**
-     * 打卡结束释放保活：移除透明保亮层，让黑屏蒙层恢复后屏幕可自然熄灭，回到省电伪息屏。
+     * 打卡结束释放保活：释放打卡 WakeLock、移除透明保亮层，让黑屏蒙层恢复后屏幕可自然熄灭，回到省电伪息屏。
      */
     fun releaseKeepAwakeForPunch(context: Context) {
+        punchWakeLock?.let { if (it.isHeld) it.release() }
+        punchWakeLock = null
         removeKeepAwake(context)
         LogFileManager.writeLog("打卡结束：释放透明保亮")
     }
@@ -216,6 +230,10 @@ object IdlePseudoMaskController {
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         mainHandler.removeCallbacks(foregroundIdleRunnable)
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
+        runCatching {
+            punchWakeLock?.let { if (it.isHeld) it.release() }
+            punchWakeLock = null
+        }
         LogFileManager.writeLog("强制伪息屏已关闭，取消后台保亮与倒计时、前台无操作计时")
     }
 
@@ -224,6 +242,10 @@ object IdlePseudoMaskController {
         enteringMask = false
         mainHandler.removeCallbacks(upgradeToMaskRunnable)
         runCatching { removeKeepAwake(DailyTaskApplication.get()) }
+        runCatching {
+            punchWakeLock?.let { if (it.isHeld) it.release() }
+            punchWakeLock = null
+        }
     }
 
     // ═══════════════════════ 前台「无操作」自动进入伪熄屏 ═══════════════════════
