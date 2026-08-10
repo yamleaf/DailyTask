@@ -1,10 +1,12 @@
 package com.pengxh.daily.app.extensions
 
+import android.app.AppOpsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import com.pengxh.daily.app.DailyTaskApplication
@@ -12,6 +14,7 @@ import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.RomDetector
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.extensions.show
 
@@ -21,6 +24,28 @@ import com.pengxh.kt.lite.extensions.show
 fun Context.notificationEnable(): Boolean {
     val packages = NotificationManagerCompat.getEnabledListenerPackages(this)
     return packages.contains(packageName)
+}
+
+/**
+ * 检测「自启动」权限是否已授予（开机自启/后台常驻），按厂商分派：
+ * - 小米 MIUI/HyperOS：自定义 op 10008（自启动），allow=已授予；
+ * - 华为/OPPO/vivo：无公开 appops，返回 null（由用户手动确认）；
+ * - 原生 Android：RECEIVE_BOOT_COMPLETED 已声明即视为允许，返回 null（无需独立引导）。
+ * 返回 null 表示「无公开检测渠道」，调用方需结合厂商自行降级处理。
+ */
+fun Context.isAutostartGranted(): Boolean? {
+    if (!RomDetector.isMiui()) return null
+    return try {
+        val appOps = getSystemService(AppOpsManager::class.java) ?: return null
+        val method = AppOpsManager::class.java.getMethod(
+            "checkOpNoThrow",
+            Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
+        )
+        val result = method.invoke(appOps, 10008, Process.myUid(), packageName) as? Int
+        result == AppOpsManager.MODE_ALLOWED
+    } catch (e: Exception) {
+        null
+    }
 }
 
 /**

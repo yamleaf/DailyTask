@@ -3,6 +3,8 @@ package com.pengxh.daily.app.ui
 import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.Manifest
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +19,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -28,6 +31,7 @@ import com.pengxh.daily.app.R
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import com.pengxh.daily.app.databinding.ActivityMainBinding
 import com.pengxh.daily.app.extensions.bringDailyTaskToFront
+import com.pengxh.daily.app.extensions.isAutostartGranted
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
@@ -47,6 +51,7 @@ import com.pengxh.daily.app.utils.MaskViewController
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.MonitorEvent
 import com.pengxh.daily.app.utils.ProjectionSession
+import com.pengxh.daily.app.utils.RomDetector
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.base.KotlinBaseActivity
@@ -108,6 +113,12 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     /** 电池优化引导对话框是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
     private var batteryOptimizationPrompted = false
+
+    /** 通知权限引导是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
+    private var notificationPermissionPrompted = false
+
+    /** 自启动权限引导是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
+    private var autostartPermissionPrompted = false
 
     /** 三个 Tab 常驻 Fragment（一次性 add，hide/show 切换，与控制端交互一致） */
     private lateinit var taskFragment: TaskFragment
@@ -533,11 +544,39 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     /**
      * 启动自检：核心权限缺失时主动引导用户。
+     * 引导顺序（串行，避免弹窗叠放）：通知权限 → 自启动权限 → 电池优化。
      */
     private fun runStartupSelfCheck() {
         if (!notificationEnable()) {
             "通知监听未开启，无法接收远程指令，请到设置页开启".show(this)
         }
+        // 1) Android 13+ 通知权限（POST_NOTIFICATIONS）：冷启动引导授权，保证结果通知可正常弹出
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !notificationPermissionPrompted &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionPrompted = true
+            UnifiedDialogKit.showPermission(
+                this,
+                "开启通知权限",
+                "开启通知权限后，任务执行结果、打卡提醒等消息才能正常显示。",
+                grantText = "去开启",
+                denyText = "暂不",
+                cancelable = false,
+                onGrant = {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            )
+            return
+        }
+        // 2) 国产 ROM 自启动权限：冷启动引导，保证后台常驻/开机自启不被系统拦截
+        if (!autostartPermissionPrompted && isAutostartGranted() == false) {
+            autostartPermissionPrompted = true
+            showAutostartGuide()
+            return
+        }
+        // 3) 电池优化豁免（原有逻辑）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !batteryOptimizationPrompted) {
             val powerManager = getSystemService(PowerManager::class.java)
             if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
@@ -563,6 +602,49 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 }
             }
         }
+    }
+
+    /** 自启动权限引导：按厂商给出去系统设置的路径 */
+    private fun showAutostartGuide() {
+        val guide = when {
+            RomDetector.isMiui() ->
+                "1. 设置 → 应用设置 → 应用管理 → 本应用 → 自启动，设为允许；\n" +
+                    "2. 或到「安全中心 → 应用管理 → 权限」中允许自启动。"
+            RomDetector.isHuawei() || RomDetector.isHonor() ->
+                "1. 手机管家 → 应用启动管理，将本应用改为「手动管理」并允许自启动。"
+            RomDetector.isVivo() ->
+                "1. i管家 → 应用管理 → 权限管理 → 自启动，设为允许。"
+            RomDetector.isOppo() ->
+                "1. 设置 → 应用管理 → 本应用 → 自启动，设为允许。"
+            else ->
+                "1. 设置 → 应用 → 本应用 → 电池/后台运行，允许自启动。"
+        }
+        UnifiedDialogKit.showForm(
+            ctx = this,
+            contentView = TextView(this).apply {
+                text = "本应用需常驻后台运行以定时打卡、接收远程指令。" +
+                    "若未开启自启动，重启手机后应用可能不会自动拉起。\n\n" +
+                    "请前往系统设置为本应用开启自启动：\n" + guide
+                setPadding(24, 16, 24, 16)
+                textSize = 14f
+            },
+            title = "建议开启自启动",
+            positiveText = "前往设置",
+            negativeText = "暂不",
+            cancelable = false,
+            onConfirm = {
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:$packageName")
+                        }
+                    )
+                } catch (_: Exception) {
+                    "无法打开系统设置".show(this)
+                }
+                true
+            }
+        )
     }
 
     /**
@@ -597,6 +679,16 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
         }
     }
+
+    /** Android 13+ 通知权限（POST_NOTIFICATIONS）运行时请求 */
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                LogFileManager.writeLog("通知权限已授权")
+            } else {
+                LogFileManager.writeLog("用户拒绝了通知权限")
+            }
+        }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {

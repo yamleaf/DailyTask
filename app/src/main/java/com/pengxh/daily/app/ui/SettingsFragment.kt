@@ -50,6 +50,7 @@ import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.DialogSliderBinding
 import com.pengxh.daily.app.databinding.FragmentSettingsBinding
 import com.pengxh.daily.app.extensions.isApplicationExist
+import com.pengxh.daily.app.extensions.isAutostartGranted
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
@@ -61,6 +62,7 @@ import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.DiagnosticReporter
+import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.ProjectionEvent
@@ -988,15 +990,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
      * - 小米 MIUI/HyperOS：自定义 op 10008（自启动），allow=已授予；
      * - 华为/OPPO/vivo：无公开 appops，返回 UNKNOWN 由用户手动确认。
      */
-    private fun queryAutostartState(): Boolean? {
-        if (!RomDetector.isMiui()) return null
-        return try {
-            val appOps = ctx.getSystemService(AppOpsManager::class.java) ?: return null
-            checkOpNoThrowInt(appOps, 10008) == AppOpsManager.MODE_ALLOWED
-        } catch (e: Exception) {
-            null
-        }
-    }
+    private fun queryAutostartState(): Boolean? = ctx.isAutostartGranted()
 
     /**
      * 权限自检：检查 App 运行所需的基本权限（不含截屏/无障碍等功能权限），在配置阶段提前暴露并引导解决——
@@ -1129,9 +1123,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx = ctx,
             contentView = TextView(ctx).apply {
                 text = buildString {
-                    append("本应用将退到桌面 → 拉起「$targetApp」→ 停留 5 秒 → 自动返回本应用。\n\n")
+                    append("本应用将跳转到「$targetApp」（悬浮窗倒计时 5 秒）→ 退回桌面 → 从桌面返回本应用。\n\n")
                     append("请观察屏幕：\n")
-                    append("· 正常弹出并自动返回 → 权限正常\n")
+                    append("· 目标应用正常弹出并自动返回 → 权限正常\n")
                     append("· 无法拉起或无法自动返回 → 被系统拦截，需开启「启动应用」权限，小米手机额外开启「后台弹出界面」权限\n\n")
                     if (a11yEnabled) append("已检测到无障碍服务，结果将自动判定。") else append("未启用无障碍服务，稍后需您手动确认结果。")
                 }
@@ -1149,44 +1143,65 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     }
 
     /**
-     * 执行后台验证动作序列：退后台 → 启动目标 → 判定 → 回前台 → 弹结果。
+     * 执行后台验证动作序列：本 App 前台跳转目标（悬浮窗 5s 倒计时）→ 退回桌面 → 从桌面返回本 App → 弹结果。
      */
     private fun performBackgroundLaunchCheck(targetApp: String, a11yEnabled: Boolean) {
         val mainHandler = Handler(Looper.getMainLooper())
+        // 开启悬浮窗会话：验证期间在目标 App 上显示 5s 倒计时
+        FloatingWindowController.startFloatSession()
+        FloatingWindowController.updateTime(5)
+        // 本 App 前台直接拉起目标 App
         try {
-            activity?.moveTaskToBack(true)
-        } catch (e: Exception) {
-            LogFileManager.error("后台验证退后台失败: ${e.message}")
-        }
-        // 退后台稳定后再从后台启动目标
-        mainHandler.postDelayed({
-            try {
-                val intent = Intent(Intent.ACTION_MAIN, null).apply {
-                    addCategory(Intent.CATEGORY_LAUNCHER)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    setPackage(targetApp)
-                }
-                val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    ctx.packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
-                } else {
-                    ctx.packageManager.queryIntentActivities(intent, 0)
-                }
-                if (activities.isNotEmpty()) {
-                    val info = activities.first()
-                    intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
-                }
-                ctx.startActivity(intent)
-            } catch (e: Exception) {
-                LogFileManager.error("后台验证启动目标失败: ${e.message}")
+            val intent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                setPackage(targetApp)
             }
-            // 等待目标 App 进入前台（或确认被拦截）
+            val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ctx.packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+            } else {
+                ctx.packageManager.queryIntentActivities(intent, 0)
+            }
+            if (activities.isNotEmpty()) {
+                val info = activities.first()
+                intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+            }
+            ctx.startActivity(intent)
+        } catch (e: Exception) {
+            LogFileManager.error("后台验证启动目标失败: ${e.message}")
+        }
+        // 5s 倒计时悬浮窗
+        var countdown = 5
+        val tickRunnable = object : Runnable {
+            override fun run() {
+                FloatingWindowController.updateTime(countdown)
+                countdown--
+                if (countdown > 0) {
+                    mainHandler.postDelayed(this, 1000L)
+                }
+            }
+        }
+        mainHandler.postDelayed(tickRunnable, 1000L)
+        // 5s 后判定目标是否弹出 → 退回桌面 → 从桌面返回本 App
+        mainHandler.postDelayed({
+            FloatingWindowController.stopFloatSession()
+            val launched = if (a11yEnabled) {
+                AutoProjectionAccessibilityService.lastForegroundPackage() == targetApp
+            } else null
+            // 从目标 App 退回桌面
+            try {
+                ctx.startActivity(Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            } catch (e: Exception) {
+                LogFileManager.error("后台验证退回桌面失败: ${e.message}")
+            }
+            // 等桌面切换稳定后，从桌面返回本 App 并展示结果
             mainHandler.postDelayed({
-                val launched = if (a11yEnabled) {
-                    AutoProjectionAccessibilityService.lastForegroundPackage() == targetApp
-                } else null
                 showBackgroundVerifyResult(targetApp, launched, a11yEnabled, mainHandler)
-            }, 3500L)
-        }, 600L)
+            }, 800L)
+        }, 5000L)
     }
 
     /** 后台验证结果展示：自动判定或用户确认；失败时引导去系统设置开启「后台弹出界面」 */
