@@ -773,9 +773,9 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         UnifiedDialogKit.showWarning(
             ctx,
             "强制解绑",
-            "确定强制解绑？解绑后，已绑定的控制端将无法再查询或控制本设备。\n\n" +
-                "注意：本操作只解除绑定关系，不会清除本机的 MQTT 配置（服务器 / 账号 / 设备ID / 控制端凭证），" +
-                "下次直接生成二维码即可重新绑定，无需重新填写。",
+            "解绑后，已绑定的控制端将无法再查询或控制本设备。\n\n" +
+                "仅解除绑定关系，MQTT 配置（服务器 / 账号 / 设备ID / 控制端凭证）均保留，" +
+                "下次生成二维码即可重新绑定。",
             confirmText = "强制解绑"
         ) {
             MqttAgentService.unbind() // 仅清绑定态，保留 MQTT 配置

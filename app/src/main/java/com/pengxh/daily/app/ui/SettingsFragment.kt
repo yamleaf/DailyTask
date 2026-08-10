@@ -38,13 +38,11 @@ import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.view.ContextThemeWrapper
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.DailyTaskApplication
@@ -561,7 +559,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 UnifiedDialogKit.showWarning(
                     ctx,
                     "开启手势识别？",
-                    "开启后，在屏幕上滑动可控制伪熄屏：双指下滑开启伪熄屏，单指/双指上滑关闭。\n\n" +
+                    "开启后，在屏幕上滑动即可控制伪息屏：\n" +
+                        "· 双指下滑：开启伪息屏\n" +
+                        "· 单指/双指上滑：关闭伪息屏\n\n" +
                         "单指下滑不受影响，可正常操作本软件。",
                     confirmText = "确认开启",
                     cancelable = false,
@@ -602,10 +602,12 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             } else {
                 UnifiedDialogKit.showWarning(
                     ctx,
-                    "开启伪熄屏？",
-                    "离开本软件超过设定时间（默认 60 秒）后，以及在本软件前台无操作超过设定时间，都将自动进入伪熄屏模式。\n\n" +
-                        "将同时开启手势识别，便于随时退出：双指下滑进入伪熄屏，单指/双指上滑退出。\n\n" +
-                        "⚠ 可能打断其他 App 使用；适合无人值守挂机，白天操作手机建议关闭。",
+                    "开启伪息屏？",
+                    "后台运行或前台无操作超过设定时间，将自动进入伪息屏（模拟息屏，省电护眼）。\n\n" +
+                        "手势识别已开启，可随时退出：\n" +
+                        "· 进入伪息屏：双指下滑\n" +
+                        "· 退出伪息屏：单指/双指上滑\n\n" +
+                        "⚠ 后台伪息屏可能打断其他 App 使用，适合无人值守挂机；白天操作手机时建议关闭。",
                     confirmText = "确认开启",
                     cancelable = false,
                     onCancel = {
@@ -1127,10 +1129,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx = ctx,
             contentView = TextView(ctx).apply {
                 text = buildString {
-                    append("将模拟真实远程指令场景：本应用退到后台，再从后台拉起「$targetApp」。\n\n")
-                    append("请观察屏幕：若看到「$targetApp」弹出，说明后台弹出界面权限正常；\n")
-                    append("若停在桌面/无反应，则被系统拦截（MIUI 需开启「后台弹出界面」）。\n\n")
-                    if (a11yEnabled) append("（已检测到无障碍服务，将自动判定结果）") else append("（未启用无障碍服务，稍后需您确认结果）")
+                    append("本应用将退到桌面 → 拉起「$targetApp」→ 停留 5 秒 → 自动返回本应用。\n\n")
+                    append("请观察屏幕：\n")
+                    append("· 正常弹出并自动返回 → 权限正常\n")
+                    append("· 无法拉起或无法自动返回 → 被系统拦截，需开启「启动应用」权限，小米手机额外开启「后台弹出界面」权限\n\n")
+                    if (a11yEnabled) append("已检测到无障碍服务，结果将自动判定。") else append("未启用无障碍服务，稍后需您手动确认结果。")
                 }
                 setPadding(24, 16, 24, 16)
                 textSize = 14f
@@ -1670,7 +1673,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     private fun showCustomAppManagerDialog() {
         val view = LayoutInflater.from(ctx).inflate(R.layout.dialog_custom_app_manager, null)
         val contentContainer = view.findViewById<FrameLayout>(R.id.contentContainer)
-        val closeBtn = view.findViewById<ImageView>(R.id.closeBtn)
         val btnPickFromInstalled = view.findViewById<TextView>(R.id.btnPickFromInstalled)
         val btnManualInput = view.findViewById<TextView>(R.id.btnManualInput)
         val customApps = Constant.getCustomTargetApps()
@@ -1712,19 +1714,19 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 )
             })
         }
-        val dialog = MaterialAlertDialogBuilder(ctx)
-            .setView(view)
-            .setCancelable(true)
-            .create()
-        dialog.show()
-        customAppDialog = dialog
-        closeBtn.setOnClickListener { dialog.dismiss() }
+        customAppDialog = UnifiedDialogKit.showForm(
+            ctx,
+            view,
+            title = getString(R.string.settings_custom_target_app),
+            positiveText = "完成",
+            negativeText = null
+        )
         btnPickFromInstalled.setOnClickListener {
-            dialog.dismiss()
+            customAppDialog?.dismiss()
             showAppPickerDialog()
         }
         btnManualInput.setOnClickListener {
-            dialog.dismiss()
+            customAppDialog?.dismiss()
             showCustomAppTextDialog()
         }
     }
@@ -1760,14 +1762,17 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 return item
             }
         }
-        val dialog = MaterialAlertDialogBuilder(ctx).setView(view).setCancelable(true).create()
-        dialog.show()
+        val dialog = UnifiedDialogKit.showForm(
+            ctx,
+            view,
+            title = getString(R.string.settings_pick_app_title),
+            positiveText = getString(android.R.string.cancel),
+            negativeText = null
+        )
         listView.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
             dialog.dismiss()
             addCustomApp(allApps[position].activityInfo.packageName)
         }
-        view.findViewById<ImageView>(R.id.closeBtn).setOnClickListener { dialog.dismiss() }
-        view.findViewById<TextView>(R.id.btnCancel).setOnClickListener { dialog.dismiss() }
     }
 
     /** 手动输入自定义应用包名 */
@@ -1907,19 +1912,22 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 )
             )
         }
-        val dialog = MaterialAlertDialogBuilder(ctx)
-            .setTitle(null)
-            .setView(container)
-            .setPositiveButton("关闭", null)
-            .create()
-        dialog.setOnDismissListener {
+        val dlg = UnifiedDialogKit.showForm(
+            ctx,
+            container,
+            positiveText = "关闭",
+            negativeText = null
+        )
+        dlg.setOnDismissListener {
             webView.stopLoading()
             webView.loadUrl("about:blank")
             (webView.parent as? ViewGroup)?.removeView(webView)
             webView.destroy()
         }
-        dialog.show()
-        dialog.window?.setLayout(resources.displayMetrics.widthPixels - pad * 2, ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.window?.setLayout(
+            resources.displayMetrics.widthPixels - pad * 2,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
 

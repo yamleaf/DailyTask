@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">DailyTask</string>
     <string name="notification_monitor_service_name">DailyTask通知监听服务</string>
-    <string name="accessibility_service_desc">提供无障碍辅助功能：支持截屏获取打卡结果，以及读取目标应用界面文本自动判断打卡是否成功。</string>
+    <string name="accessibility_service_desc">提供无障碍辅助功能：截屏获取打卡结果，以及读取目标应用界面文本自动判断打卡是否成功</string>
 
     <!-- 设置页 -->
     <string name="settings_title">设置</string>
@@ -22,20 +22,20 @@
     <string name="settings_accessibility_title">无障碍权限</string>
     <string name="settings_accessibility_tip">服务未开启，无障碍模式无法获取打卡结果</string>
     <string name="settings_gesture_title">手势识别</string>
-    <string name="settings_gesture_tip">开启后，双指在屏幕上滑动可开启/关闭伪熄屏（下滑开启，上滑关闭）</string>
+    <string name="settings_gesture_tip">开启后，双指下滑开启伪息屏，单指/双指上滑关闭</string>
     <string name="settings_power_save_title">节能模式</string>
     <string name="settings_power_save_tip">降低倒计时通知、内存监控和息屏蒙层动画刷新频率</string>
-    <string name="settings_pseudo_mask_group_title">伪熄屏增强</string>
-    <string name="settings_pseudo_mask_group_tip">离开本软件超过设定秒数后主动进入伪熄屏</string>
-    <string name="settings_force_mask_title">伪熄屏</string>
-    <string name="settings_force_mask_tip">开启后，离开本软件且超时、以及前台无操作超时，均进入伪熄屏模式（可能打断其它 App 的正常使用）</string>
-    <string name="settings_pseudo_mask_delay_title">伪熄屏延迟</string>
-    <string name="settings_pseudo_mask_delay_tip">离开本软件或前台无操作超过该秒数后进入伪熄屏（10~3600，默认 60）</string>
+    <string name="settings_pseudo_mask_group_title">伪息屏增强</string>
+    <string name="settings_pseudo_mask_group_tip">离开本软件超过设定秒数后主动进入伪息屏</string>
+    <string name="settings_force_mask_title">伪息屏</string>
+    <string name="settings_force_mask_tip">开启后，后台超时或前台无操作超时均进入伪息屏（可能打断其它 App 使用）</string>
+    <string name="settings_pseudo_mask_delay_title">伪息屏延迟</string>
+    <string name="settings_pseudo_mask_delay_tip">离开本软件或前台无操作超过该秒数后进入伪息屏（10~3600，默认 60）</string>
     <string name="settings_pseudo_mask_delay_value">%1$d 秒</string>
     <string name="settings_pseudo_mask_no_clock_title">隐藏息屏时钟</string>
-    <string name="settings_pseudo_mask_no_clock_tip">开启后伪熄屏只显示黑屏，不显示时钟，更省电</string>
+    <string name="settings_pseudo_mask_no_clock_tip">开启后伪息屏仅显示黑屏，不显示时钟，更省电</string>
     <string name="settings_accessibility_enable_warning_title">开启无障碍服务提醒</string>
-    <string name="settings_accessibility_enable_warning_msg">钉钉等部分打卡应用会检测无障碍开关。\n\n开启无障碍服务后，请先手动验证能否正常打卡；如果无法正常打卡，请关闭刚才开启的无障碍服务。</string>
+    <string name="settings_accessibility_enable_warning_msg">钉钉等部分打卡应用会检测无障碍开关。\n\n开启后请先手动验证能否正常打卡；若异常，请关闭刚开启的无障碍服务。</string>
     <string name="settings_capture_enable_warning_title">开启截屏服务提醒</string>
     <string name="settings_capture_enable_warning_msg">截屏服务通过系统屏幕录制授权获取打卡画面。\n\n⚠ 状态栏会显示录屏提示，银行/支付类 App 可能受限。开启后请先验证能否正常打卡，异常则关闭。</string>
     <string name="settings_back_home_title">返回桌面</string>
