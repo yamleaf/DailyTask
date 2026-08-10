@@ -14,6 +14,9 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
@@ -27,6 +30,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -456,7 +460,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             }
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
-        binding.chainStartRow.setOnClickListener { checkChainStartPermission() }
+        binding.setupCheckRow.setOnClickListener { showSetupSelfCheck() }
         // 电量预警分组：分组开关仅控制子项展开/收起，功能开关保留在子项内
         val applyBatteryGroupExpand = { expanded: Boolean ->
             binding.batteryAlertGroupContent.visibility = if (expanded) View.VISIBLE else View.GONE
@@ -764,6 +768,34 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
         updateResultSourceView()
         syncSettingsUiFromStore()
+        updateSetupCheckStatus()
+    }
+
+    /** 刷新「被控端就绪自检」入口的状态摘要 */
+    private fun updateSetupCheckStatus() {
+        val targetApp = Constant.getTargetApp()
+        val statusView = binding.setupCheckStatusView
+        when {
+            targetApp.isBlank() -> {
+                statusView.text = "未配置目标"
+                statusView.setTextColor(R.color.md_warning.convertColor(ctx))
+            }
+
+            !ctx.notificationEnable() -> {
+                statusView.text = "通知未授权"
+                statusView.setTextColor(R.color.md_error.convertColor(ctx))
+            }
+
+            !NotificationMonitorService.isListenerConnected() -> {
+                statusView.text = "通知未连接"
+                statusView.setTextColor(R.color.md_error.convertColor(ctx))
+            }
+
+            else -> {
+                statusView.text = "基本正常"
+                statusView.setTextColor(R.color.md_tertiary.convertColor(ctx))
+            }
+        }
     }
 
     /** 同步各开关到持久化存储（避免 UI 与状态不一致） */
@@ -782,9 +814,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
             binding.pseudoMaskNoClockSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
             binding.transferSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)
-            // 链式启动权限状态初始显示
-            binding.chainStartStatusView.text = "未检测"
-            binding.chainStartStatusView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
             // 电量智能预警
             val alertEnabled = SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
             binding.batterySmartAlertSwitch.isChecked = alertEnabled
@@ -825,84 +854,98 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.accessibilityFeedbackView.setTextColor(R.color.theme_color.convertColor(ctx))
     }
 
+    // ═══════════════════════ 权限自检 ═══════════════════════
+
     /**
-     * 链式启动权限检测：判断本应用能否从后台拉起其他应用（打卡应用）。
-     *
-     * Android 12+（API 31+）引入了 START_ACTIVITIES_FROM_BACKGROUND 权限限制后台启动 Activity。
-     * 国产 ROM（MIUI/ColorOS/EMUI 等）还有额外的「链式启动/关联启动」系统级开关，无标准 API 可查。
-     *
-     * 点击此行：先检测 API 31+ 权限，再弹引导对话框，提供「尝试启动」按钮直接拉起目标应用验证；
-     * 拉起失败时再引导去系统设置授权。
+     * 权限自检：检查 App 运行所需的基本权限（不含截屏/无障碍等功能权限），在配置阶段提前暴露并引导解决——
+     * 1) 通知监听：区分「未授权」与「已授权但服务未连接」（国产 ROM 自启动拦截绑定，远程指令无响应）。
+     * 2) 后台弹出界面：App 在后台拉起打卡应用所需的系统权限（前台验证必然成功，需真实退后台验证）。
+     * 3) 悬浮窗权限：打卡结果提示 / 伪息屏蒙层。
+     * 4) 电池优化豁免：后台保活。
      */
-    private fun checkChainStartPermission() {
+    private fun showSetupSelfCheck() {
         val targetApp = Constant.getTargetApp()
-        if (targetApp.isBlank()) {
-            "请先选择目标打卡应用".show(ctx)
-            return
-        }
+        val noticeAuthorized = ctx.notificationEnable()
+        val noticeConnected = NotificationMonitorService.isListenerConnected()
+        val overlayGranted = Settings.canDrawOverlays(ctx)
+        val batteryExempt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = ctx.getSystemService(PowerManager::class.java)
+            pm.isIgnoringBatteryOptimizations(ctx.packageName)
+        } else true
 
-        // API 31+ 检查 START_ACTIVITIES_FROM_BACKGROUND 权限
-        var granted = false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                granted = ctx.checkSelfPermission("android.permission.START_ACTIVITIES_FROM_BACKGROUND") ==
-                    PackageManager.PERMISSION_GRANTED
-            } catch (_: Exception) {
-                granted = false
+        val sb = StringBuilder()
+        sb.append("① 通知监听（远程指令接收）\n")
+        when {
+            !noticeAuthorized -> sb.append("    ✗ 未授权，无法接收远程指令\n")
+            !noticeConnected -> sb.append("    ⚠ 已授权但服务未连接，远程指令可能无响应（国产 ROM 自启动拦截）\n")
+            else -> sb.append("    ✓ 已连接，可接收远程指令\n")
+        }
+        sb.append("\n② 后台弹出界面（拉起打卡 App）\n")
+        sb.append("    ⓘ 需真实退后台验证，见下方「后台验证」\n")
+        sb.append("\n③ 悬浮窗权限（结果提示/蒙层）\n")
+        sb.append(if (overlayGranted) "    ✓ 已获取\n" else "    ✗ 未获取\n")
+        sb.append("\n④ 电池优化（后台保活）\n")
+        sb.append(if (batteryExempt) "    ✓ 已豁免\n" else "    ✗ 未豁免，锁屏后可能被杀\n")
+
+        val contentView = ScrollView(ctx).apply {
+            addView(TextView(ctx).apply {
+                text = sb.toString()
+                setPadding(24, 16, 24, 16)
+                textSize = 14f
+            })
+        }
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = contentView,
+            title = "权限自检",
+            positiveText = "后台验证",
+            negativeText = if (noticeAuthorized && !noticeConnected) "去修复" else "关闭",
+            onConfirm = {
+                verifyBackgroundLaunch(targetApp)
+                true
+            },
+            onCancel = {
+                if (noticeAuthorized && !noticeConnected) {
+                    showNotificationListenerFixGuide()
+                    false
+                } else {
+                    true
+                }
             }
-        }
+        )
+    }
 
-        val statusText: String
-        val statusColor: Int
-        val tipText: String
-        if (granted) {
-            statusText = "已授权"
-            statusColor = R.color.md_tertiary
-            tipText = "系统已授予后台启动权限，可正常拉起打卡应用"
-        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            statusText = "旧系统"
-            statusColor = R.color.md_onSurfaceVariant
-            tipText = "系统低于 Android 12，无后台启动限制；部分国产 ROM 仍需手动开启「链式启动」"
-        } else {
-            statusText = "待授权"
-            statusColor = R.color.md_warning
-            tipText = "Android 12+ 需授权后台启动；国产 ROM 可能还有「链式启动/关联启动」开关"
-        }
-        binding.chainStartStatusView.text = statusText
-        binding.chainStartStatusView.setTextColor(statusColor.convertColor(ctx))
-        binding.chainStartTipsView.text = tipText
-        binding.chainStartTipsView.setTextColor(R.color.md_onSurfaceVariant.convertColor(ctx))
-
-        // 已授权：直接尝试拉起一次，验证可正常启动
-        if (granted) {
-            tryStartTargetApp()
-            return
-        }
-
-        // 待授权 / 旧系统：弹引导对话框，提供「尝试启动」验证；失败时再引导前往设置
+    /**
+     * 通知监听未连接引导：说明国产 ROM 自启动拦截，引导去系统设置开启「自启动」。
+     */
+    private fun showNotificationListenerFixGuide() {
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = TextView(ctx).apply {
-                text = "链式启动权限用于本应用在后台拉起打卡应用（$targetApp）。\n\n" +
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                        "系统当前未授予「后台启动其它应用」权限，尝试启动可能被系统拦截。若启动失败，请前往系统设置开启「后台启动其它应用」。"
-                    else
-                        "系统低于 Android 12 无此限制，但部分国产 ROM 仍需在「自启动 / 关联启动」中允许本应用。\n\n当前状态：$statusText"
+                text = "通知监听已授权但服务未连接，远程指令会无响应。\n\n" +
+                    "常见原因：国产 ROM（MIUI/HyperOS）自启动管理拦截了通知监听服务绑定。\n\n" +
+                    "解决步骤：\n" +
+                    "1. 前往系统设置 → 应用管理 → 本应用 → 自启动，设为允许；\n" +
+                    "2. 若本应用设置中无「自启动」选项，请到系统「安全中心 → 应用管理 → 权限」中允许；\n" +
+                    "3. 修改后重启手机，或在此页重新开关通知监听，确认状态变为「已连接」。"
                 setPadding(24, 16, 24, 16)
+                textSize = 14f
             },
-            title = "链式启动权限",
-            positiveText = "尝试启动",
+            title = "通知监听未连接",
+            positiveText = "前往设置",
             negativeText = "知道了",
             onConfirm = {
-                tryStartTargetApp()
+                openAppDetailSettings(ctx.packageName)
                 true
             }
         )
     }
 
-    /** 尝试拉起目标打卡应用（链式启动验证）；失败时提示并引导前往系统设置 */
-    private fun tryStartTargetApp() {
-        val targetApp = Constant.getTargetApp()
+    /**
+     * 后台弹出界面真实验证：先退到后台，再从后台启动目标 App，验证系统后台启动限制是否放行。
+     * 无障碍已启用时自动判定目标是否进入前台；否则由用户目视确认后选择。
+     */
+    private fun verifyBackgroundLaunch(targetApp: String) {
         if (targetApp.isBlank()) {
             "请先选择目标打卡应用".show(ctx)
             return
@@ -911,57 +954,135 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             "未安装目标应用：$targetApp".show(ctx)
             return
         }
-        val intent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            setPackage(targetApp)
-        }
-        val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ctx.packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
-        } else {
-            ctx.packageManager.queryIntentActivities(intent, 0)
-        }
-        if (activities.isEmpty()) {
-            openChainStartFailDialog("未找到目标应用的启动入口（包名：$targetApp）")
-            return
-        }
-        val info = activities.first()
-        intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
-        try {
-            ctx.startActivity(intent)
-            "已尝试启动 $targetApp，3 秒后自动返回当前应用".show(ctx)
-            // 成功拉起目标应用后，3s 自动返回当前应用，作为链式启动权限生效的验证
-            lifecycleScope.launch {
-                delay(3000)
-                if (!isAdded) return@launch
-                try {
-                    val back = Intent(ctx, MainActivity::class.java).apply {
-                        addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                        )
-                    }
-                    ctx.startActivity(back)
-                    "链式启动权限已生效，已自动返回当前应用".show(ctx)
-                } catch (e: Exception) {
-                    "自动返回当前应用失败：${e.message}".show(ctx)
-                }
-            }
-        } catch (e: Exception) {
-            openChainStartFailDialog("启动失败：${e.message}")
-        }
-    }
-
-    /** 链式启动尝试失败提示：说明原因并提供「前往设置」入口 */
-    private fun openChainStartFailDialog(message: String) {
+        val a11yEnabled = AutoProjectionAccessibilityService.isEnabled(ctx)
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = TextView(ctx).apply {
-                text = "$message\n\n可能被系统限制后台启动。请前往本应用的系统权限页，开启「后台启动其它应用」（国产 ROM 另需允许「链式启动/关联启动」）。"
+                text = buildString {
+                    append("将模拟真实远程指令场景：本应用退到后台，再从后台拉起「$targetApp」。\n\n")
+                    append("请观察屏幕：若看到「$targetApp」弹出，说明后台弹出界面权限正常；\n")
+                    append("若停在桌面/无反应，则被系统拦截（MIUI 需开启「后台弹出界面」）。\n\n")
+                    if (a11yEnabled) append("（已检测到无障碍服务，将自动判定结果）") else append("（未启用无障碍服务，稍后需您确认结果）")
+                }
                 setPadding(24, 16, 24, 16)
+                textSize = 14f
             },
-            title = "启动失败",
+            title = "后台弹出验证",
+            positiveText = "开始验证",
+            negativeText = "取消",
+            onConfirm = {
+                performBackgroundLaunchCheck(targetApp, a11yEnabled)
+                true
+            }
+        )
+    }
+
+    /**
+     * 执行后台验证动作序列：退后台 → 启动目标 → 判定 → 回前台 → 弹结果。
+     */
+    private fun performBackgroundLaunchCheck(targetApp: String, a11yEnabled: Boolean) {
+        val mainHandler = Handler(Looper.getMainLooper())
+        try {
+            activity?.moveTaskToBack(true)
+        } catch (e: Exception) {
+            LogFileManager.error("后台验证退后台失败: ${e.message}")
+        }
+        // 退后台稳定后再从后台启动目标
+        mainHandler.postDelayed({
+            try {
+                val intent = Intent(Intent.ACTION_MAIN, null).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    setPackage(targetApp)
+                }
+                val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    ctx.packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+                } else {
+                    ctx.packageManager.queryIntentActivities(intent, 0)
+                }
+                if (activities.isNotEmpty()) {
+                    val info = activities.first()
+                    intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+                }
+                ctx.startActivity(intent)
+            } catch (e: Exception) {
+                LogFileManager.error("后台验证启动目标失败: ${e.message}")
+            }
+            // 等待目标 App 进入前台（或确认被拦截）
+            mainHandler.postDelayed({
+                val launched = if (a11yEnabled) {
+                    AutoProjectionAccessibilityService.lastForegroundPackage() == targetApp
+                } else null
+                showBackgroundVerifyResult(targetApp, launched, a11yEnabled, mainHandler)
+            }, 3500L)
+        }, 600L)
+    }
+
+    /** 后台验证结果展示：自动判定或用户确认；失败时引导去系统设置开启「后台弹出界面」 */
+    private fun showBackgroundVerifyResult(
+        targetApp: String,
+        launched: Boolean?,
+        a11yEnabled: Boolean,
+        mainHandler: Handler
+    ) {
+        // 回到前台再弹结果，避免在后台弹窗
+        val back = Intent(ctx, MainActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            )
+        }
+        mainHandler.postDelayed({
+            try { ctx.startActivity(back) } catch (_: Exception) { }
+            mainHandler.postDelayed({
+                if (launched == true) {
+                    UnifiedDialogKit.showSuccess(
+                        ctx,
+                        "验证通过",
+                        "「$targetApp」已从后台成功拉起，后台弹出界面权限正常。",
+                        confirmText = "知道了"
+                    )
+                } else if (launched == false) {
+                    openBackgroundStartFailDialog(targetApp)
+                } else {
+                    // 无无障碍：用户目视确认
+                    UnifiedDialogKit.showForm(
+                        ctx = ctx,
+                        contentView = TextView(ctx).apply {
+                            text = "刚才是否看到「$targetApp」从后台弹出？"
+                            setPadding(24, 16, 24, 16)
+                            textSize = 14f
+                        },
+                        title = "后台弹出验证",
+                        positiveText = "看到了",
+                        negativeText = "没看到",
+                        onConfirm = {
+                            "后台弹出界面权限正常".show(ctx)
+                            true
+                        },
+                        onCancel = {
+                            openBackgroundStartFailDialog(targetApp)
+                            false
+                        }
+                    )
+                }
+            }, 800L)
+        }, 400L)
+    }
+
+    /** 后台启动失败引导：说明原因并提供「前往系统设置」入口 */
+    private fun openBackgroundStartFailDialog(targetApp: String) {
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = TextView(ctx).apply {
+                text = "「$targetApp」未能从后台弹出，可能被系统后台启动限制拦截。\n\n" +
+                    "请前往系统设置，为本应用开启「后台弹出界面」（MIUI）或「后台启动其它应用」（Android 12+）：\n" +
+                    "设置 → 应用管理 → 本应用 → 权限管理 → 后台弹出界面（允许）"
+                setPadding(24, 16, 24, 16)
+                textSize = 14f
+            },
+            title = "后台弹出被拦截",
             positiveText = "前往设置",
             negativeText = "知道了",
             onConfirm = {

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
+import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.FloatingWindowController
@@ -53,27 +54,53 @@ fun Context.openApplication(onOpened: (() -> Unit)? = null) {
         return
     }
 
-    val intent = Intent(Intent.ACTION_MAIN, null).apply {
-        addCategory(Intent.CATEGORY_LAUNCHER)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        setPackage(targetApp)
+    // 后台启动限制（Android 10+ / MIUI 后台弹出界面）：从后台直接启动目标 App 可能被系统拦截。
+    // 需在系统权限页为 DailyTask 开启「后台弹出界面」/「后台启动其它应用」后方可正常拉起。
+    // 注：曾尝试「预拉起 MainActivity 获取可见窗口豁免」方案，但 MIUI 的 DeviceGuard 连 MainActivity
+    // 自身的后台启动都会拦截，豁免无效，且会引入界面闪现与延迟，故回退为直接启动。
+    fun startTarget() {
+        val intent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            setPackage(targetApp)
+        }
+        val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+        } else {
+            packageManager.queryIntentActivities(intent, 0)
+        }
+        if (activities.isNotEmpty()) {
+            val info = activities.first()
+            intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+            startActivity(intent)
+            // 被控端主动跳到目标 App：开启悬浮窗倒计时会话（统一收口，所有跳转自动覆盖，无需逐个调用方接入）
+            FloatingWindowController.startFloatSession()
+            onOpened?.invoke()
+        } else {
+            TaskScheduler.requestStopDueToError("未找到目标应用的 Launcher Activity，包名：$targetApp")
+        }
     }
-    val activities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        packageManager.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
-    } else {
-        packageManager.queryIntentActivities(intent, 0)
+
+    if (isAppInForeground()) {
+        startTarget()
+        return
     }
-    if (activities.isNotEmpty()) {
-        val info = activities.first()
-        intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
-        startActivity(intent)
-        // 被控端主动跳到目标 App：开启悬浮窗倒计时会话（统一收口，所有跳转自动覆盖，无需逐个调用方接入）
-        FloatingWindowController.startFloatSession()
-        onOpened?.invoke()
-    } else {
-        TaskScheduler.requestStopDueToError("未找到目标应用的 Launcher Activity，包名：$targetApp")
+    // 后台：直接启动目标 App（需已授权「后台弹出界面」）
+    try {
+        startTarget()
+    } catch (e: Exception) {
+        LogFileManager.error("openApplication 后台启动目标 App 失败: ${e.message}")
+        TaskScheduler.requestStopDueToError("启动目标 App 失败，请检查「后台弹出界面」权限: ${e.message}")
     }
 }
+
+/**
+ * 判断本应用当前是否在前台（存在可见 Activity）。
+ * 用于后台启动限制规避：在前台时后台拉起其它应用才被系统允许。
+ * 复用 DailyTaskApplication 的 Activity 生命周期统计，比 appTasks.taskInfo.topActivity
+ * 可靠——Home 键隐藏后 task 栈顶仍是 MainActivity，但应用已不在前台。
+ */
+private fun Context.isAppInForeground(): Boolean = DailyTaskApplication.isAppForeground
 
 /**
  * 将本应用（DailyTask）主界面拉到前台，并可选同步伪息屏蒙层状态。

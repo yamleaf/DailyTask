@@ -126,6 +126,12 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
          * 当前是否处于文本检测窗口期
          */
         fun isTextDetectionActive(): Boolean = instance?.textDetectionActive == true
+
+        /**
+         * 最近一次观测到的前台包名（无障碍事件记录），用于「被控端就绪自检」后台启动验证自动判定。
+         * 服务未启用/未观测到时返回 null，调用方需回退到用户人工确认。
+         */
+        fun lastForegroundPackage(): String? = instance?.lastForegroundPackage
     }
 
     private val executor = Executors.newSingleThreadExecutor()

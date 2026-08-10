@@ -125,6 +125,7 @@ class NotificationMonitorService : NotificationListenerService() {
     override fun onListenerConnected() {
         listenerConnected = true
         emitListenerState(true)
+        LogFileManager.action("通知监听服务已连接")
     }
 
     /**
@@ -136,6 +137,11 @@ class NotificationMonitorService : NotificationListenerService() {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
         // 灭屏/锁屏时微信等常把正文放到 MessagingStyle，或仅保留摘要；尽量拼出完整内容
         val notice = extractNoticeContent(extras)
+        if (pkg in auxiliaryApp) {
+            LogFileManager.action(
+                "通知回调: pkg=$pkg, title=$title, notice空=${notice.isNullOrBlank()}, 含DT#=${notice?.contains(Constant.COMMAND_PREFIX) == true}"
+            )
+        }
 
         if (notice.isNullOrBlank()) {
             // 聚合成空不代表没有 EXTRA_TEXT，息屏场景下 EXTRA_TEXT 可能独立存在
@@ -190,11 +196,21 @@ class NotificationMonitorService : NotificationListenerService() {
         add(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
         extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.forEach { add(it) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
-            if (messages != null) {
-                Notification.MessagingStyle.Message
-                    .getMessagesFromBundleArray(messages)
-                    .forEach { add(it.text) }
+            // 用类型化读取，避免 API 33+ 下无类型版本返回非 Bundle[] 导致
+            // getMessagesFromBundleArray 抛 ClassCastException 把整个回调打崩
+            try {
+                val messages: Array<Bundle>? =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        extras.getParcelableArray(Notification.EXTRA_MESSAGES, Bundle::class.java)
+                    } else {
+                        extras.getParcelableArray(Notification.EXTRA_MESSAGES) as? Array<Bundle>
+                    }
+                messages?.let {
+                    Notification.MessagingStyle.Message.getMessagesFromBundleArray(it)
+                        .forEach { msg -> add(msg.text) }
+                }
+            } catch (e: Exception) {
+                Log.w(kTag, "解析 MessagingStyle 消息失败: ${e.message}")
             }
         }
         add(extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT))
@@ -725,6 +741,7 @@ class NotificationMonitorService : NotificationListenerService() {
     override fun onListenerDisconnected() {
         listenerConnected = false
         emitListenerState(false)
+        LogFileManager.action("通知监听服务已断开，尝试重新绑定")
         // 主动请求系统重新绑定监听服务
         requestRebind(ComponentName(this, NotificationMonitorService::class.java))
     }

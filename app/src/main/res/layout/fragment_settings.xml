@@ -461,9 +461,9 @@
                         android:layout_marginHorizontal="@dimen/dp_16"
                         android:background="@color/md_outlineVariant" />
 
-                    <!-- 链式启动权限（点击检测/跳转系统设置） -->
+                    <!-- 权限自检（一键检测远程指令链路/后台弹出/悬浮窗/电池优化） -->
                     <LinearLayout
-                        android:id="@+id/chainStartRow"
+                        android:id="@+id/setupCheckRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
@@ -477,7 +477,7 @@
                         <ImageView
                             android:layout_width="@dimen/size_28"
                             android:layout_height="@dimen/size_28"
-                            android:src="@drawable/ic_lock" android:contentDescription="@null" />
+                            android:src="@drawable/ic_guide" android:contentDescription="@null" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -489,23 +489,23 @@
                             <com.google.android.material.textview.MaterialTextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="链式启动权限"
+                                android:text="权限自检"
                                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                 android:textColor="@color/md_onSurface" />
 
                             <com.google.android.material.textview.MaterialTextView
-                                android:id="@+id/chainStartTipsView"
+                                android:id="@+id/setupCheckTipsView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="@dimen/dp_2"
                                 android:singleLine="true"
-                                android:text="点击检测：部分设备需手动授权才能拉起打卡应用"
+                                android:text="点击检测远程指令链路与后台拉起是否正常"
                                 android:textColor="@color/md_onSurfaceVariant"
                                 android:textSize="@dimen/sp_10" />
                         </LinearLayout>
 
                         <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/chainStartStatusView"
+                            android:id="@+id/setupCheckStatusView"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:text="未检测"
