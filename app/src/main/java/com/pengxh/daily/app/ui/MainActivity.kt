@@ -323,12 +323,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        LogFileManager.writeLog("onNewIntent: ${packageName} 回到前台")
-
-        if (ProjectionSession.isStateActive()) {
-            LogFileManager.writeLog("截屏服务正常：MediaProjection 有效")
-        } else {
-            LogFileManager.error("截屏服务异常：MediaProjection 已失效")
+        // 回前台不再打印截屏状态日志；权限失效的权威日志在 ProjectionSession.markStoppedNeedAuth()
+        // （系统回收 MediaProjection 时）打印，此处仅保留面向用户的 toast 提示。
+        if (!ProjectionSession.isStateActive()) {
             if (SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX) == 1) {
                 "截屏服务已断开，请重新授权".show(this)
                 SaveKeyValues.saveInt(Constant.RESULT_SOURCE_KEY, 0)

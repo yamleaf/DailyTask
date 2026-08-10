@@ -2,6 +2,7 @@ package com.pengxh.daily.app.utils
 
 import android.media.projection.MediaProjection
 import android.util.Log
+import com.pengxh.daily.app.utils.LogFileManager
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -43,6 +44,10 @@ object ProjectionSession {
 
     fun markStoppedNeedAuth() {
         synchronized(this) {
+            // 仅在状态确实发生变更（ACTIVE → NEED_AUTH）时落盘，避免重复调用刷屏。
+            if (state != State.NEED_AUTH) {
+                LogFileManager.error("截屏权限已失效，需重新授权（原状态=$state）")
+            }
             state = State.NEED_AUTH
             projectionRef.getAndSet(null)
         }

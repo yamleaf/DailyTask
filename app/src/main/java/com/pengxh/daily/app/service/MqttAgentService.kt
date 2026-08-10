@@ -24,6 +24,7 @@ import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.ConfigImportSignal
+import com.pengxh.daily.app.utils.LogFileManager
 import com.yample.mqttprotocol.MqttQuota
 import com.pengxh.daily.app.utils.RemoteSnapshot
 import com.pengxh.daily.app.utils.RuntimeStateApplier
@@ -177,13 +178,23 @@ class MqttAgentService : Service() {
         } catch (_: Exception) {
             registerReceiver(remoteChangedReceiver, IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED))
         }
-        startForegroundNotification()
+        // C1：前台服务启动防护。Android 15+ 对后台启动前台服务有严格配额（"Time limit already exhausted"），
+        // startForeground 可能抛 ForegroundServiceStartNotAllowedException；若任其扩散会以
+        // "Unable to create service" 崩溃整个进程，连带同进程的 NotificationMonitorService（远程指令链路）
+        // 一起死掉。因此 startForeground 失败时优雅退出本服务（stopSelf），绝不崩进程；
+        // MQTT 由 KeepAliveReceiver / 复活闹钟 / 前台打开 App 在配额恢复后重新拉起。
+        if (!startForegroundNotification()) {
+            LogFileManager.error("MQTT 服务前台启动被系统拒绝（后台 FGS 配额限制），已降级退出，等待配额恢复后重试")
+            return
+        }
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
         Thread { initMqtt() }.start()
     }
 
-    private fun startForegroundNotification() {
+    /** 拉起前台通知。返回 false 表示 startForeground 被系统拒绝（后台 FGS 配额耗尽），
+     * 调用方应优雅退出服务，防止进程被 "Unable to create service" 整体拖崩。 */
+    private fun startForegroundNotification(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId, "Remote Control", NotificationManager.IMPORTANCE_LOW
@@ -202,8 +213,19 @@ class MqttAgentService : Service() {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(contentIntent)
             .setOngoing(true)
-        startForeground(1001, notificationBuilder!!.build())
-        updateNotification()
+        return try {
+            startForeground(1001, notificationBuilder!!.build())
+            updateNotification()
+            true
+        } catch (e: Exception) {
+            // Android 15+ 后台启动前台服务的配额已耗尽（ForegroundServiceStartNotAllowedException
+            // "Time limit already exhausted for foreground service type xxx"）。这里绝不能让异常
+            // 逃逸出 onCreate，否则整个进程（含通知监听）一起崩溃、远程指令彻底失联。
+            LogFileManager.error("startForeground 被系统拒绝：${e.message}")
+            Log.e(TAG, "startForeground 失败（后台 FGS 配额限制）", e)
+            stopSelf()
+            false
+        }
     }
 
     /** B1：按连接/绑定态刷新前台通知文案（已连接·已绑定 / 已连接·待配对 / 连接中 / 已关闭） */

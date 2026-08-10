@@ -416,7 +416,13 @@ class NotificationMonitorService : NotificationListenerService() {
                         && SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "").isNotBlank()
                         && MqttSecureConfig.loadPass().isNotBlank()
                 if (valid) {
-                    startForegroundService(intent)
+                    try {
+                        startForegroundService(intent)
+                    } catch (e: Exception) {
+                        // Android 15+ 后台启动前台服务受限时，调用点也会抛异常；
+                        // 绝不能让它从通知监听回调里逃逸，否则整个进程（含远程指令链路）崩溃。
+                        LogFileManager.error("开启远程指令拉起 MQTT 服务失败：${e.message}")
+                    }
                     MessageDispatcher.sendMessage(
                         "远程服务状态通知",
                         "已开启本机远程控制服务（MQTT），控制端可重新连接。",

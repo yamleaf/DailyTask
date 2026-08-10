@@ -80,7 +80,9 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
          */
         fun requestCaptureScreen(): CompletableDeferred<String?> {
             if (!ProjectionSession.isStateActive()) {
-                LogFileManager.error("requestCaptureScreen: 截屏权限未授权（state=${ProjectionSession.getState()}），拒绝触发")
+                // 守卫：本次请求因截屏权限未就绪被拒绝。此处不落盘 error，避免每次定时/通知截屏
+                // 请求都刷屏；权限失效的权威日志在 ProjectionSession.markStoppedNeedAuth()（系统回收时）打印。
+                Log.d("CaptureImageService", "requestCaptureScreen: 截屏权限未授权（state=${ProjectionSession.getState()}），拒绝触发")
                 return CompletableDeferred<String?>().apply { complete("") }
             }
             _captureScreenRequest.tryEmit(Unit)
@@ -149,13 +151,27 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                Constant.CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
+            try {
+                startForeground(
+                    Constant.CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } catch (e: Exception) {
+                LogFileManager.error("CaptureImageService startForeground 被系统拒绝：${e.message}")
+                Log.e(kTag, "startForeground 失败", e)
+                stopSelf()
+                return
+            }
         } else {
-            startForeground(Constant.CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID, notification)
+            try {
+                startForeground(Constant.CAPTURE_IMAGE_SERVICE_NOTIFICATION_ID, notification)
+            } catch (e: Exception) {
+                LogFileManager.error("CaptureImageService startForeground 被系统拒绝：${e.message}")
+                Log.e(kTag, "startForeground 失败", e)
+                stopSelf()
+                return
+            }
         }
 
         launch {

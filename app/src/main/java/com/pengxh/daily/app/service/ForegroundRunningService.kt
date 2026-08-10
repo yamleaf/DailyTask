@@ -130,14 +130,27 @@ class ForegroundRunningService : Service() {
                 setVibrate(null) // 禁用振动
             }
         val notification = notificationBuilder.build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification)
+        // C1：前台服务启动防护。Android 15+ 后台启动前台服务受严格配额限制，
+        // startForeground 可能抛 ForegroundServiceStartNotAllowedException；任其逃逸会以
+        // "Unable to create service" 崩溃整个进程，连带同进程的通知监听（远程指令）一起死掉。
+        // 失败时优雅 stopSelf，由 KeepAliveReceiver 心跳/前台打开 App 在配额恢复后重新拉起。
+        val foregroundOk = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (e: Exception) {
+            LogFileManager.error("ForegroundRunningService startForeground 被系统拒绝：${e.message}")
+            Log.e(javaClass.simpleName, "startForeground 失败（后台 FGS 配额限制）", e)
+            stopSelf()
+            false
         }
+        if (!foregroundOk) return
 
         serviceScope.launch {
             notificationText.collect { text ->

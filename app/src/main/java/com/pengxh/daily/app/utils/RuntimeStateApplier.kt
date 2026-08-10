@@ -117,7 +117,12 @@ object RuntimeStateApplier {
                     // 开关变更后参照被控端主开关逻辑：开则校验账户并拉起 MQTT 前台服务，关则停止服务
                     val app = DailyTaskApplication.get()
                     if (v) {
-                        if (isMqttConfigValid(app)) app.startForegroundService(Intent(app, MqttAgentService::class.java))
+                        try {
+                            if (isMqttConfigValid(app)) app.startForegroundService(Intent(app, MqttAgentService::class.java))
+                        } catch (e: Exception) {
+                            // Android 15+ 后台启动前台服务受限时调用点也会抛异常，捕获防止中断远端配置应用
+                            LogFileManager.error("远程开启 MQTT 服务拉起失败：${e.message}")
+                        }
                     } else {
                         // 延后停服：先让本条指令的 Ack 发出去，避免控制端一直等回执
                         Handler(Looper.getMainLooper()).postDelayed({
