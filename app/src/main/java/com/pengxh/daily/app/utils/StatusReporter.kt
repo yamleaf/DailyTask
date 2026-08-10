@@ -1124,17 +1124,45 @@ object StatusReporter {
         val shutdownTimeMs = System.currentTimeMillis() + (battery / pred.ratePerHour * 3600 * 1000).toLong()
         val shutdownTimeText = java.util.Date(shutdownTimeMs).format("HH:mm")
         val warningTimeText = BatteryPredictor.formatWarningMinute(warningMinute)
+        val rateText = String.format("%.1f", pred.ratePerHour)
         val body = buildString {
-            append("<div style=\"text-align:center;padding:16px 0 10px;\">")
-            append("<div style=\"font-size:40px;margin-bottom:8px;\">⚠️</div>")
-            append("<div style=\"font-size:28px;font-weight:700;color:#b45309;\">电量耗尽预警</div>")
-            append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">预计 ${predictedTime} 降至 $threshold%</div>")
+            // ── 标题区：图标 + 大标题 ──
+            append("<div style=\"text-align:center;padding:20px 0 16px;\">")
+            append("<div style=\"font-size:44px;margin-bottom:10px;\">⚠️</div>")
+            append("<div style=\"font-size:22px;font-weight:700;color:#b45309;\">电量耗尽预警</div>")
             append("</div>")
-            append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
-            append("<p style=\"margin:0 0 6px;\">⚠️ 当前电量 $battery%，预计 <b>${predictedTime}</b> 降至 <b>$threshold%</b>。</p>")
-            append("<p style=\"margin:0 0 6px;\">预测时间落在夜间（${warningTimeText} 之后），可能在你睡眠期间电量耗尽关机。</p>")
-            append("<p style=\"margin:0 0 6px;\"><b>手机预计将在 ${shutdownTimeText} 后电量耗尽关机</b>（基于当前 ${String.format("%.1f", pred.ratePerHour)}%/h 消耗速度）。</p>")
-            append("<p style=\"margin:0;color:#888;font-size:11px;\">请在 <b>${warningTimeText}</b> 前为设备充电，避免夜间低电量关机。</p>")
+
+            // ── 三栏核心数据卡 ──
+            append("<div style=\"display:flex;gap:0;margin:0 0 18px;border-radius:12px;overflow:hidden;border:1px solid #e8e8e8;\">")
+            // 当前电量
+            append("<div style=\"flex:1;text-align:center;padding:14px 4px;background:#fffbf0;border-right:1px solid #e8e8e8;\">")
+            append("<div style=\"font-size:26px;font-weight:700;color:#b45309;line-height:1.2;\">$battery<span style=\"font-size:14px\">%</span></div>")
+            append("<div style=\"font-size:11px;color:#999;margin-top:4px;\">当前电量</div>")
+            append("</div>")
+            // 预计耗尽
+            append("<div style=\"flex:1;text-align:center;padding:14px 4px;background:#fff5f5;border-right:1px solid #e8e8e8;\">")
+            append("<div style=\"font-size:20px;font-weight:700;color:#dc2626;line-height:1.2;\">$shutdownTimeText</div>")
+            append("<div style=\"font-size:11px;color:#999;margin-top:4px;\">预计耗尽</div>")
+            append("</div>")
+            // 建议充电
+            append("<div style=\"flex:1;text-align:center;padding:14px 4px;background:#f0fdf4;\">")
+            append("<div style=\"font-size:20px;font-weight:700;color:#16a34a;line-height:1.2;\">$warningTimeText</div>")
+            append("<div style=\"font-size:11px;color:#999;margin-top:4px;\">建议充电</div>")
+            append("</div>")
+            append("</div>") // end 三栏
+
+            // ── 消耗速度（辅助信息，弱化）──
+            append("<div style=\"text-align:center;font-size:12px;color:#aaa;margin-bottom:16px;\">⚡ ${rateText}%/h 消耗速度</div>")
+
+            // ── 原因说明（精简为一段）──
+            append("<div style=\"background:#fafafa;border-radius:10px;padding:14px 16px;margin-bottom:18px;\">")
+            append("<div style=\"font-size:13px;color:#444;line-height:1.7;\">")
+            append("预测电量将在 <b>$predictedTime</b> 降至 <b>$threshold%</b>，时间落在夜间（<b>${warningTimeText}</b> 之后），可能在你睡眠期间自动关机。</div>")
+            append("</div>")
+
+            // ── 行动召唤条（高亮）──
+            append("<div style=\"background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;padding:14px 20px;text-align:center;border-left:4px solid #f59e0b;\">")
+            append("<div style=\"font-size:15px;font-weight:600;color:#92400e;\">🔌 请在 <b style=\"color:#b45309;font-size:17px;\">${warningTimeText}</b> 前为设备充电</div>")
             append("</div>")
         }
         return pageShell("⚠️ 电量耗尽预警", body, compact = false)
