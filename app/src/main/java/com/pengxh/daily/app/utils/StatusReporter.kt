@@ -1118,13 +1118,36 @@ object StatusReporter {
         return pageShell("🔋 电量已充满", body, compact = false)
     }
 
-    /** 电量智能预警（HTML，走反馈渠道通知） */
+    /** 电量智能预警（HTML，走反馈渠道通知）
+     *
+     * @param predictedTime   预测降到阈值的时间（格式 "MM-dd HH:mm"，如 "08-10 17:20"）
+     * @param warningMinute   预警上报时间的分钟数（从午夜算起，仅用于日志/调试上下文，不用于建议时间）
+     * @param threshold       低电量阈值（%）
+     * @param detectStartMinute 检测区间起始（分钟数，如 15:00 = 900）
+     * @param detectEndMinute   检测区间结束（分钟数，可能跨天，如 03:00 = 180）
+     */
     @JvmStatic
-    fun buildBatterySmartAlertContentHtml(battery: Int, predictedTime: String, warningMinute: Int, threshold: Int, pred: BatteryPredictor.Prediction): String {
+    fun buildBatterySmartAlertContentHtml(
+        battery: Int,
+        predictedTime: String,
+        warningMinute: Int,
+        threshold: Int,
+        pred: BatteryPredictor.Prediction,
+        detectStartMinute: Int,
+        detectEndMinute: Int
+    ): String {
+        // 「建议充电」= 预测降到阈值的时间（从 "MM-dd HH:mm" 提取 "HH:mm"）
+        val thresholdTimeHm = predictedTime.takeLast(5)  // e.g. "17:20"
+        val detectStartHm = BatteryPredictor.formatWarningMinute(detectStartMinute)
+        // 检测区间跨午夜（结束分钟数早于开始分钟数）时，结束时间加"次日"前缀
+        val crossMidnight = detectEndMinute < detectStartMinute
+        val detectEndHm = if (crossMidnight) "次日 ${BatteryPredictor.formatWarningMinute(detectEndMinute)}"
+                          else BatteryPredictor.formatWarningMinute(detectEndMinute)
+        // 电量完全耗尽时间（降至 0%）
         val shutdownTimeMs = System.currentTimeMillis() + (battery / pred.ratePerHour * 3600 * 1000).toLong()
         val shutdownTimeText = java.util.Date(shutdownTimeMs).format("HH:mm")
-        val warningTimeText = BatteryPredictor.formatWarningMinute(warningMinute)
         val rateText = String.format("%.1f", pred.ratePerHour)
+
         val body = buildString {
             // ── 标题区：图标 + 大标题 ──
             append("<div style=\"text-align:center;padding:20px 0 16px;\">")
@@ -1144,9 +1167,9 @@ object StatusReporter {
             append("<div style=\"font-size:20px;font-weight:700;color:#dc2626;line-height:1.2;\">$shutdownTimeText</div>")
             append("<div style=\"font-size:11px;color:#999;margin-top:4px;\">预计耗尽</div>")
             append("</div>")
-            // 建议充电
+            // 建议充电（= 降到阈值的时间）
             append("<div style=\"flex:1;text-align:center;padding:14px 4px;background:#f0fdf4;\">")
-            append("<div style=\"font-size:20px;font-weight:700;color:#16a34a;line-height:1.2;\">$warningTimeText</div>")
+            append("<div style=\"font-size:20px;font-weight:700;color:#16a34a;line-height:1.2;\">$thresholdTimeHm</div>")
             append("<div style=\"font-size:11px;color:#999;margin-top:4px;\">建议充电</div>")
             append("</div>")
             append("</div>") // end 三栏
@@ -1154,15 +1177,15 @@ object StatusReporter {
             // ── 消耗速度（辅助信息，弱化）──
             append("<div style=\"text-align:center;font-size:12px;color:#aaa;margin-bottom:16px;\">⚡ ${rateText}%/h 消耗速度</div>")
 
-            // ── 原因说明（精简为一段）──
+            // ── 原因说明（精简为一段，时间落在检测区间内）──
             append("<div style=\"background:#fafafa;border-radius:10px;padding:14px 16px;margin-bottom:18px;\">")
             append("<div style=\"font-size:13px;color:#444;line-height:1.7;\">")
-            append("预测电量将在 <b>$predictedTime</b> 降至 <b>$threshold%</b>，时间落在夜间（<b>${warningTimeText}</b> 之后），可能在你睡眠期间自动关机。</div>")
+            append("预测电量将在 <b>$predictedTime</b> 降至 <b>$threshold%</b>，时间落在检测区间内（<b>${detectStartHm} - ${detectEndHm}</b>），低于该阈值后可能在你离开设备时自动关机。</div>")
             append("</div>")
 
             // ── 行动召唤条（高亮）──
             append("<div style=\"background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;padding:14px 20px;text-align:center;border-left:4px solid #f59e0b;\">")
-            append("<div style=\"font-size:15px;font-weight:600;color:#92400e;\">🔌 请在 <b style=\"color:#b45309;font-size:17px;\">${warningTimeText}</b> 前为设备充电</div>")
+            append("<div style=\"font-size:15px;font-weight:600;color:#92400e;\">🔌 请在 <b style=\"color:#b45309;font-size:17px;\">${thresholdTimeHm}</b> 前为设备充电</div>")
             append("</div>")
         }
         return pageShell("⚠️ 电量耗尽预警", body, compact = false)

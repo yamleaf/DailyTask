@@ -479,7 +479,15 @@ val filter = IntentFilter().apply {
             LogFileManager.action("电量智能预警已触发：预计 ${targetTimeText} 降至 ${result.threshold}%（当前 ${battery}%），在 ${BatteryPredictor.formatWarningMinute(result.warningMinute)} 前提醒")
             MessageDispatcher.sendMessage(
                 "电量智能预警",
-                StatusReporter.buildBatterySmartAlertContentHtml(battery, targetTimeText, result.warningMinute, result.threshold, pred),
+                StatusReporter.buildBatterySmartAlertContentHtml(
+                    battery,
+                    targetTimeText,
+                    result.warningMinute,
+                    result.threshold,
+                    pred,
+                    result.detectStartMinute,
+                    result.detectEndMinute
+                ),
                 force = true,
                 appendMeta = false
             )

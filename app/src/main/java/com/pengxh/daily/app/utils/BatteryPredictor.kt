@@ -41,7 +41,9 @@ object BatteryPredictor {
         val prediction: Prediction?,    // 预测详情
         val warningMinute: Int,         // 用户配置的预警时间（分钟数 0-1439）
         val threshold: Int,             // 当前低电量告警阈值（预测目标）
-        val reason: String              // 原因说明
+        val reason: String,             // 原因说明
+        val detectStartMinute: Int = 0, // 检测区间起始（分钟数 0-1439，如 15:00=900）
+        val detectEndMinute: Int = 0    // 检测区间结束（分钟数 0-1439，可能跨天，如 03:00=180）
     )
 
     /** 将分钟数格式化为 HH:mm 字符串 */
@@ -135,11 +137,15 @@ object BatteryPredictor {
         ).coerceIn(1, 24)
 
         val prediction = predict(ctx, threshold) ?: return AlertCheck(
-            false, null, warningMinute, threshold, "数据不足或充电中，无法预测"
+            false, null, warningMinute, threshold, "数据不足或充电中，无法预测",
+            detectStartMinute = rangeStart * 60,
+            detectEndMinute = (rangeStart + rangeDuration) % 24 * 60
         )
 
         if (prediction.isCharging) return AlertCheck(
-            false, prediction, warningMinute, threshold, "充电中，无需预警"
+            false, prediction, warningMinute, threshold, "充电中，无需预警",
+            detectStartMinute = rangeStart * 60,
+            detectEndMinute = (rangeStart + rangeDuration) % 24 * 60
         )
 
         val cal = Calendar.getInstance()
@@ -200,7 +206,11 @@ object BatteryPredictor {
             else -> "预计 ${fmtTime(prediction.targetTimeMs)} 降至 $threshold%，需在 ${formatWarningMinute(warningMinute)} 前预警"
         }
 
-        return AlertCheck(shouldAlert, prediction, warningMinute, threshold, reason)
+        return AlertCheck(
+            shouldAlert, prediction, warningMinute, threshold, reason,
+            detectStartMinute = rangeStart * 60,
+            detectEndMinute = rangeEnd * 60
+        )
     }
 
     /**

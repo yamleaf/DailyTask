@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.ui
 
 import android.app.Activity
+import android.app.AppOpsManager
 import android.app.Dialog
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -17,12 +18,16 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.Process
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.Button
 import android.widget.EditText
@@ -34,6 +39,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.view.ContextThemeWrapper
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -41,6 +47,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.pengxh.daily.app.BuildConfig
+import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.DialogSliderBinding
 import com.pengxh.daily.app.databinding.FragmentSettingsBinding
@@ -60,6 +67,7 @@ import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
+import com.pengxh.daily.app.utils.RomDetector
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.WatermarkDrawable
 import com.pengxh.kt.lite.base.KotlinBaseFragment
@@ -856,6 +864,138 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     // ═══════════════════════ 权限自检 ═══════════════════════
 
+    private enum class BackgroundStartState { ALLOWED, DENIED, UNKNOWN }
+
+    /** 反射调用 AppOpsManager.checkOpNoThrow(int, int, String)，失败返回 MODE_DEFAULT */
+    private fun checkOpNoThrowInt(appOps: AppOpsManager, op: Int): Int {
+        return try {
+            val method = AppOpsManager::class.java.getMethod(
+                "checkOpNoThrow",
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, String::class.java
+            )
+            method.invoke(appOps, op, Process.myUid(), ctx.packageName) as? Int
+                ?: AppOpsManager.MODE_DEFAULT
+        } catch (e: Exception) {
+            AppOpsManager.MODE_DEFAULT
+        }
+    }
+
+    /**
+     * 程序化检测「后台弹出界面」权限（后台拉起目标 App 的能力），按厂商分派：
+     * - 原生/标准 Android：op 字符串 android:background_activity_start（Android Q+）；
+     * - 小米 MIUI/HyperOS：自定义 op 10021（后台弹出界面），旧版本为 10001；
+     * - 华为/荣耀：checkHwOpNoThrow(AppOps, 100000)（com.huawei.android.app.AppOpsManagerEx）；
+     * - vivo：内容提供方 content://com.vivo.permissionmanager.provider.permission/start_bg_activity；
+     * - OPPO/一加：无公开 appops，用悬浮窗权限近似（有悬浮窗时通常允许后台弹出）。
+     */
+    private fun queryBackgroundStartOp(): BackgroundStartState {
+        val appOps = ctx.getSystemService(AppOpsManager::class.java)
+            ?: return BackgroundStartState.UNKNOWN
+        return try {
+            when {
+                RomDetector.isMiui() -> {
+                    // 10021 = 后台弹出界面；旧版 MIUI 用 10001。任一 allow 即已授予
+                    val m21 = checkOpNoThrowInt(appOps, 10021)
+                    val m01 = checkOpNoThrowInt(appOps, 10001)
+                    when {
+                        m21 == AppOpsManager.MODE_ALLOWED || m01 == AppOpsManager.MODE_ALLOWED ->
+                            BackgroundStartState.ALLOWED
+                        m21 == AppOpsManager.MODE_IGNORED || m21 == AppOpsManager.MODE_ERRORED ||
+                            m01 == AppOpsManager.MODE_IGNORED || m01 == AppOpsManager.MODE_ERRORED ->
+                            BackgroundStartState.DENIED
+                        else -> BackgroundStartState.UNKNOWN
+                    }
+                }
+                RomDetector.isHuawei() || RomDetector.isHonor() -> {
+                    val mode = try {
+                        val cls = Class.forName("com.huawei.android.app.AppOpsManagerEx")
+                        val method = cls.getDeclaredMethod(
+                            "checkHwOpNoThrow",
+                            AppOpsManager::class.java,
+                            Int::class.javaPrimitiveType,
+                            Int::class.javaPrimitiveType,
+                            String::class.java
+                        )
+                        method.invoke(
+                            cls.newInstance(), appOps, 100000,
+                            Process.myUid(), ctx.packageName
+                        ) as? Int ?: AppOpsManager.MODE_DEFAULT
+                    } catch (e: Exception) {
+                        AppOpsManager.MODE_DEFAULT
+                    }
+                    when (mode) {
+                        AppOpsManager.MODE_ALLOWED -> BackgroundStartState.ALLOWED
+                        AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> BackgroundStartState.DENIED
+                        else -> BackgroundStartState.UNKNOWN
+                    }
+                }
+                RomDetector.isVivo() -> {
+                    val state = try {
+                        val uri = Uri.parse(
+                            "content://com.vivo.permissionmanager.provider.permission/start_bg_activity"
+                        )
+                        ctx.contentResolver.query(
+                            uri, null, "pkgname = ?",
+                            arrayOf(ctx.packageName), null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                cursor.getInt(cursor.getColumnIndexOrThrow("currentstate"))
+                            } else 1
+                        } ?: 1
+                    } catch (e: Exception) {
+                        1
+                    }
+                    // 0=已开启，1=未开启
+                    if (state == 0) BackgroundStartState.ALLOWED else BackgroundStartState.DENIED
+                }
+                RomDetector.isOppo() -> {
+                    // ColorOS 无公开 appops；悬浮窗允许一般伴随后台弹出可用
+                    if (Settings.canDrawOverlays(ctx)) BackgroundStartState.ALLOWED
+                    else BackgroundStartState.UNKNOWN
+                }
+                else -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val mode = try {
+                            appOps.checkOpNoThrow(
+                                "android:background_activity_start",
+                                Process.myUid(), ctx.packageName
+                            )
+                        } catch (e: Exception) {
+                            AppOpsManager.MODE_DEFAULT
+                        }
+                        when (mode) {
+                            AppOpsManager.MODE_ALLOWED -> BackgroundStartState.ALLOWED
+                            AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED ->
+                                BackgroundStartState.DENIED
+                            else -> BackgroundStartState.UNKNOWN
+                        }
+                    } else {
+                        BackgroundStartState.UNKNOWN
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            LogFileManager.error("检测后台弹出界面权限失败: ${e.message}")
+            BackgroundStartState.UNKNOWN
+        }
+    }
+
+    /**
+     * 程序化检测「自启动」权限（开机自启/后台常驻），按厂商分派：
+     * - 原生 Android：RECEIVE_BOOT_COMPLETED 权限已声明即视为允许（无独立自启开关）；
+     * - 小米 MIUI/HyperOS：自定义 op 10008（自启动），allow=已授予；
+     * - 华为/OPPO/vivo：无公开 appops，返回 UNKNOWN 由用户手动确认。
+     */
+    private fun queryAutostartState(): Boolean? {
+        if (!RomDetector.isMiui()) return null
+        return try {
+            val appOps = ctx.getSystemService(AppOpsManager::class.java) ?: return null
+            checkOpNoThrowInt(appOps, 10008) == AppOpsManager.MODE_ALLOWED
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /**
      * 权限自检：检查 App 运行所需的基本权限（不含截屏/无障碍等功能权限），在配置阶段提前暴露并引导解决——
      * 1) 通知监听：区分「未授权」与「已授权但服务未连接」（国产 ROM 自启动拦截绑定，远程指令无响应）。
@@ -880,12 +1020,29 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             !noticeConnected -> sb.append("    ⚠ 已授权但服务未连接，远程指令可能无响应（国产 ROM 自启动拦截）\n")
             else -> sb.append("    ✓ 已连接，可接收远程指令\n")
         }
-        sb.append("\n② 后台弹出界面（拉起打卡 App）\n")
-        sb.append("    ⓘ 需真实退后台验证，见下方「后台验证」\n")
+        sb.append("\n② 后台弹出界面（后台拉起打卡 App）\n")
+        sb.append("    [${RomDetector.displayName()}]\n")
+        when (queryBackgroundStartOp()) {
+            BackgroundStartState.ALLOWED -> sb.append("    ✓ 已授予，后台可拉起目标 App\n")
+            BackgroundStartState.DENIED -> sb.append(
+                "    ✗ 未授予，后台拉起目标 App / 伪息屏蒙层会被系统拦截\n"
+            )
+            BackgroundStartState.UNKNOWN -> sb.append(
+                "    ⓘ 系统未暴露该权限状态，请用下方「后台验证」实测确认\n"
+            )
+        }
         sb.append("\n③ 悬浮窗权限（结果提示/蒙层）\n")
         sb.append(if (overlayGranted) "    ✓ 已获取\n" else "    ✗ 未获取\n")
-        sb.append("\n④ 电池优化（后台保活）\n")
-        sb.append(if (batteryExempt) "    ✓ 已豁免\n" else "    ✗ 未豁免，锁屏后可能被杀\n")
+        sb.append("\n④ 电池白名单（电池优化豁免，后台保活）\n")
+        sb.append(if (batteryExempt) "    ✓ 已加入白名单\n" else "    ✗ 未豁免，锁屏后可能被杀\n")
+        sb.append("\n⑤ 自启动权限（开机自启/后台常驻）\n")
+        when (val auto = queryAutostartState()) {
+            true -> sb.append("    ✓ 已允许自启动（MIUI/HyperOS）\n")
+            false -> sb.append("    ✗ 已禁用自启动，重启后 App 不会自动拉起\n")
+            null -> sb.append(
+                "    ${if (RomDetector.isMiui()) "ⓘ 无法读取，请到系统设置确认" else "✓ 系统默认允许（原生 Android 无独立自启开关）"}\n"
+            )
+        }
 
         val contentView = ScrollView(ctx).apply {
             addView(TextView(ctx).apply {
@@ -919,15 +1076,26 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
      * 通知监听未连接引导：说明国产 ROM 自启动拦截，引导去系统设置开启「自启动」。
      */
     private fun showNotificationListenerFixGuide() {
+        val guide = when {
+            RomDetector.isMiui() ->
+                "1. 设置 → 应用设置 → 应用管理 → 本应用 → 自启动，设为允许；\n" +
+                    "2. 或到「安全中心 → 应用管理 → 权限」中允许自启动；\n"
+            RomDetector.isHuawei() || RomDetector.isHonor() ->
+                "1. 手机管家 → 应用启动管理，将本应用改为「手动管理」并允许自启动；\n"
+            RomDetector.isVivo() ->
+                "1. i管家 → 应用管理 → 权限管理 → 自启动，设为允许；\n"
+            RomDetector.isOppo() ->
+                "1. 设置 → 应用管理 → 本应用 → 自启动，设为允许；\n"
+            else ->
+                "1. 设置 → 应用 → 本应用 → 电池/后台运行，允许自启动；\n"
+        }
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = TextView(ctx).apply {
                 text = "通知监听已授权但服务未连接，远程指令会无响应。\n\n" +
-                    "常见原因：国产 ROM（MIUI/HyperOS）自启动管理拦截了通知监听服务绑定。\n\n" +
-                    "解决步骤：\n" +
-                    "1. 前往系统设置 → 应用管理 → 本应用 → 自启动，设为允许；\n" +
-                    "2. 若本应用设置中无「自启动」选项，请到系统「安全中心 → 应用管理 → 权限」中允许；\n" +
-                    "3. 修改后重启手机，或在此页重新开关通知监听，确认状态变为「已连接」。"
+                    "常见原因：国产 ROM 自启动管理拦截了通知监听服务绑定。\n\n" +
+                    "解决步骤：\n" + guide +
+                    "2. 修改后重启手机，或在此页重新开关通知监听，确认状态变为「已连接」。"
                 setPadding(24, 16, 24, 16)
                 textSize = 14f
             },
@@ -1025,60 +1193,207 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         a11yEnabled: Boolean,
         mainHandler: Handler
     ) {
-        // 回到前台再弹结果，避免在后台弹窗
+        // 回到前台再弹结果，避免在后台弹窗。
+        // 带 EXTRA_MASK_COMMAND=0 退出蒙层：否则 consumeReturnFromBackground() 会因「强制伪息屏」
+        // 在返回时恢复黑屏蒙层，用户得先取消伪息屏才能看到验证结果弹窗。
         val back = Intent(ctx, MainActivity::class.java).apply {
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP or
                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             )
+            putExtra(Constant.EXTRA_MASK_COMMAND, 0)
         }
         mainHandler.postDelayed({
             try { ctx.startActivity(back) } catch (_: Exception) { }
-            mainHandler.postDelayed({
-                if (launched == true) {
-                    UnifiedDialogKit.showSuccess(
-                        ctx,
-                        "验证通过",
-                        "「$targetApp」已从后台成功拉起，后台弹出界面权限正常。",
-                        confirmText = "知道了"
-                    )
-                } else if (launched == false) {
-                    openBackgroundStartFailDialog(targetApp)
-                } else {
-                    // 无无障碍：用户目视确认
-                    UnifiedDialogKit.showForm(
-                        ctx = ctx,
-                        contentView = TextView(ctx).apply {
-                            text = "刚才是否看到「$targetApp」从后台弹出？"
-                            setPadding(24, 16, 24, 16)
-                            textSize = 14f
-                        },
-                        title = "后台弹出验证",
-                        positiveText = "看到了",
-                        negativeText = "没看到",
-                        onConfirm = {
-                            "后台弹出界面权限正常".show(ctx)
-                            true
-                        },
-                        onCancel = {
-                            openBackgroundStartFailDialog(targetApp)
-                            false
-                        }
-                    )
+            // MIUI 等系统的「后台弹出界面」限制会静默拦截 startActivity 拉起 MainActivity，
+            // 界面回不来导致结果弹窗永不显示（真机实测：MIUIOP(10021) 记录 rejectTime）。
+            // 轮询应用前台状态：3s 内回到前台则走正常弹窗；超时改用悬浮窗 overlay 展示结果，
+            // 并提示可能需要的权限，避免验证流程卡死在目标 App 页。
+            val start = SystemClock.elapsedRealtime()
+            val poll = object : Runnable {
+                override fun run() {
+                    if (DailyTaskApplication.isAppForeground) {
+                        mainHandler.postDelayed({
+                            showBackgroundVerifyResultDialog(targetApp, launched, a11yEnabled)
+                        }, 300L)
+                    } else if (SystemClock.elapsedRealtime() - start < 3000L) {
+                        mainHandler.postDelayed(this, 200L)
+                    } else {
+                        LogFileManager.error("后台验证：MainActivity 未在 3s 内回前台，改用悬浮窗展示结果")
+                        showBackgroundVerifyResultOverlay(targetApp, launched)
+                    }
                 }
-            }, 800L)
+            }
+            mainHandler.postDelayed(poll, 200L)
         }, 400L)
     }
 
-    /** 后台启动失败引导：说明原因并提供「前往系统设置」入口 */
+    /** MainActivity 正常回前台时的结果弹窗 */
+    private fun showBackgroundVerifyResultDialog(targetApp: String, launched: Boolean?, a11yEnabled: Boolean) {
+        if (launched == true) {
+            UnifiedDialogKit.showSuccess(
+                ctx,
+                "验证通过",
+                "「$targetApp」已从后台成功拉起，后台弹出界面权限正常。",
+                confirmText = "知道了"
+            )
+        } else if (launched == false) {
+            openBackgroundStartFailDialog(targetApp)
+        } else {
+            // 无无障碍：用户目视确认
+            UnifiedDialogKit.showForm(
+                ctx = ctx,
+                contentView = TextView(ctx).apply {
+                    text = "刚才是否看到「$targetApp」从后台弹出？"
+                    setPadding(24, 16, 24, 16)
+                    textSize = 14f
+                },
+                title = "后台弹出验证",
+                positiveText = "看到了",
+                negativeText = "没看到",
+                onConfirm = {
+                    "后台弹出界面权限正常".show(ctx)
+                    true
+                },
+                onCancel = {
+                    openBackgroundStartFailDialog(targetApp)
+                    false
+                }
+            )
+        }
+    }
+
+    /**
+     * 悬浮窗 overlay 兜底展示验证结果：MainActivity 被系统「后台弹出界面」限制拦截、无法回前台时，
+     * 直接用已获授权的悬浮窗在目标 App 之上弹出结果，并引导开启所需权限。
+     * 布局复用 dialog_unified_content（与 App 内弹窗一致的 M3 风格），但按钮背景/文字色显式指定，
+     * 因为 overlay 环境不依赖 MaterialAlertDialog 主题、MaterialButton 的 backgroundTint 不会生效。
+     */
+    private fun showBackgroundVerifyResultOverlay(targetApp: String, launched: Boolean?) {
+        if (!Settings.canDrawOverlays(ctx)) {
+            LogFileManager.error("后台验证悬浮窗兜底失败：无悬浮窗权限")
+            "后台验证：本应用回前台被系统拦截，且无悬浮窗权限，无法显示结果".show(ctx)
+            return
+        }
+        val appCtx = ctx.applicationContext
+        val wm = appCtx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        // 与应用内弹窗同主题 inflate，保证颜色资源可正确解析
+        val themedCtx = ContextThemeWrapper(appCtx, R.style.Theme_DailyTask)
+        val density = appCtx.resources.displayMetrics.density
+        val dip = { v: Int -> (v * density).toInt() }
+
+        // 无法返回本应用 = 「后台弹出界面」权限未开全，无论目标是否弹出都引导去权限页（精简文案）
+        val title = "后台弹出界面未授权"
+        val message = when (launched) {
+            true -> "「$targetApp」已弹出，但本应用无法自动返回。\n请开启「后台弹出界面」权限。"
+            false -> "「$targetApp」未能弹出。\n请开启「后台弹出界面」权限后重试。"
+            else -> "本应用无法自动返回。\n请开启「后台弹出界面」权限。"
+        }
+
+        val content = LayoutInflater.from(themedCtx).inflate(R.layout.dialog_unified_content, null)
+        content.findViewById<ImageView>(R.id.ivDialogIcon).apply {
+            backgroundTintList = ContextCompat.getColorStateList(themedCtx, R.color.md_errorContainer)
+            setImageResource(R.drawable.ic_dialog_permission)
+            imageTintList = ContextCompat.getColorStateList(themedCtx, R.color.md_error)
+        }
+        content.findViewById<TextView>(R.id.tvDialogTitle).text = title
+        content.findViewById<TextView>(R.id.tvDialogMessage).text = message
+
+        // 按钮：显式指定背景/文字色（overlay 下 MaterialButton backgroundTint 不生效）
+        val btnPositive = content.findViewById<Button>(R.id.btnPositive)
+        val btnNegative = content.findViewById<Button>(R.id.btnNegative)
+        val btnBar = content.findViewById<LinearLayout>(R.id.btnBar)
+        val primaryColor = ContextCompat.getColor(themedCtx, R.color.md_primary)
+        val onPrimaryColor = ContextCompat.getColor(themedCtx, R.color.md_onPrimary)
+        val onSurfaceVariantColor = ContextCompat.getColor(themedCtx, R.color.md_onSurfaceVariant)
+        val outlineVariantColor = ContextCompat.getColor(themedCtx, R.color.md_outlineVariant)
+        fun pillBackground(fill: Int?, stroke: Int?) = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            cornerRadius = dip(22).toFloat()
+            if (fill != null) setColor(fill)
+            if (stroke != null) setStroke(dip(1), stroke)
+        }
+
+        btnPositive.apply {
+            text = "前往设置"
+            background = pillBackground(primaryColor, null)
+            setTextColor(onPrimaryColor)
+            visibility = View.VISIBLE
+            setOnClickListener {
+                openAppDetailSettings(ctx.packageName)
+                runCatching { wm.removeView(content) }
+            }
+        }
+        if (launched == false) {
+            // 目标未弹出：保留「知道了」，用户可先关掉弹窗
+            btnNegative.apply {
+                text = "知道了"
+                background = pillBackground(null, outlineVariantColor)
+                setTextColor(onSurfaceVariantColor)
+                visibility = View.VISIBLE
+                setOnClickListener {
+                    runCatching { wm.removeView(content) }
+                }
+            }
+            btnBar.gravity = Gravity.CENTER
+        } else {
+            // 单按钮：居中自然宽度（与 UnifiedDialogKit 行为一致）
+            val lp = btnPositive.layoutParams as LinearLayout.LayoutParams
+            lp.width = LinearLayout.LayoutParams.WRAP_CONTENT
+            lp.weight = 0f
+            lp.marginStart = 0
+            btnPositive.layoutParams = lp
+            btnBar.gravity = Gravity.CENTER
+        }
+
+        // 28dp 大圆角 + tonal 抬升表面，复刻 MaterialAlertDialog 外观
+        val bg = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            cornerRadius = dip(28).toFloat()
+            setColor(ContextCompat.getColor(themedCtx, R.color.md_surfaceContainerHigh))
+        }
+        content.setBackground(bg)
+        content.elevation = dip(8).toFloat()
+
+        val cardParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+            width = dip(320)
+        }
+        try {
+            wm.addView(content, cardParams)
+        } catch (e: Exception) {
+            LogFileManager.error("后台验证悬浮窗展示失败: ${e.message}")
+        }
+    }
+
+    /** 后台启动失败引导：说明原因并提供「前往系统设置」入口（按厂商给对应路径） */
     private fun openBackgroundStartFailDialog(targetApp: String) {
+        val guide = when {
+            RomDetector.isMiui() ->
+                "设置 → 应用设置 → 应用管理 → 本应用 → 权限管理 → 后台弹出界面（允许）"
+            RomDetector.isHuawei() || RomDetector.isHonor() ->
+                "设置 → 应用 → 权限管理 → 后台弹出界面（允许）"
+            RomDetector.isVivo() ->
+                "i管家 → 应用管理 → 权限管理 → 后台弹出界面（允许）"
+            RomDetector.isOppo() ->
+                "设置 → 应用管理 → 本应用 → 允许后台弹出界面（允许）"
+            else ->
+                "设置 → 应用 → 本应用 → 电池/后台运行，允许后台启动 Activity"
+        }
         UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = TextView(ctx).apply {
                 text = "「$targetApp」未能从后台弹出，可能被系统后台启动限制拦截。\n\n" +
-                    "请前往系统设置，为本应用开启「后台弹出界面」（MIUI）或「后台启动其它应用」（Android 12+）：\n" +
-                    "设置 → 应用管理 → 本应用 → 权限管理 → 后台弹出界面（允许）"
+                    "请前往系统设置，为本应用开启「后台弹出界面」权限：\n" +
+                    guide
                 setPadding(24, 16, 24, 16)
                 textSize = 14f
             },

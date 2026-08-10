@@ -101,10 +101,11 @@ object BatteryHistory {
 
     /**
      * 供远程快照暴露的电池采样序列（B5：控制端电池曲线复用）。
-     * 返回最近 windowHours 小时内的 {ts, level} 序列，降采样到 maxPoints 个点以便控制端绘制。
-     * 失败/无数据返回空列表（控制端据此显示“数据不足”占位，不影响主流程）。
+     * 返回最近 windowHours 小时内的 {ts, level, charging} 序列，降采样到 maxPoints 个点。
+     * 控制端依赖 charging 字段精确排除充电时段以计算耗电速率（避免含充电段导致速率偏低）。
+     * 失败/无数据返回空列表（控制端据此显示"数据不足"占位，不影响主流程）。
      */
-    fun recentSeries(ctx: Context, windowHours: Int = 12, maxPoints: Int = 24): List<Pair<Long, Int>> {
+    fun recentSeries(ctx: Context, windowHours: Int = 12, maxPoints: Int = 24): List<Triple<Long, Int, Boolean>> {
         return try {
             val f = file(ctx)
             if (!f.exists()) return emptyList()
@@ -113,12 +114,12 @@ object BatteryHistory {
             val pts = f.readLines()
                 .mapNotNull { parse(it) }
                 .filter { now - it.ts <= windowMs }
-                .map { it.ts to it.level }
+                .map { Triple(it.ts, it.level, it.charging) }
             if (pts.size <= maxPoints) return pts
             // 均匀降采样：保留首点 + 每隔 step 取一点 + 末点
             val step = (pts.size / maxPoints).coerceAtLeast(1)
             val sampled = pts.filterIndexed { i, _ -> i % step == 0 }.toMutableList()
-            if (sampled.last().first != pts.last().first) sampled.add(pts.last())
+            if (sampled.last() != pts.last()) sampled.add(pts.last())
             sampled
         } catch (_: Exception) {
             emptyList()

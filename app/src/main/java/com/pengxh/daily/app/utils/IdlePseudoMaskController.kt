@@ -121,12 +121,28 @@ object IdlePseudoMaskController {
                 if (!appInBackground || !enteringMask) return@postDelayed
                 if (MaskOverlayHelper.isShowing()) return@postDelayed
                 context.bringDailyTaskToFront(true)
+                scheduleOverlayFallback(context)
             }, HOME_TO_APP_DELAY_MS)
         } else {
             // 步骤1 关闭：直接跳回本 App 再显示蒙层
             LogFileManager.action("强制伪息屏：直接跳回 DailyTask 显示蒙层（未开启返回桌面）")
             context.bringDailyTaskToFront(true)
+            scheduleOverlayFallback(context)
         }
+    }
+
+    /**
+     * MIUI DeviceGuard 等系统的后台 Activity 启动限制会拦截 bringDailyTaskToFront 拉起 MainActivity，
+     * 导致蒙层无法经 Activity 显示。兜底：应用仍停留后台且蒙层未显示时，直接用悬浮窗蒙层盖黑屏，
+     * 保证「强制伪息屏」在后台拉起被拦时依然生效。
+     */
+    private fun scheduleOverlayFallback(context: Context) {
+        mainHandler.postDelayed({
+            if (!appInBackground || !enteringMask) return@postDelayed
+            if (MaskOverlayHelper.isShowing()) return@postDelayed
+            LogFileManager.action("MainActivity 后台拉起被系统拦截，改用悬浮窗蒙层兜底")
+            MaskOverlayHelper.show(context)
+        }, HOME_TO_APP_DELAY_MS + 1000L)
     }
 
     fun onAppForegrounded(context: Context) {

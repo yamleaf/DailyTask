@@ -61,23 +61,25 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         }
     }
 
-    /** 顶部时钟 + 节日/工作日标签（整秒刷新）；伪息屏蒙层展示期间暂停 */
+    /** 顶部时钟 + 节日/工作日标签（整秒刷新）；伪息屏蒙层展示期间仅跳过更新，不中断调度 */
     private val timeUpdateRunnable = object : Runnable {
         override fun run() {
             val activity = activity
-            if (activity is MainActivity && activity.isMaskVisible()) return
-            // 日期拆分：2026年08月07日 15:30:22 星期五 → [日期, 时间, 星期]
-            val parts = Date().format("yyyy年MM月dd日 HH:mm:ss EEEE").split(" ")
-            if (parts.size < 3) return
-            val today = LocalDate.now()
-            val dayType = when {
-                ChinaHolidayManager.isHoliday(today) -> "节假日"
-                ChinaHolidayManager.isWorkday(today) -> "补班日"
-                CustomWorkdayManager.isWeekdayRestDay(today) -> "休息日"
-                else -> "工作日"
+            if (activity !is MainActivity || !activity.isMaskVisible()) {
+                // 日期拆分：2026年08月07日 15:30:22 星期五 → [日期, 时间, 星期]
+                val parts = Date().format("yyyy年MM月dd日 HH:mm:ss EEEE").split(" ")
+                if (parts.size >= 3) {
+                    val today = LocalDate.now()
+                    val dayType = when {
+                        ChinaHolidayManager.isHoliday(today) -> "节假日"
+                        ChinaHolidayManager.isWorkday(today) -> "补班日"
+                        CustomWorkdayManager.isWeekdayRestDay(today) -> "休息日"
+                        else -> "工作日"
+                    }
+                    binding.toolbar.title = "${parts[2]}（$dayType）"
+                    binding.toolbar.subtitle = "${parts[0]} ${parts[1]}"
+                }
             }
-            binding.toolbar.title = "${parts[2]}（$dayType）"
-            binding.toolbar.subtitle = "${parts[0]} ${parts[1]}"
             mainHandler.postDelayed(this, 1000L)
         }
     }

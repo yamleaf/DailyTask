@@ -129,10 +129,11 @@ object RemoteSnapshot {
             val series = BatteryHistory.recentSeries(context, 12, 24)
             if (series.isNotEmpty()) {
                 val arr = JsonArray()
-                series.forEach { (ts, level) ->
+                series.forEach { (ts, level, charging) ->
                     val p = JsonObject()
                     p.addProperty("ts", ts)
                     p.addProperty("level", level)
+                    p.addProperty("charging", charging)
                     arr.add(p)
                 }
                 o.add("batterySeries", arr)
