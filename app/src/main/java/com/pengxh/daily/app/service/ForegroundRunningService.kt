@@ -94,6 +94,11 @@ class ForegroundRunningService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // 「暂停使用」开启时：不在 onCreate 发布前台通知，直接自停，避免通知栏「消失又出现」闪烁。
+        if (KeepAliveReceiver.isPaused()) {
+            stopSelf()
+            return
+        }
         isRunning = true
         // 注入协程作用域给 TaskScheduler
         TaskScheduler.attach(serviceScope)
@@ -194,6 +199,12 @@ val filter = IntentFilter().apply {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 「暂停使用」开启时自停：防御任意路径（广播/回调）在暂停期间拉起本服务。
+        // 前置判断，避免 onCreate 已产生的副作用（TaskScheduler 作用域、通知重绑等）继续运行。
+        if (KeepAliveReceiver.isPaused()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         checkLowBattery()
         KeepAliveReceiver.schedule(this)
         KeepAliveReceiver.scheduleResetAlarm(this)
@@ -210,7 +221,8 @@ val filter = IntentFilter().apply {
         if (intent?.action == KeepAliveReceiver.ACTION_BATTERY_ALERT) {
             checkBatterySmartAlert()
         }
-        return START_STICKY
+        // 「后台自启」总开关：关闭时返回 START_NOT_STICKY，进程被杀后系统不会自动重建本服务
+        return if (KeepAliveReceiver.isKeepAliveEnabled()) START_STICKY else START_NOT_STICKY
     }
 
     private val systemBroadcastReceiver = object : BroadcastReceiver() {

@@ -143,6 +143,9 @@ class NotificationMonitorService : NotificationListenerService() {
                 "通知回调: pkg=$pkg, title=$title, notice空=${notice.isNullOrBlank()}, 含DT#=${notice?.contains(Constant.COMMAND_PREFIX) == true}"
             )
         }
+        // 「暂停使用」开启：进程可能因系统绑定通知监听而存活，但不得执行任何远程指令 /
+        // 拉起 MQTT / 打卡。仅保留通知记录与转发静默跳过。暂停时不做任何动作。
+        val paused = KeepAliveReceiver.isPaused()
 
         if (notice.isNullOrBlank()) {
             // 聚合成空不代表没有 EXTRA_TEXT，息屏场景下 EXTRA_TEXT 可能独立存在
@@ -297,6 +300,12 @@ class NotificationMonitorService : NotificationListenerService() {
      */
     private fun handleRemoteCommand(pkg: String, notice: String) {
         if (pkg !in auxiliaryApp) return
+        // 「暂停使用」开启时忽略一切远程指令（执行任务 / 开启远程 / 打卡等），
+        // 保证暂停期间被控端彻底安静，不拉起任何服务、不执行任何动作。
+        if (KeepAliveReceiver.isPaused()) {
+            LogFileManager.writeLog("暂停使用中，忽略远程指令")
+            return
+        }
 
         // 灭屏后正文可能带前缀（昵称/摘要），取最后一次 DT# 作为当前指令
         val commandIndex = notice.lastIndexOf(Constant.COMMAND_PREFIX)
@@ -461,6 +470,11 @@ class NotificationMonitorService : NotificationListenerService() {
      * → 经消息渠道回传结果。供 DT# 指令与 MQTT 动作命令共用。
      */
     fun performRemotePunch(keyword: String = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")) {
+        // 「暂停使用」开启时不执行远程打卡
+        if (KeepAliveReceiver.isPaused()) {
+            LogFileManager.writeLog("暂停使用中，忽略远程打卡指令")
+            return
+        }
         LogFileManager.action("收到远程打卡指令（关键词=$keyword）")
         // 遥控"打卡"：一次性，只唤起目标 App 并倒计时，不关联任务调度
         val timeoutSeconds = SaveKeyValues.loadInt(

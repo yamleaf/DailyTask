@@ -35,27 +35,31 @@ class PackageReplacedReceiver : BroadcastReceiver() {
             Log.e(javaClass.simpleName, "覆盖安装后恢复通知监听组件状态失败", e)
         }
 
-        // 后台自启常驻开启：覆盖安装后无条件拉起前台服务
-        try {
-            context.startForegroundService(
-                Intent(context, ForegroundRunningService::class.java)
-            )
-        } catch (e: Exception) {
-            Log.e(javaClass.simpleName, "覆盖安装后启动前台服务失败", e)
-        }
-
-        // 覆盖安装后同时拉起 MQTT 代理服务：否则开关开启且配置有效时，远程控制会在更新后
-        // 静默失效（收不到指令、不回 ack）直到用户再次手动进入「远程控制」页。
-        // 仅当总开关开启时启动；initMqtt 内部会对 broker 为空等无效配置安全 no-op。
-        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
+        // 恢复组件 enabled 后，若「后台自启」总开关关闭，则不主动拉起任何服务，
+        // 等用户手动打开 App 再恢复；开关开启则正常拉起前台服务
+        if (KeepAliveReceiver.isKeepAliveEnabled()) {
             try {
-                context.startForegroundService(Intent(context, MqttAgentService::class.java))
+                context.startForegroundService(
+                    Intent(context, ForegroundRunningService::class.java)
+                )
             } catch (e: Exception) {
-                Log.e(javaClass.simpleName, "覆盖安装后启动 MQTT 代理服务失败", e)
+                Log.e(javaClass.simpleName, "覆盖安装后启动前台服务失败", e)
+            }
+
+            // 覆盖安装后同时拉起 MQTT 代理服务：否则开关开启且配置有效时，远程控制会在更新后
+            // 静默失效（收不到指令、不回 ack）直到用户再次手动进入「远程控制」页。
+            // 仅当总开关开启时启动；initMqtt 内部会对 broker 为空等无效配置安全 no-op。
+            if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
+                try {
+                    context.startForegroundService(Intent(context, MqttAgentService::class.java))
+                } catch (e: Exception) {
+                    Log.e(javaClass.simpleName, "覆盖安装后启动 MQTT 代理服务失败", e)
+                }
             }
         }
 
-        // 重建保活心跳闹钟与每日重置闹钟（更新后旧闹钟已被系统清除，需幂等重建）
+        // 重建保活心跳闹钟与每日重置闹钟（更新后旧闹钟已被系统清除，需幂等重建；
+        // 自启开关关闭时 schedule() 内部会取消心跳闹钟）
         KeepAliveReceiver.schedule(context)
         KeepAliveReceiver.scheduleResetAlarm(context)
     }

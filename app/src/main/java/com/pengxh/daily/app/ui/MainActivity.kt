@@ -37,6 +37,7 @@ import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.ForegroundRunningService
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.AppRuntimeConfig
@@ -181,16 +182,23 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
         ft.commitNow()
 
-        if (Settings.canDrawOverlays(this)) {
-            Intent(this, FloatingWindowService::class.java).apply { startService(this) }
-        } else {
-            // 悬浮窗权限并显示悬浮窗
-            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-            overlayPermissionLauncher.launch(intent)
+        // 「暂停使用」开启时：重新打开 App 也不会恢复任何服务（前台/悬浮窗均跳过），
+        // 必须关闭暂停开关后功能才恢复正常。
+        if (!KeepAliveReceiver.isPaused()) {
+            if (Settings.canDrawOverlays(this)) {
+                Intent(this, FloatingWindowService::class.java).apply { startService(this) }
+            } else {
+                // 悬浮窗权限并显示悬浮窗
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                overlayPermissionLauncher.launch(intent)
+            }
         }
 
         // 前台服务（保活 + 托管 TaskScheduler 协程作用域 + 每日重置）
-        Intent(this, ForegroundRunningService::class.java).apply { startForegroundService(this) }
+        // 「暂停使用」开启时跳过：用户暂停状态下打开 App 只是查看/恢复，不重启任何后台服务
+        if (!KeepAliveReceiver.isPaused()) {
+            Intent(this, ForegroundRunningService::class.java).apply { startForegroundService(this) }
+        }
 
         // 订阅通知监听事件（远程指令；单条异常不得取消整个订阅）
         lifecycleScope.launch(CoroutineExceptionHandler { _, e ->
@@ -344,8 +352,10 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
 
         if (!applyMaskCommandFromIntent(intent)) {
-            // 从后台返回恢复蒙层：受「强制伪息屏」开关控制（机制约定）
-            if (AppRuntimeConfig.isForcePseudoMask() && IdlePseudoMaskController.consumeReturnFromBackground()) {
+            // 从后台返回恢复蒙层：受「强制伪息屏」开关控制（机制约定）；暂停使用时不恢复
+            if (!KeepAliveReceiver.isPaused()
+                && AppRuntimeConfig.isForcePseudoMask() && IdlePseudoMaskController.consumeReturnFromBackground()
+            ) {
                 if (!maskViewController.isMaskVisible()) {
                     maskViewController.showMaskView()
                 }
@@ -361,6 +371,11 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private fun applyMaskCommandFromIntent(intent: Intent?): Boolean {
         val action = intent?.getIntExtra(Constant.EXTRA_MASK_COMMAND, -1) ?: -1
         if (action < 0) return false
+        // 「暂停使用」开启：忽略息屏/亮屏蒙层指令
+        if (KeepAliveReceiver.isPaused()) {
+            intent?.removeExtra(Constant.EXTRA_MASK_COMMAND)
+            return true
+        }
         intent?.removeExtra(Constant.EXTRA_MASK_COMMAND)
         when (action) {
             1 -> {
@@ -401,7 +416,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
 
             is MonitorEvent.StartTaskCommand -> {
-                if (!TaskScheduler.isRunning()) {
+                if (!KeepAliveReceiver.isPaused() && !TaskScheduler.isRunning()) {
                     TaskScheduler.startTask()
                 }
                 MqttAgentService.pushTaskIncrement() // 任务调度启动 → 推送状态变化
@@ -413,9 +428,12 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
 
             is MonitorEvent.ShowMaskCommand -> {
-                MaskOverlayHelper.show(this)
-                if (!maskViewController.isMaskVisible()) {
-                    maskViewController.showMaskView()
+                // 「暂停使用」开启：不执行远程息屏/伪息屏蒙层指令
+                if (!KeepAliveReceiver.isPaused()) {
+                    MaskOverlayHelper.show(this)
+                    if (!maskViewController.isMaskVisible()) {
+                        maskViewController.showMaskView()
+                    }
                 }
             }
 
@@ -537,7 +555,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         LogFileManager.writeLog("检测到今日尚未重置，执行重置操作")
         SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
 
-        if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
+        if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+            && !KeepAliveReceiver.isPaused()
+        ) {
             TaskScheduler.startTask()
         }
     }
@@ -673,7 +693,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
      * 悬浮窗权限启动器
      */
     private val overlayPermissionLauncher = registerForActivityResult(permissionContract) {
-        if (Settings.canDrawOverlays(this)) {
+        if (Settings.canDrawOverlays(this) && !KeepAliveReceiver.isPaused()) {
             Intent(this, FloatingWindowService::class.java).apply {
                 startService(this)
             }

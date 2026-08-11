@@ -34,6 +34,8 @@ object Constant {
     const val BACK_TO_HOME_KEY = "BACK_TO_HOME_KEY" // 返回桌面(Boolean)
     /** 返回桌面默认值：默认开启，打卡/伪息屏后自动退回桌面 */
     const val BACK_TO_HOME_DEFAULT = true
+    /** 后台自启（保活复活）总开关：默认开启。关闭后进程被杀不再尝试拉起任何服务，需手动打开 App 恢复 */
+    const val KEEP_ALIVE_ENABLED_KEY = "KEEP_ALIVE_ENABLED_KEY" // Boolean，默认 true
     const val TASK_AUTO_RECYCLE_KEY = "TASK_AUTO_RECYCLE_KEY" // 任务每日自动循环(Boolean)
     const val RANDOM_TIME_KEY = "RANDOM_TIME_KEY" // 随机时间(Boolean)
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
@@ -46,6 +48,8 @@ object Constant {
     const val IDLE_PSEUDO_MASK_TIMEOUT_KEY = "IDLE_PSEUDO_MASK_TIMEOUT_KEY" // Int
     /** 伪息屏：关闭时钟显示（Boolean，默认 false=显示时钟）。开启后伪息屏只显示黑屏，更省电 */
     const val PSEUDO_MASK_NO_CLOCK_KEY = "PSEUDO_MASK_NO_CLOCK_KEY" // Boolean
+    /** 伪息屏增强分组展开状态（Boolean，默认 true=展开） */
+    const val PSEUDO_MASK_GROUP_EXPANDED_KEY = "PSEUDO_MASK_GROUP_EXPANDED_KEY"
 
     // ===== 远程控制 MQTT 配置（被控端持久化；解绑时【不】清除，下次绑定无需重输）=====
     const val MQTT_BROKER_KEY = "MQTT_BROKER_KEY"       // EMQX broker 地址(含端口)，如 xxx.emqx.com:8883
@@ -89,6 +93,8 @@ object Constant {
     const val LOW_BATTERY_THRESHOLD_KEY = "LOW_BATTERY_THRESHOLD_KEY"
     /** 电量智能预警总开关（Boolean） */
     const val BATTERY_SMART_ALERT_ENABLED_KEY = "BATTERY_SMART_ALERT_ENABLED_KEY"
+    /** 电量预警分组展开状态（Boolean，默认 true=展开） */
+    const val BATTERY_ALERT_GROUP_EXPANDED_KEY = "BATTERY_ALERT_GROUP_EXPANDED_KEY"
     /** 电量智能预警最晚预警时间（小时 0-23，默认 20） */
     const val BATTERY_WARNING_HOUR_KEY = "BATTERY_WARNING_HOUR_KEY"
     /** 电量智能预警已发送标记（每次充电重置，避免重复推送） */

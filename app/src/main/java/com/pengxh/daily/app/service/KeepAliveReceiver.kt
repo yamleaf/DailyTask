@@ -14,6 +14,9 @@ import android.app.NotificationManager
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.IdlePseudoMaskController
+import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import java.util.Calendar
 
@@ -105,8 +108,70 @@ class KeepAliveReceiver : BroadcastReceiver() {
             }
         }
 
-        /** 调度一次精确闹钟（15 分钟后触发复活广播）；后台自启功能常驻开启，不受开关控制 */
+        /**
+         * 后台自启（保活复活）总开关：默认开启。
+         * 关闭后，进程被杀不再尝试拉起任何服务（心跳闹钟 / 开机自启 / 任务重置 / MQTT 复活等），
+         * 直到用户手动打开 App 或重新打开开关才恢复。
+         */
+        fun isKeepAliveEnabled(): Boolean =
+            SaveKeyValues.loadBoolean(Constant.KEEP_ALIVE_ENABLED_KEY, true)
+
+        /**
+         * 「暂停使用」是否生效：暂停（后台自启关闭）时，被控端被杀后不再自启、心跳闹钟不调度，
+         * 并应在切换瞬间主动停止所有服务实现彻底安静。
+         */
+        fun isPaused(): Boolean = !isKeepAliveEnabled()
+
+        /**
+         * 暂停所有服务：前台保活服务、MQTT 代理、悬浮窗全部停止，退出伪息屏蒙层，
+         * 取消心跳 / 每日重置 / 电量预警闹钟。进程随之可被系统正常回收，实现「彻底安静」。
+         * 由设置页「暂停使用」开关触发；不停止通知监听组件（其由系统按授权管理，暂停结束后自动重连）。
+         */
+        fun pauseAllServices(context: Context) {
+            LogFileManager.action("暂停使用已开启：停止所有服务与闹钟")
+            runCatching {
+                context.stopService(Intent(context, ForegroundRunningService::class.java))
+            }
+            runCatching {
+                context.stopService(Intent(context, MqttAgentService::class.java))
+            }
+            runCatching {
+                context.stopService(Intent(context, FloatingWindowService::class.java))
+            }
+            runCatching { IdlePseudoMaskController.cancel() }
+            runCatching { MaskOverlayHelper.hide(context) }
+            cancel(context)
+            cancelResetAlarm(context)
+            cancelBatteryAlert(context)
+        }
+
+        /**
+         * 恢复所有服务：重新拉起前台保活服务（其内部会重建心跳 / 每日重置 / 电量预警闹钟
+         * 并依开关拉起 MQTT 代理），并恢复悬浮窗。由「暂停使用」开关关闭时触发。
+         */
+        fun resumeAllServices(context: Context) {
+            LogFileManager.action("暂停使用已关闭：恢复所有服务")
+            runCatching {
+                context.startForegroundService(
+                    Intent(context, ForegroundRunningService::class.java)
+                )
+            }
+            runCatching {
+                if (Settings.canDrawOverlays(context)) {
+                    context.startService(Intent(context, FloatingWindowService::class.java))
+                }
+            }
+        }
+
+        /**
+         * 调度一次精确闹钟（15 分钟后触发复活广播）；受「后台自启」总开关控制。
+         * 开关关闭时不调度（并取消已排的闹钟），确保进程被杀后不会由心跳闹钟拉起。
+         */
         fun schedule(context: Context) {
+            if (!isKeepAliveEnabled()) {
+                cancel(context)
+                return
+            }
             val pi = pendingIntent(context)
             val triggerAt = System.currentTimeMillis() + INTERVAL_MS
             setExactAlarm(context, triggerAt, pi)
@@ -254,6 +319,13 @@ class KeepAliveReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        // 「后台自启」总开关：关闭后，进程被杀不再尝试拉起任何服务。
+        // 开机广播 / 心跳复活 / 任务重置 / 电量预警闹钟全部跳过，直到用户手动打开 App 或重新打开开关。
+        // 手动打开 App 由 MainActivity 直接启动 ForegroundRunningService，不受此开关限制。
+        if (!isKeepAliveEnabled()) {
+            Log.d(javaClass.simpleName, "后台自启已关闭，跳过拉起服务（action=${intent.action}）")
+            return
+        }
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED -> {
                 tryStartForegroundService(context)

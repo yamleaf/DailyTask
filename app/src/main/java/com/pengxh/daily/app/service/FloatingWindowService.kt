@@ -240,6 +240,11 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 「暂停使用」开启时自停：防御任意路径（广播/回调）在暂停期间拉起本服务
+        if (KeepAliveReceiver.isPaused()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 }

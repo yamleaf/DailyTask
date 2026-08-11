@@ -15,6 +15,7 @@ import android.view.View
 import android.view.WindowManager
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.bringDailyTaskToFront
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.kt.lite.utils.SaveKeyValues
 
@@ -27,6 +28,7 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
  *
  * 开关关闭时不执行上述行为。打卡等待窗口内不盖黑屏。
  * 注意：本控制器只负责「强制伪息屏」路径；远程打卡复原使用独立的 bringMainActivityForMask，互不打扰。
+ * 「暂停使用」开启时所有入口一律 no-op，实现被控端彻底安静。
  */
 object IdlePseudoMaskController {
 
@@ -57,6 +59,7 @@ object IdlePseudoMaskController {
     }
 
     private val upgradeToMaskRunnable: Runnable = Runnable {
+        if (KeepAliveReceiver.isPaused()) return@Runnable
         if (!appInBackground) return@Runnable
         if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
         if (TaskScheduler.isInActivePunch()) {
@@ -155,6 +158,13 @@ object IdlePseudoMaskController {
     }
 
     fun onAppBackgrounded(context: Context) {
+        // 「暂停使用」开启：不进入伪息屏流程（不保亮、不倒计时），实现彻底安静
+        if (KeepAliveReceiver.isPaused()) {
+            appInBackground = false
+            enteringMask = false
+            mainHandler.removeCallbacks(upgradeToMaskRunnable)
+            return
+        }
         appInBackground = true
         pendingReturnFromBackground = true
         enteringMask = false
@@ -180,6 +190,7 @@ object IdlePseudoMaskController {
      * App 在前台时不干预——蒙层由 Activity 生命周期管理，唤醒屏幕会造成循环。
      */
     fun onSystemScreenOff(context: Context) {
+        if (KeepAliveReceiver.isPaused()) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (!appInBackground) return
         if (TaskScheduler.isInActivePunch()) {
@@ -259,6 +270,7 @@ object IdlePseudoMaskController {
 
     private val foregroundIdleRunnable: Runnable = Runnable {
         val context = idleMaskContext ?: return@Runnable
+        if (KeepAliveReceiver.isPaused()) return@Runnable
         if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
         if (appInBackground) return@Runnable
         if (TaskScheduler.isInActivePunch()) return@Runnable
@@ -270,6 +282,7 @@ object IdlePseudoMaskController {
     }
 
     fun startIdleMask(context: Context) {
+        if (KeepAliveReceiver.isPaused()) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (MaskOverlayHelper.isShowing()) return
         idleMaskContext = context
@@ -304,6 +317,7 @@ object IdlePseudoMaskController {
     /** 黑屏蒙层被关掉后，若仍在外部且开关开启，则继续透明保亮并重新计时 */
     fun onBlackMaskHidden(context: Context) {
         enteringMask = false
+        if (KeepAliveReceiver.isPaused()) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (appInBackground) {
             // 后台解除：仍在外部，重新保亮并计时，超时再次进入伪息屏
@@ -324,6 +338,7 @@ object IdlePseudoMaskController {
      * 用户在后台期间切换其他 App 时，倒计时重新开始。
      */
     fun onForegroundTaskChanged() {
+        if (KeepAliveReceiver.isPaused()) return
         if (!appInBackground) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (TaskScheduler.isInActivePunch()) return  // 打卡期间不重置/触发伪息屏计时（同时避免高频日志）

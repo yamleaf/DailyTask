@@ -55,6 +55,7 @@ import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
@@ -126,7 +127,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     private val overlayPermissionLauncher =
         registerForActivityResult(permissionContract) {
-            if (Settings.canDrawOverlays(ctx)) {
+            // 「暂停使用」开启时不拉起悬浮窗服务，避免授权后意外恢复
+            if (Settings.canDrawOverlays(ctx) && !KeepAliveReceiver.isPaused()) {
                 ctx.startService(Intent(ctx, FloatingWindowService::class.java))
             }
         }
@@ -477,6 +479,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 .rotation(if (expanded) 180f else 0f)
                 .setDuration(200)
                 .start()
+            SaveKeyValues.saveBoolean(Constant.BATTERY_ALERT_GROUP_EXPANDED_KEY, expanded)
         }
         binding.batteryAlertGroupSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
@@ -587,6 +590,57 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             SaveKeyValues.saveBoolean(Constant.BACK_TO_HOME_KEY, checked)
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
+        binding.keepAliveSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncingSwitchState) return@setOnCheckedChangeListener
+            // 反转语义：开关 = 「暂停使用」。checked=true 表示暂停，checked=false 表示恢复。
+            if (checked) {
+                // 开启暂停：双层确认弹窗，防止误操作。
+                // 第一层说明后果；用户点「确认暂停」后再弹第二层，再次确认后才固化暂停状态。
+                DialogCardBuilder.show(
+                    ctx,
+                    getString(R.string.settings_keep_alive_confirm_title),
+                    DialogCardBuilder.CardSpec(
+                        paragraphs = listOf(getString(R.string.settings_keep_alive_confirm_tip)),
+                        notice = "暂停期间不会执行打卡、远程指令与保活，请确认已无需本软件运行。" to DialogCardBuilder.NoticeKind.WARN
+                    ),
+                    positiveText = "确认暂停",
+                    cancelable = false,
+                    onCancel = {
+                        syncingSwitchState = true
+                        binding.keepAliveSwitch.isChecked = false
+                        syncingSwitchState = false
+                    },
+                    onConfirm = {
+                        // 第二层确认：再次询问是否真的确定暂停，而不是误操作
+                        DialogCardBuilder.show(
+                            ctx,
+                            getString(R.string.settings_keep_alive_confirm_second_title),
+                            DialogCardBuilder.CardSpec(
+                                paragraphs = listOf(getString(R.string.settings_keep_alive_confirm_second_tip))
+                            ),
+                            positiveText = "确定暂停",
+                            cancelable = false,
+                            onCancel = {
+                                syncingSwitchState = true
+                                binding.keepAliveSwitch.isChecked = false
+                                syncingSwitchState = false
+                            },
+                            onConfirm = {
+                                SaveKeyValues.saveBoolean(Constant.KEEP_ALIVE_ENABLED_KEY, false)
+                                KeepAliveReceiver.pauseAllServices(ctx)
+                                "已暂停使用".show(ctx)
+                                ConfigImportSignal.notifyRemoteChanged(ctx)
+                            }
+                        )
+                    }
+                )
+            } else {
+                // 关闭暂停：恢复所有服务
+                SaveKeyValues.saveBoolean(Constant.KEEP_ALIVE_ENABLED_KEY, true)
+                KeepAliveReceiver.resumeAllServices(ctx)
+                ConfigImportSignal.notifyRemoteChanged(ctx)
+            }
+        }
         binding.powerSaveSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
             AppRuntimeConfig.setPowerSaveMode(checked)
@@ -647,6 +701,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 .rotation(if (expanded) 180f else 0f)
                 .setDuration(200)
                 .start()
+            SaveKeyValues.saveBoolean(Constant.PSEUDO_MASK_GROUP_EXPANDED_KEY, expanded)
         }
         binding.pseudoMaskGroupSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
@@ -822,11 +877,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.gestureDetectSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
             binding.backToHomeSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
+            binding.keepAliveSwitch.isChecked = KeepAliveReceiver.isPaused()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
-            // 分组开关仅控制展开，默认展开便于查看子项；内容显隐随开关
-            binding.pseudoMaskGroupSwitch.isChecked = true
-            binding.pseudoMaskGroupContent.visibility = View.VISIBLE
-            binding.pseudoMaskGroupArrow.rotation = 180f
+            // 分组开关仅控制展开；内容显隐随持久化的展开状态
+            val pseudoMaskGroupExpanded = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_GROUP_EXPANDED_KEY, true)
+            binding.pseudoMaskGroupSwitch.isChecked = pseudoMaskGroupExpanded
+            binding.pseudoMaskGroupContent.visibility = if (pseudoMaskGroupExpanded) View.VISIBLE else View.GONE
+            binding.pseudoMaskGroupArrow.rotation = if (pseudoMaskGroupExpanded) 180f else 0f
             val delay = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60).coerceIn(10, 3600)
             binding.pseudoMaskDelayValueText.text = getString(R.string.settings_pseudo_mask_delay_value, delay)
             binding.pseudoMaskNoClockSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
@@ -836,10 +893,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.batterySmartAlertSwitch.isChecked = alertEnabled
             // 运行时日志总开关（默认开启）
             binding.logRecordSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true)
-            // 分组开关仅控制展开，默认展开便于查看子项；内容显隐随开关
-            binding.batteryAlertGroupSwitch.isChecked = true
-            binding.batteryAlertGroupContent.visibility = View.VISIBLE
-            binding.batteryAlertGroupArrow.rotation = 180f
+            // 分组开关仅控制展开；内容显隐随持久化的展开状态
+            val batteryGroupExpanded = SaveKeyValues.loadBoolean(Constant.BATTERY_ALERT_GROUP_EXPANDED_KEY, true)
+            binding.batteryAlertGroupSwitch.isChecked = batteryGroupExpanded
+            binding.batteryAlertGroupContent.visibility = if (batteryGroupExpanded) View.VISIBLE else View.GONE
+            binding.batteryAlertGroupArrow.rotation = if (batteryGroupExpanded) 180f else 0f
             val warningMinute = SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60).coerceIn(0, 1439)
             binding.batteryWarningTimeValue.text = String.format("%02d:%02d", warningMinute / 60, warningMinute % 60)
             val rangeStart = SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20).coerceIn(0, 23)

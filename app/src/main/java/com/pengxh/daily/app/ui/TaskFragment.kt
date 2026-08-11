@@ -17,6 +17,7 @@ import com.pengxh.daily.app.adapter.DailyTaskAdapter
 import com.pengxh.daily.app.databinding.FragmentTaskBinding
 import com.pengxh.daily.app.extensions.convertToTimeEntity
 import com.pengxh.daily.app.extensions.format
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.ChinaHolidayManager
@@ -190,6 +191,11 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     override fun initEvent() {
         binding.executeTaskButton.setOnClickListener {
+            // 「暂停使用」开启时禁止手动启动任务（暂停期间基本功能不可用）
+            if (KeepAliveReceiver.isPaused()) {
+                "暂停使用中，请先关闭「暂停使用」开关恢复功能".show(requireContext())
+                return@setOnClickListener
+            }
             if (TaskScheduler.isRunning()) {
                 (activity as? MainActivity)?.doStopTask()
             } else {

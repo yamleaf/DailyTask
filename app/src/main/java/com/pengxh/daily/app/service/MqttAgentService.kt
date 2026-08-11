@@ -951,6 +951,8 @@ class MqttAgentService : Service() {
      * 注意：resurrectAttempt 先参与计算再自增，得到序列 30/30/30/120/240/… */
     private fun scheduleResurrectWithBackoff() {
         if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
+        // 「后台自启」总开关：关闭时不安排复活闹钟，进程被杀后不再尝试自启
+        if (!KeepAliveReceiver.isKeepAliveEnabled()) return
         val delay = if (resurrectAttempt < 3) 30_000L
         else minOf((1L shl (resurrectAttempt - 2)) * 60_000L, 15 * 60_000L)
         resurrectAttempt++
@@ -962,6 +964,8 @@ class MqttAgentService : Service() {
     /** 复活闹钟：进程/服务被杀或长时间断线后兜底重启服务 */
     private fun scheduleResurrect(delayMs: Long) {
         if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
+        // 「后台自启」总开关：关闭时不安排复活闹钟
+        if (!KeepAliveReceiver.isKeepAliveEnabled()) return
         nextReconnectAtMs = System.currentTimeMillis() + delayMs
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val intent = Intent(this, MqttAgentService::class.java)
@@ -1017,7 +1021,9 @@ class MqttAgentService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // A1：开关守卫 —— 关闭时返回 START_NOT_STICKY，不让系统因内存回收自动拉起并绕过开关重连；
         // 仅开关开启时返回 START_STICKY（被杀后由系统重新拉起并继续连接）。
-        if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
+        if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
+            || !KeepAliveReceiver.isKeepAliveEnabled()
+        ) {
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
             stopSelf()
             return START_NOT_STICKY
@@ -1028,7 +1034,10 @@ class MqttAgentService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         // 用户划掉任务卡片后，若远程开关仍开启，则安排复活闹钟兜底
-        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
+        // 「后台自启」总开关关闭时不安排复活，直到用户手动重新启动
+        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
+            && KeepAliveReceiver.isKeepAliveEnabled()
+        ) {
             scheduleResurrect(delayMs = 5_000L)
         }
     }
