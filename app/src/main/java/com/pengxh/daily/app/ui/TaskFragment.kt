@@ -30,6 +30,7 @@ import com.pengxh.kt.lite.extensions.convertColor
 import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
+import com.pengxh.daily.app.utils.DialogCardBuilder
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -287,27 +288,32 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             "任务进行中，无法删除".show(ctx)
             return
         }
-        UnifiedDialogKit.showWarning(
+        DialogCardBuilder.show(
             ctx,
             "删除任务",
-            "确定要删除这个任务吗？",
-            confirmText = "确定"
-        ) {
-            lifecycleScope.launch {
-                try {
-                    withContext(Dispatchers.IO) {
-                        DatabaseWrapper.deleteTask(taskBeans[position])
-                        taskBeans = DatabaseWrapper.loadAllTask()
+            DialogCardBuilder.CardSpec(
+                paragraphs = listOf("确定要删除这个任务吗？"),
+                notice = "此操作不可恢复" to DialogCardBuilder.NoticeKind.DANGER
+            ),
+            positiveText = "确定",
+            danger = true,
+            onConfirm = {
+                lifecycleScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            DatabaseWrapper.deleteTask(taskBeans[position])
+                            taskBeans = DatabaseWrapper.loadAllTask()
+                        }
+                        dailyTaskAdapter.refresh(taskBeans)
+                        binding.recyclerView.visibility = if (taskBeans.isEmpty()) View.GONE else View.VISIBLE
+                        binding.emptyView.visibility = if (taskBeans.isEmpty()) View.VISIBLE else View.GONE
+                        com.pengxh.daily.app.utils.ConfigImportSignal.notifyRemoteChanged(ctx)
+                    } catch (e: Exception) {
+                        android.util.Log.e(kTag, "刷新任务列表越界", e)
                     }
-                    dailyTaskAdapter.refresh(taskBeans)
-                    binding.recyclerView.visibility = if (taskBeans.isEmpty()) View.GONE else View.VISIBLE
-                    binding.emptyView.visibility = if (taskBeans.isEmpty()) View.VISIBLE else View.GONE
-                    com.pengxh.daily.app.utils.ConfigImportSignal.notifyRemoteChanged(ctx)
-                } catch (e: Exception) {
-                    android.util.Log.e(kTag, "刷新任务列表越界", e)
                 }
             }
-        }
+        )
     }
 
     /** 导入任务：粘贴文本解析 */

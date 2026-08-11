@@ -58,6 +58,7 @@ import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.yample.mqttprotocol.BindingPayload
 import com.yample.mqttprotocol.MqttQuota
+import com.pengxh.daily.app.utils.DialogCardBuilder
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import com.yample.mqttprotocol.Protocol
 import com.yample.mqttprotocol.ThemeManager
@@ -770,17 +771,23 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
 
     /** 强制解绑：确认后清绑定态，保留 MQTT 配置 */
     private fun forceUnbind() {
-        UnifiedDialogKit.showWarning(
+        DialogCardBuilder.show(
             ctx,
             "强制解绑",
-            "解绑后，已绑定的控制端将无法再查询或控制本设备。\n\n" +
-                "仅解除绑定关系，MQTT 配置（服务器 / 账号 / 设备ID / 控制端凭证）均保留，" +
-                "下次生成二维码即可重新绑定。",
-            confirmText = "强制解绑"
-        ) {
-            MqttAgentService.unbind() // 仅清绑定态，保留 MQTT 配置
-            "已强制解绑（MQTT 配置已保留）".show(ctx)
-        }
+            DialogCardBuilder.CardSpec(
+                paragraphs = listOf(
+                    "解绑后，已绑定的控制端将无法再查询或控制本设备。",
+                    "仅解除绑定关系，MQTT 配置不会清空。"
+                ),
+                notice = "此操作不可恢复，请确认后再解绑。" to DialogCardBuilder.NoticeKind.DANGER
+            ),
+            positiveText = "强制解绑",
+            danger = true,
+            onConfirm = {
+                MqttAgentService.unbind() // 仅清绑定态，保留 MQTT 配置
+                "已强制解绑".show(ctx)
+            }
+        )
     }
 
     // ═══════════════════════ 额度统计 ═══════════════════════
@@ -1172,14 +1179,18 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             setTypeface(null, Typeface.BOLD)
             setPadding(dip(16), 0, 0, 0)
             setOnClickListener {
-                UnifiedDialogKit.showWarning(
+                DialogCardBuilder.show(
                     ctx,
                     "下线客户端",
-                    "确定下线客户端 ${client.clientId}？下线会终结其连接与会话。",
-                    confirmText = "下线"
-                ) {
-                    kickApiClient(baseUrl, client.clientId, auth) { refreshApiClients(container, baseUrl, auth) }
-                }
+                    DialogCardBuilder.CardSpec(
+                        notice = "确定下线客户端 ${client.clientId}？下线会终结其连接与会话。" to DialogCardBuilder.NoticeKind.DANGER
+                    ),
+                    positiveText = "下线",
+                    danger = true,
+                    onConfirm = {
+                        kickApiClient(baseUrl, client.clientId, auth) { refreshApiClients(container, baseUrl, auth) }
+                    }
+                )
             }
         })
         return row
@@ -1334,16 +1345,20 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     setTypeface(null, Typeface.BOLD)
                     setPadding(dip(16), 0, 0, 0)
                     setOnClickListener {
-                        UnifiedDialogKit.showWarning(
+                        DialogCardBuilder.show(
                             ctx,
                             "退订主题",
-                            "确定取消客户端对 $topic 的订阅？",
-                            confirmText = "退订"
-                        ) {
-                            unsubscribeClientTopic(baseUrl, auth, clientId, topic) {
-                                if (it) fetchClientSubscriptions(baseUrl, auth, clientId, statusView, listHost)
+                            DialogCardBuilder.CardSpec(
+                                notice = "确定取消客户端对 $topic 的订阅？" to DialogCardBuilder.NoticeKind.DANGER
+                            ),
+                            positiveText = "退订",
+                            danger = true,
+                            onConfirm = {
+                                unsubscribeClientTopic(baseUrl, auth, clientId, topic) {
+                                    if (it) fetchClientSubscriptions(baseUrl, auth, clientId, statusView, listHost)
+                                }
                             }
-                        }
+                        )
                     }
                 })
                 listHost.addView(row)

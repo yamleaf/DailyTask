@@ -1,4 +1,5 @@
 import java.text.SimpleDateFormat
+import java.util.TimeZone
 
 plugins {
     id('com.android.application')
@@ -34,7 +35,13 @@ def buildSource = System.getenv('BUILD_SOURCE') ?:
 def buildTag = "${buildSource}-${gitShort}"
 
 // 构建时间（分钟精度，与 versionCode 的 2 分钟粒度相称，避免秒级变动导致无谓重编）
-def buildTime = new SimpleDateFormat('yyyy-MM-dd HH:mm', Locale.CHINA).format(new Date())
+def cnTz = TimeZone.getTimeZone('Asia/Shanghai')
+def cnFormat = { String pattern, Date date ->
+    def fmt = new SimpleDateFormat(pattern, Locale.CHINA)
+    fmt.timeZone = cnTz
+    fmt.format(date)
+}
+def buildTime = cnFormat('yyyy-MM-dd HH:mm', new Date())
 
 android {
     namespace 'com.pengxh.daily.app'
@@ -88,9 +95,9 @@ android {
             // 上限 991231*1000+1439 ≈ 9.9e8，远低于 int 上限 2.147e9，不会溢出。
             // 代价：同 2 分钟内的两次构建会得到相同 versionCode（一次构建耗时 1~5 分钟，不构成问题）。
             def now = new Date()
-            def ymd = new SimpleDateFormat('yyMMdd', Locale.CHINA).format(now).toInteger()
-            def hh = new SimpleDateFormat('HH', Locale.CHINA).format(now).toInteger()
-            def mm = new SimpleDateFormat('mm', Locale.CHINA).format(now).toInteger()
+            def ymd = cnFormat('yyMMdd', now).toInteger()
+            def hh = cnFormat('HH', now).toInteger()
+            def mm = cnFormat('mm', now).toInteger()
             versionName "${baselineVersion}-${buildTag}"
             versionCode ymd * 1000 + 720 + (hh * 30 + (int) (mm / 2))
         } else {

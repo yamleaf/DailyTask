@@ -21,6 +21,7 @@ import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.FloatingWindowController
+import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
@@ -475,6 +476,11 @@ class NotificationMonitorService : NotificationListenerService() {
         val maskWasShowing = MaskOverlayHelper.isShowing()
         if (maskWasShowing) {
             LogFileManager.writeLog("远程打卡：伪息屏蒙层显示中，临时移除以确保障碍不遮挡目标App")
+            // 先唤醒并保持亮屏（持有独立 WakeLock），再移除蒙层：
+            // 蒙层 hide 会释放 SCREEN_DIM_WAKE_LOCK，若先 hide 后保活，释放瞬间系统可能按屏幕超时休眠锁屏
+            // （真机复现：打卡瞬间 goToSleep + keyguard + 指纹图标，打卡界面被锁屏挡住空跑）。
+            // 与 TaskScheduler 定时任务路径保持一致。
+            IdlePseudoMaskController.keepAwakeForPunch(this)
             MaskOverlayHelper.hide(this@NotificationMonitorService)
         }
         try {
@@ -610,6 +616,8 @@ class NotificationMonitorService : NotificationListenerService() {
                             withContext(Dispatchers.Main) {
                                 MaskOverlayHelper.show(this@NotificationMonitorService)
                             }
+                            // 蒙层已恢复（持有 SCREEN_DIM_WAKE_LOCK），释放打卡保活，让屏幕自然熄灭回到省电伪息屏
+                            IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                         }
                     }
                 }
@@ -627,6 +635,7 @@ class NotificationMonitorService : NotificationListenerService() {
             if (maskWasShowing) {
                 Handler(Looper.getMainLooper()).post {
                     MaskOverlayHelper.show(this@NotificationMonitorService)
+                    IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                 }
             }
         }

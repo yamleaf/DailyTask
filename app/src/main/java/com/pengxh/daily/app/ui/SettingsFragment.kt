@@ -77,6 +77,7 @@ import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
 import com.yample.mqttprotocol.ThemeManager
+import com.pengxh.daily.app.utils.DialogCardBuilder
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -558,14 +559,16 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 SaveKeyValues.saveBoolean(Constant.GESTURE_DETECTOR_KEY, false)
                 ConfigImportSignal.notifyRemoteChanged(ctx)
             } else {
-                UnifiedDialogKit.showWarning(
+                DialogCardBuilder.show(
                     ctx,
                     "开启手势识别？",
-                    "开启后，在屏幕上滑动即可控制伪息屏：\n" +
-                        "· 双指下滑：开启伪息屏\n" +
-                        "· 单指/双指上滑：关闭伪息屏\n\n" +
-                        "单指下滑不受影响，可正常操作本软件。",
-                    confirmText = "确认开启",
+                    DialogCardBuilder.CardSpec(
+                        paragraphs = listOf(
+                            "开启后，在屏幕上滑动即可控制伪息屏：\n· 双指下滑：开启伪息屏\n· 单指 / 双指上滑：关闭伪息屏\n"
+                        ),
+                        notice = "单指下滑不受影响，可正常操作本软件。" to DialogCardBuilder.NoticeKind.WARN
+                    ),
+                    positiveText = "确认开启",
                     cancelable = false,
                     onCancel = {
                         syncingSwitchState = true
@@ -602,15 +605,17 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             if (!enabled) {
                 onConfirm(false)
             } else {
-                UnifiedDialogKit.showWarning(
+                DialogCardBuilder.show(
                     ctx,
                     "开启伪息屏？",
-                    "后台运行或前台无操作超过设定时间，将自动进入伪息屏（模拟息屏，省电护眼）。\n\n" +
-                        "手势识别已开启，可随时退出：\n" +
-                        "· 进入伪息屏：双指下滑\n" +
-                        "· 退出伪息屏：单指/双指上滑\n\n" +
-                        "⚠ 后台伪息屏可能打断其他 App 使用，适合无人值守挂机；白天操作手机时建议关闭。",
-                    confirmText = "确认开启",
+                    DialogCardBuilder.CardSpec(
+                        paragraphs = listOf(
+                            "后台运行或前台无操作超过设定时间，将自动进入伪息屏。",
+                            "手势识别已开启，可随时退出：\n· 进入伪息屏：双指下滑\n· 退出伪息屏：单指 / 双指上滑\n"
+                        ),
+                        notice = "后台伪息屏可能打断其他 App 使用，适合无人值守挂机；白天操作手机时建议关闭。" to DialogCardBuilder.NoticeKind.WARN
+                    ),
+                    positiveText = "确认开启",
                     cancelable = false,
                     onCancel = {
                         syncingSwitchState = true
@@ -1013,7 +1018,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         sb.append("① 通知监听（远程指令接收）\n")
         when {
             !noticeAuthorized -> sb.append("    ✗ 未授权，无法接收远程指令\n")
-            !noticeConnected -> sb.append("    ⚠ 已授权但服务未连接，远程指令可能无响应（国产 ROM 自启动拦截）\n")
+            !noticeConnected -> sb.append("    ⚠ 已授权但服务未连接（国产 ROM 可能需要开启自启动权限）\n")
             else -> sb.append("    ✓ 已连接，可接收远程指令\n")
         }
         sb.append("\n② 后台弹出界面（后台拉起打卡 App）\n")
@@ -1834,11 +1839,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 开启截屏服务提醒 */
     private fun showCaptureEnableWarning(onConfirm: () -> Unit) {
-        UnifiedDialogKit.showWarning(
+        DialogCardBuilder.show(
             ctx,
             getString(R.string.settings_capture_enable_warning_title),
-            getString(R.string.settings_capture_enable_warning_msg),
-            confirmText = "继续开启",
+            DialogCardBuilder.CardSpec(
+                notice = getString(R.string.settings_capture_enable_warning_msg) to DialogCardBuilder.NoticeKind.WARN
+            ),
+            positiveText = "继续开启",
             cancelable = false,
             onConfirm = onConfirm
         )
@@ -1846,11 +1853,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 开启无障碍服务提醒 */
     private fun showAccessibilityEnableWarning() {
-        UnifiedDialogKit.showWarning(
+        DialogCardBuilder.show(
             ctx,
             getString(R.string.settings_accessibility_enable_warning_title),
-            getString(R.string.settings_accessibility_enable_warning_msg),
-            confirmText = "前往开启",
+            DialogCardBuilder.CardSpec(
+                notice = getString(R.string.settings_accessibility_enable_warning_msg) to DialogCardBuilder.NoticeKind.WARN
+            ),
+            positiveText = "前往开启",
             cancelable = false,
             onConfirm = {
                 ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))

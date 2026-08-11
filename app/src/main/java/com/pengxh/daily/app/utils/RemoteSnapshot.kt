@@ -139,6 +139,22 @@ object RemoteSnapshot {
                 o.add("batterySeries", arr)
             }
         } catch (_: Exception) { }
+        // B5：电量智能预测（复用被控端 BatteryPredictor，控制端直接展示避免算法不一致导致偏差）
+        try {
+            val pred = BatteryPredictor.predict(context)
+            if (pred != null) {
+                o.addProperty("batteryPredictHas", true)
+                o.addProperty("batteryPredictCharging", pred.isCharging)
+                o.addProperty("batteryPredictRate", String.format("%.1f", pred.ratePerHour))
+                if (!pred.isCharging && pred.targetTimeMs > 0) {
+                    o.addProperty("batteryPredictTime", BatteryPredictor.formatTime(pred.targetTimeMs))
+                    val threshold = SaveKeyValues.loadInt(
+                        Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
+                    ).coerceIn(10, 80)
+                    o.addProperty("batteryPredictThreshold", threshold)
+                }
+            }
+        } catch (_: Exception) { }
         try {
             val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
             val now = System.currentTimeMillis()
