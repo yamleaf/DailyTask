@@ -1,65 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:layout_gravity="center"
-    app:cardBackgroundColor="@android:color/transparent"
-    app:cardCornerRadius="22dp"
-    app:cardElevation="14dp"
-    app:strokeColor="@color/theme_color"
-    app:strokeWidth="1.5dp">
+    android:layout_height="wrap_content">
 
-    <LinearLayout
+    <!-- 非打卡期间的「桌面小宠物」形态：默认贴边停靠、可自由拖到任意位置，
+         让悬浮窗保持常驻可见，为安卓 15+ 提供可见窗口豁免，规避后台跳转被系统限制。
+         换宠物：直接改 text 的 emoji 字符即可。 -->
+    <TextView
+        android:id="@+id/idlePetView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_floating_countdown"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="12dp">
+        android:layout_gravity="center"
+        android:background="@drawable/bg_idle_pet"
+        android:padding="6dp"
+        android:text="🐧"
+        android:textSize="32sp"
+        android:visibility="gone" />
 
-        <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_marginEnd="12dp"
-            android:src="@drawable/ic_clock"
-            app:tint="@android:color/white" />
+    <!-- 打卡期间展开的完整倒计时卡片 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/countdownCardView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="22dp"
+        app:cardElevation="14dp"
+        app:strokeColor="@color/theme_color"
+        app:strokeWidth="1.5dp">
 
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:background="@drawable/bg_floating_countdown"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
 
-            <com.google.android.material.textview.MaterialTextView
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginEnd="12dp"
+                android:src="@drawable/ic_clock"
+                app:tint="@android:color/white" />
+
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="打卡倒计时"
-                android:textColor="#C9C9E8"
-                android:textSize="11sp"
-                android:letterSpacing="0.08" />
+                android:orientation="vertical">
 
-            <com.google.android.material.textview.MaterialTextView
-                android:id="@+id/timeView"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="30s"
-                android:textColor="@android:color/white"
-                android:textSize="22sp"
-                android:textStyle="bold"
-                android:fontFamily="sans-serif-medium" />
+                <com.google.android.material.textview.MaterialTextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="打卡倒计时"
+                    android:textColor="#C9C9E8"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.08" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/timeView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="30s"
+                    android:textColor="@android:color/white"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-medium" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_marginHorizontal="12dp"
+                android:layout_marginVertical="4dp"
+                android:background="#5A5A82" />
+
+            <com.pengxh.daily.app.widget.WaveProgressView
+                android:id="@+id/waveProgressView"
+                android:layout_width="30dp"
+                android:layout_height="30dp" />
         </LinearLayout>
-
-        <View
-            android:layout_width="1dp"
-            android:layout_height="match_parent"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginVertical="4dp"
-            android:background="#5A5A82" />
-
-        <com.pengxh.daily.app.widget.WaveProgressView
-            android:id="@+id/waveProgressView"
-            android:layout_width="30dp"
-            android:layout_height="30dp" />
-    </LinearLayout>
-</com.google.android.material.card.MaterialCardView>
+    </com.google.android.material.card.MaterialCardView>
+</FrameLayout>

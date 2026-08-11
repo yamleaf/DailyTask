@@ -224,14 +224,15 @@ object TaskScheduler {
             runningDetail =
                 "执行第 ${task.displayIndex}/${schedule.size} 个任务（等待打卡）"
 
-            // 伪息屏蒙层显示时，先临时移除，让目标 App 能正常打开和打卡
+            // 打卡准备：屏幕当前息屏时先亮屏再打卡，保证打卡界面真实可见、可被无障碍正常操作；
+            // 伪息屏蒙层显示时同样先保亮、再移除蒙层（避免蒙层释放 SCREEN_DIM 瞬间被系统休眠锁屏）。
+            val keptAwakeForPunch = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(DailyTaskApplication.get())
             val maskWasShowing = MaskOverlayHelper.isShowing()
             if (maskWasShowing) {
                 LogFileManager.writeLog("定时任务：伪息屏蒙层显示中，临时移除")
-                // 先唤醒并保持亮屏（持有独立 WakeLock），再移除蒙层：
+                // 注意顺序：必须先 keepAwakeForPunch 建立 SCREEN_BRIGHT 保亮、再 hide 蒙层——
                 // 蒙层 hide 会释放 SCREEN_DIM_WAKE_LOCK，若先 hide 后保活，释放瞬间系统可能按屏幕超时休眠锁屏
                 // （真机复现：打卡瞬间 goToSleep + keyguard + 指纹图标，打卡界面被锁屏挡住空跑）。
-                IdlePseudoMaskController.keepAwakeForPunch(DailyTaskApplication.get())
                 withContext(Dispatchers.Main) {
                     MaskOverlayHelper.hide(DailyTaskApplication.get())
                 }
@@ -359,7 +360,9 @@ object TaskScheduler {
                     MaskOverlayHelper.show(DailyTaskApplication.get())
                 }
                 DailyTaskApplication.get().bringDailyTaskToFront(true)
-                // 蒙层已恢复（无 FLAG_KEEP_SCREEN_ON），释放打卡保活，让屏幕自然熄灭回到省电伪息屏
+            }
+            // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
+            if (keptAwakeForPunch) {
                 IdlePseudoMaskController.releaseKeepAwakeForPunch(DailyTaskApplication.get())
             }
 

@@ -46,7 +46,8 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     // 悬浮窗可见性由两个独立维度决定：
     // 1) floatSessionActive —— 是否处于「被控端主动跳到目标 App」的操作会话中（由 openApplication 统一 start、各操作结束 stop）
     // 2) visibilityAllowed —— 蒙层是否未遮挡（由 show/hide 控制，蒙层显示时临时隐藏避免截到黑屏）
-    // 最终可见 = floatSessionActive && visibilityAllowed
+    // 形态切换：会话中显示完整倒计时卡片；空闲（非打卡、蒙层未遮挡）显示桌面小宠物，
+    // 保证悬浮窗窗口常驻可见可拖动，为安卓 15+ 后台跳转提供可见窗口豁免；蒙层遮挡时整体隐藏。
     private var floatSessionActive = false
     private var visibilityAllowed = true
 
@@ -63,7 +64,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         // 用 Gravity.END 锚定右缘，不依赖视图测量宽度——
         // 避免 addView 后首帧未测量导致 width=0、被推到屏幕外不可见的旧 bug。
         // x 为相对 END 锚点的偏移：负值=向左留间隙，窗口整体贴边且完全可见。
-        val edgeMarginPx = (10 * resources.displayMetrics.density).toInt()
+        val edgeMarginPx = edgeMarginPx()
         floatViewParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -117,15 +118,17 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
 
-        // 初始隐藏，仅在被控端主动跳到目标 App 操作期间显示。
-        // 必须用 View.GONE 而非纯 alpha=0：alpha=0 的 VISIBLE 窗口仍会接收触摸事件，
-        // 在非打卡期间会截获落在该区域的点击（尤其是贴边后稳定显示在屏幕内），
-        // 导致后台操作其他 App 时点击没反应；GONE 不绘制也不接收触摸，点击正常穿透。
-        binding.root.visibility = View.GONE
-        binding.root.alpha = 0.0f
+        // 初始状态：空闲（非打卡、蒙层未遮挡）显示桌面小宠物，默认贴右边缘、垂直居中停靠。
+        // 宠物极小巧（emoji），常驻可见但不明显遮挡交互，为安卓 15+ 后台跳转提供常驻可见窗口豁免；
+        // 可拖动到任意位置（松手即停），打卡会话开始后由 recomputeVisibility() 自动展开为完整倒计时卡片。
+        binding.countdownCardView.visibility = View.GONE
+        binding.idlePetView.visibility = View.VISIBLE
+        binding.root.visibility = View.VISIBLE
+        binding.root.alpha = 1.0f
         binding.timeView.text = "0s"
+        dockPetToEdge()
 
-        // 移动悬浮窗
+        // 移动悬浮窗（宠物与卡片都可拖动到任意位置）
         onDragMove()
 
         restartMemoryMonitoring()
@@ -141,14 +144,68 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
     }
 
-    // 统一计算悬浮窗可见性：仅当「目标 App 操作会话中」且「蒙层未遮挡」时显示。
-    // show=false 时用 View.GONE：GONE 的窗口不参与绘制与 hit-test，
-    // 触摸事件正常穿透到下层 App，避免在屏幕内隐藏时仍截获点击（参见 onCreate 说明）。
+    // 统一计算悬浮窗可见性与形态：
+    // · 蒙层遮挡时整体隐藏（用 View.GONE：GONE 的窗口不参与绘制与 hit-test，触摸事件穿透到下层 App）；
+    // · 打卡会话中展开完整倒计时卡片；
+    // · 空闲（非打卡、蒙层未遮挡）时显示桌面小宠物，窗口保持常驻可见可拖动，
+    //   为安卓 15+ 后台跳转提供可见窗口豁免。
     private fun recomputeVisibility() {
-        val show = floatSessionActive && visibilityAllowed
-        binding.root.visibility = if (show) View.VISIBLE else View.GONE
-        binding.root.alpha = if (show) 1.0f else 0.0f
-        if (show) applyWaveAnimation() else binding.waveProgressView.stopWaveAnimation()
+        if (!visibilityAllowed) {
+            binding.root.visibility = View.GONE
+            binding.root.alpha = 0.0f
+            binding.waveProgressView.stopWaveAnimation()
+            return
+        }
+        if (floatSessionActive) {
+            binding.idlePetView.visibility = View.GONE
+            binding.countdownCardView.visibility = View.VISIBLE
+            binding.root.visibility = View.VISIBLE
+            binding.root.alpha = 1.0f
+            applyWaveAnimation()
+        } else {
+            binding.countdownCardView.visibility = View.GONE
+            binding.idlePetView.visibility = View.VISIBLE
+            binding.root.visibility = View.VISIBLE
+            binding.root.alpha = 1.0f
+            binding.waveProgressView.stopWaveAnimation()
+        }
+        // WRAP_CONTENT 窗口在宠物/卡片形态切换后需重新布局以匹配新尺寸
+        floatViewParams?.let { windowManager.updateViewLayout(binding.root, it) }
+    }
+
+    private fun edgeMarginPx() = (10 * resources.displayMetrics.density).toInt()
+
+    // 桌面宠物初始化停靠：贴右边缘、垂直居中
+    private fun dockPetToEdge() {
+        floatViewParams?.let {
+            it.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            it.x = -edgeMarginPx()
+            it.y = 0
+            windowManager.updateViewLayout(binding.root, it)
+        }
+    }
+
+    // 松手自动吸附到较近的屏幕边缘（保留纵向位置），保证宠物始终贴边停靠。
+    private fun dockPetToNearestEdge() {
+        val params = floatViewParams ?: return
+        val screenWidth = resources.displayMetrics.widthPixels
+        val width = binding.root.width.coerceAtLeast(1)
+        // END 锚点下 x 为窗口右缘相对屏幕右缘的偏移：负=屏内留边距，正=越出屏幕右侧
+        val windowRight = screenWidth + params.x
+        val windowLeft = windowRight - width
+        val distRight = (screenWidth - windowRight).coerceAtLeast(0)
+        val distLeft = windowLeft.coerceAtLeast(0)
+        // 记录当前纵向偏移，贴边时保留（CENTER_VERTICAL 下 y 为相对垂直居中的偏移）
+        val keepY = params.y
+        if (distRight <= distLeft) {
+            params.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            params.x = -edgeMarginPx()
+        } else {
+            params.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            params.x = edgeMarginPx()
+        }
+        params.y = keepY
+        windowManager.updateViewLayout(binding.root, params)
     }
 
     private fun restartMemoryMonitoring() {
@@ -216,6 +273,12 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                             it.y = initialY + (event.rawY - initialTouchY).toInt()
                             windowManager.updateViewLayout(binding.root, it)
                         }
+                        return true
+                    }
+
+                    // 松手自动吸附到较近的屏幕边缘（宠物始终贴边停靠）
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        dockPetToNearestEdge()
                         return true
                     }
 

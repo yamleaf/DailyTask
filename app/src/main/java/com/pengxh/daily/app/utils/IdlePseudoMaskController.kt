@@ -208,6 +208,24 @@ object IdlePseudoMaskController {
     }
 
     /**
+     * 打卡前准备亮屏：仅当屏幕当前处于息屏状态时先亮屏并保持亮屏，再让调用方执行打卡；
+     * 若屏幕已亮则不打扰，直接走打卡流程。 蒙层显示时屏幕通常仍为交互态（SCREEN_DIM 保亮）。
+     *
+     * @return true 表示本次确实亮屏并持有了打卡保活（调用方打卡结束后应调用 releaseKeepAwakeForPunch）；
+     *         false 表示屏幕本就亮着，未打扰，无需释放。
+     */
+    fun keepAwakeForPunchIfNeeded(context: Context): Boolean {
+        val pm = context.getSystemService(PowerManager::class.java)
+        val screenOff = pm?.isInteractive != true
+        val maskShowing = MaskOverlayHelper.isShowing()
+        if (screenOff || maskShowing) {
+            keepAwakeForPunch(context)
+            return true
+        }
+        return false
+    }
+
+    /**
      * 打卡期间保活屏幕：
      * 1. 同步获取并持有带 ACQUIRE_CAUSES_WAKEUP 的屏幕 WakeLock，立即唤醒并保持亮屏；
      * 2. 另加 1x1dp FLAG_KEEP_SCREEN_ON 透明窗口兜底。

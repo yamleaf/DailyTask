@@ -486,15 +486,12 @@ class NotificationMonitorService : NotificationListenerService() {
             force = true,
             appendMeta = false
         )
-        // 伪息屏蒙层显示时，先临时移除，让目标 App 能正常打开和打卡
+        // 打卡前准备：屏幕当前息屏时先亮屏再打卡，保证打卡界面真实可见、可被无障碍正常操作；
+        // 伪息屏蒙层显示时同样先保亮、再移除蒙层（避免蒙层释放 SCREEN_DIM 瞬间被系统休眠锁屏）。
+        val keptAwakeForPunch = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(this)
         val maskWasShowing = MaskOverlayHelper.isShowing()
         if (maskWasShowing) {
             LogFileManager.writeLog("远程打卡：伪息屏蒙层显示中，临时移除以确保障碍不遮挡目标App")
-            // 先唤醒并保持亮屏（持有独立 WakeLock），再移除蒙层：
-            // 蒙层 hide 会释放 SCREEN_DIM_WAKE_LOCK，若先 hide 后保活，释放瞬间系统可能按屏幕超时休眠锁屏
-            // （真机复现：打卡瞬间 goToSleep + keyguard + 指纹图标，打卡界面被锁屏挡住空跑）。
-            // 与 TaskScheduler 定时任务路径保持一致。
-            IdlePseudoMaskController.keepAwakeForPunch(this)
             MaskOverlayHelper.hide(this@NotificationMonitorService)
         }
         try {
@@ -630,7 +627,9 @@ class NotificationMonitorService : NotificationListenerService() {
                             withContext(Dispatchers.Main) {
                                 MaskOverlayHelper.show(this@NotificationMonitorService)
                             }
-                            // 蒙层已恢复（持有 SCREEN_DIM_WAKE_LOCK），释放打卡保活，让屏幕自然熄灭回到省电伪息屏
+                        }
+                        // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
+                        if (keptAwakeForPunch) {
                             IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                         }
                     }
@@ -645,10 +644,10 @@ class NotificationMonitorService : NotificationListenerService() {
                 force = true,
                 appendMeta = false
             )
-            // 异常时也要恢复蒙层
-            if (maskWasShowing) {
+            // 异常时也要恢复蒙层 / 释放打卡保活
+            if (maskWasShowing || keptAwakeForPunch) {
                 Handler(Looper.getMainLooper()).post {
-                    MaskOverlayHelper.show(this@NotificationMonitorService)
+                    if (maskWasShowing) MaskOverlayHelper.show(this@NotificationMonitorService)
                     IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                 }
             }
