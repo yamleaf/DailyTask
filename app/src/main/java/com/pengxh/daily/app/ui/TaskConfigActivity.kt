@@ -117,6 +117,9 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
         binding.keyTextView.text = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
 
+        val punchKeywords = SaveKeyValues.loadString(Constant.PUNCH_RESULT_KEYWORDS_KEY, "")
+        binding.punchKeywordView.text = if (punchKeywords.isBlank()) "默认" else punchKeywords
+
         updateCustomWorkdaySummary(CustomWorkdayManager.loadWorkdays())
 
         binding.autoTaskSwitch.isChecked =
@@ -178,6 +181,36 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
                         SaveKeyValues.saveString(Constant.REMOTE_COMMAND_KEY, value)
                         binding.keyTextView.text = value
                         ConfigImportSignal.notifyRemoteChanged(context)
+                        true
+                    }
+                }
+            )
+        }
+
+        binding.punchKeywordLayout.setOnClickListener {
+            val current = SaveKeyValues.loadString(Constant.PUNCH_RESULT_KEYWORDS_KEY, "")
+            val editText = EditText(this).apply {
+                hint = "多个关键字用逗号分隔，如：上班打卡成功,打卡完成"
+                setText(current)
+                setSelection(current.length)
+            }
+            UnifiedDialogKit.showForm(
+                this, editText,
+                title = "设置打卡结果关键字",
+                positiveText = "确定",
+                negativeText = "取消",
+                onConfirm = {
+                    val value = editText.text.toString().trim()
+                    val normalized = value.split(",", "，").map { it.trim() }
+                        .filter { it.isNotEmpty() }.distinct().joinToString(",")
+                    if (normalized.isEmpty()) {
+                        SaveKeyValues.saveString(Constant.PUNCH_RESULT_KEYWORDS_KEY, "")
+                        binding.punchKeywordView.text = "默认"
+                        "已清除自定义关键字，恢复默认".show(this)
+                        true
+                    } else {
+                        SaveKeyValues.saveString(Constant.PUNCH_RESULT_KEYWORDS_KEY, normalized)
+                        binding.punchKeywordView.text = normalized
                         true
                     }
                 }

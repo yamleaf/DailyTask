@@ -119,6 +119,30 @@ class MqttAgentService : Service() {
                 svc.scope.launch { svc.reconnect() }
             }
         }
+
+        /**
+         * 取消 MQTT 复活闹钟（服务实例可能已销毁，仍按相同 PendingIntent 取消）。
+         * 「暂停使用」路径必须调用，避免残留闹钟在暂停期间再次拉起服务。
+         */
+        fun cancelResurrectAlarms(context: Context) {
+            nextReconnectAtMs = 0L
+            instance?.cancelResurrect()
+            val appCtx = context.applicationContext
+            val alarmManager = appCtx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val intent = Intent(appCtx, MqttAgentService::class.java)
+            val pi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                PendingIntent.getForegroundService(
+                    appCtx, 2001, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            } else {
+                PendingIntent.getService(
+                    appCtx, 2001, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            }
+            alarmManager.cancel(pi)
+        }
     }
 
     @Volatile private var _connected = false
@@ -161,8 +185,10 @@ class MqttAgentService : Service() {
         instance = this
         // A1：开关守卫 —— 关闭 MQTT 开关时直接不启动连接，保证「关闭零耗电」。
         // 否则进程被系统回收后重启，onCreate 会重新 initMqtt 绕过开关继续连接，承诺破防。
-        if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
-            Log.d(TAG, "MQTT 开关关闭，服务不启动（关闭零耗电）")
+        if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
+            || KeepAliveReceiver.isPaused()
+        ) {
+            Log.d(TAG, "MQTT 开关关闭或暂停使用中，服务不启动")
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
             stopSelf()
             return
@@ -1059,15 +1085,15 @@ class MqttAgentService : Service() {
             mqttClient?.close()
         } catch (_: Exception) {
         }
-        // 如果开关仍开启（非正常手动关闭），安排复活闹钟兜底重连；
-        // 正常关闭开关会先把 MQTT_ENABLED_KEY 设为 false，因此不会复活。
-        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) {
-            // 服务被销毁但开关仍开（非正常手动关闭），安排复活闹钟（带退避）
+        // 如果开关仍开启且未暂停使用，安排复活闹钟兜底重连；
+        // 「暂停使用」或正常关 MQTT 开关时一律取消复活闹钟，避免安静期被再次拉起。
+        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
+            && KeepAliveReceiver.isKeepAliveEnabled()
+        ) {
             scheduleResurrectWithBackoff()
         } else {
             cancelResurrect()
-            // 撤销前台通知，确保关闭开关后通知栏无残留
-            stopForeground(true)
+            stopForeground(STOP_FOREGROUND_REMOVE)
         }
     }
 

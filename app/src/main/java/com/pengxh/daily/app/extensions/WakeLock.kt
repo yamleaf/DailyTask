@@ -14,6 +14,14 @@ import android.os.PowerManager
  * 常量本身（SCREEN_BRIGHT_WAKE_LOCK 等）在 API 26+ 已被标记废弃但仍可用，统一在此抑制。
  */
 @Suppress("DEPRECATION")
+object LegacyWakeLockFlags {
+    val SCREEN_BRIGHT: Int = PowerManager.SCREEN_BRIGHT_WAKE_LOCK
+    val SCREEN_DIM: Int = PowerManager.SCREEN_DIM_WAKE_LOCK
+    val CAUSES_WAKEUP: Int = PowerManager.ACQUIRE_CAUSES_WAKEUP
+    val ON_AFTER_RELEASE: Int = PowerManager.ON_AFTER_RELEASE
+}
+
+@Suppress("DEPRECATION")
 fun Context.acquireWakeLock(
     level: Int,
     tag: String,

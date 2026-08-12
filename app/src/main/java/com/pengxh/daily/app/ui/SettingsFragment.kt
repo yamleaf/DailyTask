@@ -40,6 +40,7 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.view.ContextThemeWrapper
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -454,7 +455,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 when (SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, -1)) {
                     0 -> {
                         val cfg = com.pengxh.daily.app.utils.ConfigStore.get().load("emailConfig")
-                        val inbox = cfg?.get("inbox")?.asString ?: ""
+                        val inbox = cfg.get("inbox")?.asString ?: ""
                         if (inbox.isBlank() || com.pengxh.daily.app.utils.EmailSecureConfig.loadAuthCode().isBlank()) {
                             "通知转发依赖邮箱配置，请先完善邮箱与授权码".show(ctx)
                         }
@@ -499,7 +500,12 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
         binding.logRecordSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
+            val wasEnabled = SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true)
             SaveKeyValues.saveBoolean(Constant.LOG_ENABLED_KEY, checked)
+            // 运行日志关闭→再开启：允许无障碍关键字节点再 dump 一次
+            if (!wasEnabled && checked) {
+                AutoProjectionAccessibilityService.resetNodeDumpFlag()
+            }
         }
         binding.batteryWarningTimeRow.setOnClickListener { showBatteryWarningTimePicker() }
         binding.batteryAlertRangeRow.setOnClickListener { showBatteryAlertRangePicker() }
@@ -547,8 +553,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.statusQueryLayout.setOnClickListener {
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
-                    val html = StatusReporter.buildStatusReportHtml(ctx, NotificationMonitorService.isListenerConnected())
-                    withContext(Dispatchers.Main) { showStatusReportDialog(html) }
+                    val report = StatusReporter.buildStatusReport(
+                        ctx,
+                        NotificationMonitorService.isListenerConnected()
+                    )
+                    withContext(Dispatchers.Main) { showStatusReportDialog(report) }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         Snackbar.make(binding.root, "状态查询生成失败：${e.message}", Snackbar.LENGTH_SHORT).show()
@@ -638,6 +647,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 // 关闭暂停：恢复所有服务
                 SaveKeyValues.saveBoolean(Constant.KEEP_ALIVE_ENABLED_KEY, true)
                 KeepAliveReceiver.resumeAllServices(ctx)
+                "已恢复使用，服务与闹钟已重新启动".show(ctx)
                 ConfigImportSignal.notifyRemoteChanged(ctx)
             }
         }
@@ -728,10 +738,28 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.introduceLayout.setOnClickListener {
             ctx.startActivity(Intent(ctx, QuestionAndAnswerActivity::class.java))
         }
+        // 一键诊断：写 Documents/diagnostic_*.txt，经系统分享面板导出（Fragment 化时曾误改为弹窗预览）
         binding.diagnosticLayout.setOnClickListener {
             lifecycleScope.launch(Dispatchers.IO) {
-                val report = DiagnosticReporter.buildReport(ctx)
-                withContext(Dispatchers.Main) { showStatusReportDialog(report) }
+                val file = DiagnosticReporter.exportToFile(ctx)
+                withContext(Dispatchers.Main) {
+                    file?.let { reportFile ->
+                        val authority = BuildConfig.APPLICATION_ID + ".fileprovider"
+                        val uri = FileProvider.getUriForFile(ctx, authority, reportFile)
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        try {
+                            startActivity(Intent.createChooser(shareIntent, "导出诊断日志"))
+                        } catch (e: Exception) {
+                            "导出失败：${e.message}".show(ctx)
+                        }
+                    } ?: run {
+                        "诊断日志导出失败".show(ctx)
+                    }
+                }
             }
         }
     }
@@ -984,7 +1012,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                             String::class.java
                         )
                         method.invoke(
-                            cls.newInstance(), appOps, 100000,
+                            cls.getDeclaredConstructor().newInstance(), appOps, 100000,
                             Process.myUid(), ctx.packageName
                         ) as? Int ?: AppOpsManager.MODE_DEFAULT
                     } catch (e: Exception) {
@@ -1317,7 +1345,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 ctx,
                 "验证通过",
                 "「$targetApp」已从后台成功拉起，后台弹出界面权限正常。",
-                confirmText = "知道了"
+                confirmText = "知道了",
+                cancelText = null
             )
         } else if (launched == false) {
             openBackgroundStartFailDialog(targetApp)
@@ -1974,43 +2003,41 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         return best
     }
 
-    /** 状态报告展示（WebView 渲染 HTML） */
-    private fun showStatusReportDialog(html: String) {
+    /** 状态报告：统一弹窗 + 可滚动纯文本（不再用 WebView/HTML） */
+    private fun showStatusReportDialog(report: String) {
         val density = resources.displayMetrics.density
-        val pad = (12 * density).toInt()
-        val webView = android.webkit.WebView(ctx).apply {
-            settings.javaScriptEnabled = false
-            settings.defaultTextEncodingName = "UTF-8"
-            setBackgroundColor(ctx.getColor(R.color.md_surface))
+        val padH = (8 * density).toInt()
+        val textView = TextView(ctx).apply {
+            text = report
+            textSize = 13f
+            setTextIsSelectable(true)
+            setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
+            setLineSpacing(2 * density, 1f)
+            setPadding(padH, 0, padH, 0)
+            typeface = android.graphics.Typeface.MONOSPACE
         }
-        val container = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, 0, pad, 0)
+        val scroll = ScrollView(ctx).apply {
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            isFillViewport = true
             addView(
-                webView,
-                LinearLayout.LayoutParams(
+                textView,
+                ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    (resources.displayMetrics.heightPixels * 0.6).toInt()
+                    ViewGroup.LayoutParams.WRAP_CONTENT
                 )
             )
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (resources.displayMetrics.heightPixels * 0.55).toInt()
+            )
         }
-        val dlg = UnifiedDialogKit.showForm(
-            ctx,
-            container,
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = scroll,
+            title = "状态查询",
             positiveText = "关闭",
             negativeText = null
         )
-        dlg.setOnDismissListener {
-            webView.stopLoading()
-            webView.loadUrl("about:blank")
-            (webView.parent as? ViewGroup)?.removeView(webView)
-            webView.destroy()
-        }
-        dlg.window?.setLayout(
-            resources.displayMetrics.widthPixels - pad * 2,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
 
     /** 版本信息 */

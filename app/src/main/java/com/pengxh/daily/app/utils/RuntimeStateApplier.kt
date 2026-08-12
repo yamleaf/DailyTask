@@ -7,6 +7,7 @@ import android.util.Log
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.DailyTaskApplication
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.yample.mqttprotocol.MqttPacket
@@ -118,7 +119,9 @@ object RuntimeStateApplier {
                     val app = DailyTaskApplication.get()
                     if (v) {
                         try {
-                            if (isMqttConfigValid(app)) app.startForegroundService(Intent(app, MqttAgentService::class.java))
+                            if (!KeepAliveReceiver.isPaused() && isMqttConfigValid(app)) {
+                                app.startForegroundService(Intent(app, MqttAgentService::class.java))
+                            }
                         } catch (e: Exception) {
                             // Android 15+ 后台启动前台服务受限时调用点也会抛异常，捕获防止中断远端配置应用
                             LogFileManager.error("远程开启 MQTT 服务拉起失败：${e.message}")

@@ -57,8 +57,8 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     private val dailyTaskAdapter by lazy {
         DailyTaskAdapter(taskBeans).apply {
             setOnItemClickListener(object : DailyTaskAdapter.OnItemClickListener {
-                override fun onItemClick(position: Int) = itemClick(position)
-                override fun onItemLongClick(position: Int) = itemLongClick(position)
+                override fun onItemClick(item: DailyTaskBean) = itemClick(item)
+                override fun onItemLongClick(item: DailyTaskBean) = itemLongClick(item)
             })
         }
     }
@@ -80,6 +80,10 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                     }
                     binding.toolbar.title = "${parts[2]}（$dayType）"
                     binding.toolbar.subtitle = "${parts[0]} ${parts[1]}"
+                }
+                // 调度中：过点后自动隐藏「实际」小字
+                if (TaskScheduler.isRunning()) {
+                    dailyTaskAdapter.refreshActualHintVisibility()
                 }
             }
             mainHandler.postDelayed(this, 1000L)
@@ -138,11 +142,12 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                 binding.repeatTimeView.text = it
             }
         }
-        // 任务运行状态 → 启动/停止按钮与提示
+        // 任务运行状态 → 启动/停止按钮与提示；实际时间小字仅调度中展示
         lifecycleScope.launch {
             TaskScheduler.isRunning.collectLatest { running ->
                 if (!running) {
                     dailyTaskAdapter.updateCurrentTaskState(-1)
+                    dailyTaskAdapter.setActualHintState(false, emptyMap())
                     binding.tipsView.text = ""
                     binding.executeTaskButton.setIconResource(R.mipmap.ic_start)
                     binding.executeTaskButton.setIconTintResource(R.color.ios_green)
@@ -151,6 +156,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                     binding.executeTaskButton.setIconResource(R.mipmap.ic_stop)
                     binding.executeTaskButton.setIconTintResource(R.color.red)
                     binding.executeTaskButton.text = "停止"
+                    refreshActualHintsFromSchedule()
                 }
             }
         }
@@ -161,16 +167,19 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                     is com.pengxh.daily.app.utils.TipsEvent.Skip -> {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
                         binding.tipsView.text = "本次任务已跳过，等待下一次"
+                        refreshActualHintsFromSchedule()
                     }
 
                     is com.pengxh.daily.app.utils.TipsEvent.Executing -> {
                         binding.tipsView.text =
                             "正在执行第 ${event.index}/${event.total} 个任务（${event.actualTime}）"
+                        refreshActualHintsFromSchedule()
                     }
 
                     is com.pengxh.daily.app.utils.TipsEvent.Completed -> {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
                         binding.tipsView.text = "今日任务已全部执行完毕，等待下次任务"
+                        dailyTaskAdapter.setActualHintState(true, emptyMap())
                     }
                 }
             }
@@ -246,18 +255,19 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /** 点击任务：修改任务时间 */
-    private fun itemClick(position: Int) {
+    private fun itemClick(item: DailyTaskBean) {
         if (TaskScheduler.isRunning()) {
             "任务进行中，无法修改".show(ctx)
             return
         }
-        val item = taskBeans[position]
         val view = layoutInflater.inflate(R.layout.bottom_sheet_layout_select_time, null)
         val dialog = BottomSheetDialog(requireContext())
         dialog.setContentView(view)
         view.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.titleView).text = "修改任务时间"
         val timePicker = view.findViewById<TimeWheelLayout>(R.id.timePicker)
-        timePicker.setDefaultValue(item.convertToTimeEntity())
+        // 布局完成后再回填，避免 TimeWheel 尚未 measure 时 setDefaultValue 不生效
+        val defaultEntity = item.convertToTimeEntity()
+        timePicker.post { timePicker.setDefaultValue(defaultEntity) }
         view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.nameEditText).setText(item.name)
         view.findViewById<com.google.android.material.button.MaterialButton>(R.id.saveButton).setOnClickListener {
             val time = String.format(
@@ -289,7 +299,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /** 长按任务：删除确认 */
-    private fun itemLongClick(position: Int) {
+    private fun itemLongClick(item: DailyTaskBean) {
         if (TaskScheduler.isRunning()) {
             "任务进行中，无法删除".show(ctx)
             return
@@ -307,7 +317,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                 lifecycleScope.launch {
                     try {
                         withContext(Dispatchers.IO) {
-                            DatabaseWrapper.deleteTask(taskBeans[position])
+                            DatabaseWrapper.deleteTask(item)
                             taskBeans = DatabaseWrapper.loadAllTask()
                         }
                         dailyTaskAdapter.refresh(taskBeans)
@@ -372,6 +382,35 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             dailyTaskAdapter.refresh(taskBeans)
             binding.recyclerView.visibility = if (taskBeans.isEmpty()) View.GONE else View.VISIBLE
             binding.emptyView.visibility = if (taskBeans.isEmpty()) View.VISIBLE else View.GONE
+            if (TaskScheduler.isRunning()) {
+                refreshActualHintsFromSchedule()
+            }
+        }
+    }
+
+    /**
+     * 调度已启动时：用今日计划里「仍待执行」的实际时间驱动列表小字；
+     * 已过点/已执行项不放入 map，时钟滴答也会再隐藏一次。
+     */
+    private fun refreshActualHintsFromSchedule() {
+        if (!TaskScheduler.isRunning()) {
+            dailyTaskAdapter.setActualHintState(false, emptyMap())
+            return
+        }
+        lifecycleScope.launch {
+            val plans = withContext(Dispatchers.IO) {
+                TaskScheduler.loadTodayTaskPlans(usePersisted = true)
+            }
+            val now = System.currentTimeMillis()
+            val pending = plans
+                .filter { it.actualTimeMillis > now }
+                .associate { plan ->
+                    plan.task.id to DailyTaskAdapter.PendingActualHint(
+                        displayTime = plan.actualTime,
+                        millis = plan.actualTimeMillis
+                    )
+                }
+            dailyTaskAdapter.setActualHintState(true, pending)
         }
     }
 

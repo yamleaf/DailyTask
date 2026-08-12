@@ -5,19 +5,33 @@ import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.kt.lite.extensions.appendZero
 import com.pengxh.kt.lite.utils.SaveKeyValues
-import java.text.SimpleDateFormat
 import java.time.LocalDate
-import java.util.Locale
+import java.util.Calendar
+import java.util.Date
 import java.util.Random
 
 private const val MAX_SECONDS_OF_DAY = 86399 // 一天最大秒数（23:59:59）
 
 fun DailyTaskBean.convertToTimeEntity(): TimeEntity {
-    val parsed = runCatching {
-        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
-            .parse("${LocalDate.now()} ${this.time}")
-    }.getOrNull() ?: return TimeEntity.target(java.util.Date())
-    return TimeEntity.target(parsed)
+    // 直接拆 HH:mm[:ss]，避免 SimpleDateFormat 对个别格式解析失败后回落到「当前时间」
+    val parts = time.trim().split(":")
+    val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23)
+    val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59)
+    if (hour == null || minute == null) {
+        return TimeEntity.target(Date())
+    }
+    val second = parts.getOrNull(2)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+    return runCatching {
+        TimeEntity.target(hour, minute, second)
+    }.getOrElse {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, second)
+            set(Calendar.MILLISECOND, 0)
+        }
+        TimeEntity.target(cal.time)
+    }
 }
 
 fun DailyTaskBean.resolveExecutionTime(): String {

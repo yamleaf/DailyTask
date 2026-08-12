@@ -364,7 +364,7 @@ class DesktopPetController(
             windowX = when (dockSide) {
                 DockSide.LEFT -> 0
                 DockSide.RIGHT -> (sw - visiblePx).coerceAtLeast(0)
-                else -> windowX
+                DockSide.NONE -> windowX
             }
             setDockViewport(visiblePx)
         } else {
@@ -395,12 +395,10 @@ class DesktopPetController(
         val edgeXDock = when (side) {
             DockSide.LEFT -> 0
             DockSide.RIGHT -> (sw - visiblePx).coerceAtLeast(0)
-            else -> windowX
         }
         val dockAsset = when (side) {
             DockSide.LEFT -> PetConfig.ASSET_BLINK_DOCK_LEFT
             DockSide.RIGHT -> PetConfig.ASSET_BLINK_DOCK_RIGHT
-            else -> PetConfig.ASSET_BLINK
         }
 
         cancelRandomAction()
@@ -445,7 +443,6 @@ class DesktopPetController(
                         val right = startRight + (sw - startRight) * f
                         (right - w).toInt()
                     }
-                    else -> edgeXDock
                 }
                 windowY = (startY + (targetY - startY) * f).toInt()
                 viewportWidthPx = w
@@ -673,7 +670,7 @@ class DesktopPetController(
                 b.width() to b.height()
             } else {
                 @Suppress("DEPRECATION")
-                val dm = DisplayMetrics().also { context.display?.getRealMetrics(it) }
+                val dm = DisplayMetrics().also { context.display.getRealMetrics(it) }
                 (if (dm.widthPixels > 0) dm.widthPixels else (PetConfig.FALLBACK_SCREEN_WIDTH_DP * density).toInt()) to
                         (if (dm.heightPixels > 0) dm.heightPixels else (PetConfig.FALLBACK_SCREEN_HEIGHT_DP * density).toInt())
             }

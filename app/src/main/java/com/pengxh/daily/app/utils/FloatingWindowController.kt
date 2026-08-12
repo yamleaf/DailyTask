@@ -8,6 +8,9 @@ import kotlinx.coroutines.flow.asSharedFlow
  */
 object FloatingWindowController {
 
+    /** 预截图前等待末段渐隐动画推进的时间（与悬浮窗 ~920ms 步进动画对齐，取前半段） */
+    const val SCREENSHOT_FADE_YIELD_MS = 380L
+
     private val _timeTick = MutableSharedFlow<Int>(extraBufferCapacity = 2)
     val timeTick = _timeTick.asSharedFlow()
 
@@ -21,15 +24,29 @@ object FloatingWindowController {
     private val _floatSessionActive = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 1)
     val floatSessionActive = _floatSessionActive.asSharedFlow()
 
+    /** 截屏期间临时隐藏整窗（倒计时/贴边宠物），避免 TYPE_APPLICATION_OVERLAY 被截进图 */
+    private val _hiddenForScreenshot = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 1)
+    val hiddenForScreenshot = _hiddenForScreenshot.asSharedFlow()
+
+    /** 同步可读：是否处于打开目标 App 的倒计时会话（供伪息屏门禁等同步查询） */
+    @Volatile
+    var isSessionActive: Boolean = false
+        private set
+
+    @Volatile
+    private var screenshotHideLatch = false
+
     fun updateTime(tick: Int) {
         _timeTick.tryEmit(tick)
     }
 
     fun startFloatSession() {
+        isSessionActive = true
         _floatSessionActive.tryEmit(true)
     }
 
     fun stopFloatSession() {
+        isSessionActive = false
         _floatSessionActive.tryEmit(false)
     }
 
@@ -43,5 +60,18 @@ object FloatingWindowController {
 
     fun hide() {
         _visibility.tryEmit(false)
+    }
+
+    /** 截图前临时隐藏悬浮窗（含贴边宠物）；与蒙层 hideForScreenshot 对称 */
+    fun hideForScreenshot() {
+        screenshotHideLatch = true
+        _hiddenForScreenshot.tryEmit(true)
+    }
+
+    /** 截图结束后恢复；仅当本次确实因截屏藏过才恢复 */
+    fun restoreAfterScreenshot() {
+        if (!screenshotHideLatch) return
+        screenshotHideLatch = false
+        _hiddenForScreenshot.tryEmit(false)
     }
 }

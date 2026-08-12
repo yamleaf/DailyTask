@@ -66,24 +66,25 @@ fun Context.isApplicationExist(packageName: String): Boolean {
 }
 
 /**
- * 打开指定包名的 apk，之后执行回调
+ * 打开指定包名的 apk，之后执行回调。
  *
  * @param onOpened 目标 App 成功打开后执行的回调（如启动超时计时器）
+ * @return true 表示已成功发出启动 Intent；false 表示失败
  */
-fun Context.openApplication(onOpened: (() -> Unit)? = null) {
+fun Context.openApplication(onOpened: (() -> Unit)? = null): Boolean {
     val targetApp = Constant.getTargetApp()
     Log.d("Ex-Context", "openApplication: $targetApp")
     if (!isApplicationExist(targetApp)) {
         "未安装指定的目标软件，无法执行任务".show(this)
-        TaskScheduler.requestStopDueToError("未安装指定的目标软件，无法执行任务")
-        return
+        // 仅打断正在跑的定时调度；远程打卡/截屏失败不应 stop 日程
+        if (TaskScheduler.isRunning()) {
+            TaskScheduler.requestStopDueToError("未安装指定的目标软件，无法执行任务")
+        }
+        return false
     }
 
     // 后台启动限制（Android 10+ / MIUI 后台弹出界面）：从后台直接启动目标 App 可能被系统拦截。
-    // 需在系统权限页为 DailyTask 开启「后台弹出界面」/「后台启动其它应用」后方可正常拉起。
-    // 注：曾尝试「预拉起 MainActivity 获取可见窗口豁免」方案，但 MIUI 的 DeviceGuard 连 MainActivity
-    // 自身的后台启动都会拦截，豁免无效，且会引入界面闪现与延迟，故回退为直接启动。
-    fun startTarget() {
+    fun startTarget(): Boolean {
         val intent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -94,28 +95,31 @@ fun Context.openApplication(onOpened: (() -> Unit)? = null) {
         } else {
             packageManager.queryIntentActivities(intent, 0)
         }
-        if (activities.isNotEmpty()) {
-            val info = activities.first()
-            intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
-            startActivity(intent)
-            // 被控端主动跳到目标 App：开启悬浮窗倒计时会话（统一收口，所有跳转自动覆盖，无需逐个调用方接入）
-            FloatingWindowController.startFloatSession()
-            onOpened?.invoke()
-        } else {
-            TaskScheduler.requestStopDueToError("未找到目标应用的 Launcher Activity，包名：$targetApp")
+        if (activities.isEmpty()) {
+            if (TaskScheduler.isRunning()) {
+                TaskScheduler.requestStopDueToError("未找到目标应用的 Launcher Activity，包名：$targetApp")
+            }
+            return false
         }
+        val info = activities.first()
+        intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+        startActivity(intent)
+        FloatingWindowController.startFloatSession()
+        onOpened?.invoke()
+        return true
     }
 
     if (isAppInForeground()) {
-        startTarget()
-        return
+        return startTarget()
     }
-    // 后台：直接启动目标 App（需已授权「后台弹出界面」）
-    try {
+    return try {
         startTarget()
     } catch (e: Exception) {
         LogFileManager.error("openApplication 后台启动目标 App 失败: ${e.message}")
-        TaskScheduler.requestStopDueToError("启动目标 App 失败，请检查「后台弹出界面」权限: ${e.message}")
+        if (TaskScheduler.isRunning()) {
+            TaskScheduler.requestStopDueToError("启动目标 App 失败，请检查「后台弹出界面」权限: ${e.message}")
+        }
+        false
     }
 }
 

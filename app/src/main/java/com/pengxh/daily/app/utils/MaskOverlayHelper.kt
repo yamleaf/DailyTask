@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 
+import com.pengxh.daily.app.extensions.LegacyWakeLockFlags
 import com.pengxh.daily.app.extensions.acquireWakeLock
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import android.provider.Settings
@@ -72,9 +73,9 @@ object MaskOverlayHelper {
     private fun acquireKeepAwake(context: Context) {
         if (keepAwakeWakeLock?.isHeld == true) return
         keepAwakeWakeLock = context.acquireWakeLock(
-            PowerManager.SCREEN_DIM_WAKE_LOCK,
+            LegacyWakeLockFlags.SCREEN_DIM,
             "DailyTask:MaskPseudo",
-            extraFlags = PowerManager.ACQUIRE_CAUSES_WAKEUP
+            extraFlags = LegacyWakeLockFlags.CAUSES_WAKEUP
         )
         if (keepAwakeWakeLock != null) {
             LogFileManager.writeLog("伪息屏：已持有 SCREEN_DIM_WAKE_LOCK（微亮不锁屏）")

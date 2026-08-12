@@ -66,6 +66,13 @@ class NotificationMonitorService : NotificationListenerService() {
 
         private var lastSuccessWriteMs = 0L
 
+        /** 遥控截屏会话结束时是否需恢复伪息屏 / 打卡保活 */
+        @Volatile
+        var pendingScreenshotMaskRestore = false
+
+        @Volatile
+        var pendingScreenshotKeepAwakeRelease = false
+
         /**
          * 发送事件
          */
@@ -144,8 +151,13 @@ class NotificationMonitorService : NotificationListenerService() {
             )
         }
         // 「暂停使用」开启：进程可能因系统绑定通知监听而存活，但不得执行任何远程指令 /
-        // 拉起 MQTT / 打卡。仅保留通知记录与转发静默跳过。暂停时不做任何动作。
-        val paused = KeepAliveReceiver.isPaused()
+        // 打卡结果邮件 / 通知转移。仅保留目标通知入库。
+        if (KeepAliveReceiver.isPaused()) {
+            if (!notice.isNullOrBlank()) {
+                saveTargetNotice(pkg, Constant.getTargetApp(), title, notice)
+            }
+            return
+        }
 
         if (notice.isNullOrBlank()) {
             // 聚合成空不代表没有 EXTRA_TEXT，息屏场景下 EXTRA_TEXT 可能独立存在
@@ -207,7 +219,10 @@ class NotificationMonitorService : NotificationListenerService() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         extras.getParcelableArray(Notification.EXTRA_MESSAGES, Bundle::class.java)
                     } else {
-                        extras.getParcelableArray(Notification.EXTRA_MESSAGES) as? Array<Bundle>
+                        @Suppress("DEPRECATION")
+                        extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+                            ?.mapNotNull { it as? Bundle }
+                            ?.toTypedArray()
                     }
                 messages?.let {
                     Notification.MessagingStyle.Message.getMessagesFromBundleArray(it)
@@ -502,7 +517,7 @@ class NotificationMonitorService : NotificationListenerService() {
             )
         }
         try {
-            openApplication {
+            val opened = openApplication {
                 launchOrWarn("远程打卡倒计时") {
                     val timeout = SaveKeyValues.loadInt(
                         Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
@@ -524,22 +539,27 @@ class NotificationMonitorService : NotificationListenerService() {
                     // 无障碍文本反馈模式：开启文本检测
                     if (resultSource == 2 && feedbackMode == 1) {
                         AutoProjectionAccessibilityService.setTextDetectionEnabled(true)
+                    } else if (resultSource == 2) {
+                        LogFileManager.action("远程打卡：无障碍截屏反馈（不启用文本识别）")
                     }
                     val target = SystemClock.elapsedRealtime() + timeout * 1000L
                     var hasCaptured = false
                     var captureDeferred: CompletableDeferred<String?>? = null
                     try {
                         while (isActive) {
+                            if (detectedSuccess) break
                             val remaining = target - SystemClock.elapsedRealtime()
                             if (remaining <= 0) break
                             val tick = (remaining / 1000).toInt()
                             FloatingWindowController.updateTime(tick)
 
-                            // 最后 5 秒兜底截屏（只触发一次）
-                            if (tick <= 5 && !hasCaptured) {
+                            // 最后 5 秒兜底截屏（只触发一次）；文本反馈同样保留末段截屏
+                            if (tick <= 5 && !hasCaptured && !detectedSuccess) {
                                 if (resultSource == 1) {
                                     // 截屏模式：MediaProjection
                                     hasCaptured = true
+                                    // 等悬浮窗把卡片压到低透明后再截，避免同帧仍拍到不透明遮挡
+                                    delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
                                     captureDeferred = CaptureImageService.requestCaptureScreen()
                                 } else if (resultSource == 2 && (
                                     feedbackMode == 0
@@ -551,6 +571,7 @@ class NotificationMonitorService : NotificationListenerService() {
                                     // · 文本反馈(feedbackMode=1) 有截屏能力(Android14+)时同样兜底截屏；
                                     //   无截屏能力(版本过低)则不预截屏，交由后续 tryFallbackScreenshot 失败 → 文字提示
                                     hasCaptured = true
+                                    delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
                                     val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
                                     captureDeferred = a11yDeferred
                                         ?: CompletableDeferred<String?>().apply { complete("") }
@@ -560,30 +581,35 @@ class NotificationMonitorService : NotificationListenerService() {
                             delay(minOf(1000L, remaining).coerceAtLeast(1))
                         }
                         FloatingWindowController.stopFloatSession()
-                        // 倒计时结束：关闭文本检测，先取截图（目标 App 还在前台时），
-                        // 然后再返回主页。避免回到桌面/本 App 后再截图截到桌面。
+                        // 倒计时结束 / 文本命中提前结束：关闭文本检测；未成功时再取截图
                         AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
-                        LogFileManager.writeLog("远程打卡倒计时结束，目标 App 仍在台，准备截图")
-
-                        // 停止成功事件监听（结果判定已读取）
                         detectionJob.cancel()
 
-                        // 获取截图：优先用倒计时最后 5 秒已发起的预截图；
-                        // 若失败且未检测到成功，则按权限优先级兜底再截一次。
                         var imagePath = ""
-                        if (hasCaptured && captureDeferred != null) {
-                            imagePath = runCatching {
-                                withTimeout(5000) { captureDeferred!!.await() ?: "" }
-                            }.getOrNull() ?: ""
-                        }
-                        if (imagePath.isEmpty() && !detectedSuccess) {
-                            imagePath = runCatching {
-                                withTimeout(5000) { TaskScheduler.tryFallbackScreenshot() }
-                            }.getOrNull() ?: ""
+                        if (!detectedSuccess) {
+                            LogFileManager.writeLog("远程打卡倒计时结束，目标 App 仍在台，准备截图")
+                            val deferred = captureDeferred
+                            if (hasCaptured && deferred != null) {
+                                imagePath = runCatching {
+                                    withTimeout(5000) { deferred.await() ?: "" }
+                                }.getOrNull() ?: ""
+                            }
+                            if (imagePath.isEmpty()) {
+                                imagePath = runCatching {
+                                    withTimeout(5000) { TaskScheduler.tryFallbackScreenshot() }
+                                }.getOrNull() ?: ""
+                            }
+                        } else {
+                            // 文本已命中：取消未完成的末段预截图等待，避免多余落盘/日志
+                            captureDeferred?.cancel()
                         }
 
+                        // 截屏临时隐藏结束后先恢复悬浮窗（贴边宠物），再回桌面/本 App，
+                        // 否则安卓 15+ 缺少可见悬浮窗豁免，可能停在目标 App。
+                        FloatingWindowController.restoreAfterScreenshot()
+
                         // 现在返回主页 / 本 App
-                        LogFileManager.writeLog("远程打卡截图已获取，返回主页")
+                        LogFileManager.writeLog("远程打卡结束，返回主页")
                         withContext(Dispatchers.Main) {
                             try {
                                 startActivity(Intent(Intent.ACTION_MAIN).apply {
@@ -600,7 +626,7 @@ class NotificationMonitorService : NotificationListenerService() {
                         // 统一发送远程打卡结果：无论何种模式都必须有反馈，避免“什么都没有”。
                         if (detectedSuccess) {
                             // 文本检测命中成功：无障碍服务已直接发过“打卡结果通知”，不重复
-                            LogFileManager.writeLog("远程打卡结果：已检测到成功，无需重复发送")
+                            LogFileManager.action("远程打卡结果：文本识别已成功")
                         } else {
                             if (imagePath.isNotEmpty()) {
                                 MessageDispatcher.sendAttachmentMessage(
@@ -639,6 +665,21 @@ class NotificationMonitorService : NotificationListenerService() {
                         if (keptAwakeForPunch) {
                             IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                         }
+                    }
+                }
+            }
+            if (!opened) {
+                LogFileManager.error("远程打卡：目标 App 未能启动，恢复蒙层/保活")
+                MessageDispatcher.sendMessage(
+                    "远程打卡通知",
+                    StatusReporter.buildTimeoutAlertHtml("远程打卡失败", "目标应用未能启动，请检查是否已安装及后台弹出权限"),
+                    force = true,
+                    appendMeta = false
+                )
+                if (maskWasShowing || keptAwakeForPunch) {
+                    Handler(Looper.getMainLooper()).post {
+                        if (maskWasShowing) MaskOverlayHelper.show(this@NotificationMonitorService)
+                        IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                     }
                 }
             }
@@ -699,6 +740,10 @@ class NotificationMonitorService : NotificationListenerService() {
 
     /** 截取目标应用画面（对应 DT#截屏 / 控制端动作 screenshot），经消息渠道回传 */
     fun performScreenshot() {
+        if (KeepAliveReceiver.isPaused()) {
+            LogFileManager.writeLog("暂停使用中，忽略截屏指令")
+            return
+        }
         LogFileManager.action("收到截屏指令")
         val resultSource = SaveKeyValues.loadInt(
             Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
@@ -712,9 +757,7 @@ class NotificationMonitorService : NotificationListenerService() {
             2 -> a11yScreenshotReady                                // 无障碍模式：有截屏能力即兜底
             else -> false
         }
-        if (canProceed) {
-            openApplication { emitMonitorEvent(MonitorEvent.AppOpenedForScreenshot) }
-        } else {
+        if (!canProceed) {
             val failMsg = when (resultSource) {
                 0 -> "当前为通知监听模式，不支持截屏"
                 2 -> "无障碍截屏不可用（需 Android 14+ 且已开启无障碍服务），将以文本反馈为主"
@@ -723,6 +766,27 @@ class NotificationMonitorService : NotificationListenerService() {
             MessageDispatcher.sendMessage(
                 "截屏状态通知",
                 StatusReporter.buildScreenshotResultHtml(false, failMsg),
+                appendMeta = false
+            )
+            return
+        }
+        val keptAwakeForShot = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(this)
+        val maskWasShowing = MaskOverlayHelper.isShowing()
+        if (maskWasShowing) {
+            MaskOverlayHelper.hide(this, MaskOverlayHelper.HideReason.TEMP_PUNCH)
+        }
+        // 供 MainActivity 截屏会话 finally 恢复
+        pendingScreenshotMaskRestore = maskWasShowing
+        pendingScreenshotKeepAwakeRelease = keptAwakeForShot
+        val opened = openApplication { emitMonitorEvent(MonitorEvent.AppOpenedForScreenshot) }
+        if (!opened) {
+            pendingScreenshotMaskRestore = false
+            pendingScreenshotKeepAwakeRelease = false
+            if (maskWasShowing) MaskOverlayHelper.show(this)
+            if (keptAwakeForShot) IdlePseudoMaskController.releaseKeepAwakeForPunch(this)
+            MessageDispatcher.sendMessage(
+                "截屏状态通知",
+                StatusReporter.buildScreenshotResultHtml(false, "目标应用未能启动"),
                 appendMeta = false
             )
         }

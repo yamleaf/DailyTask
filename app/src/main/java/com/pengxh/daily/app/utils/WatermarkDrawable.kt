@@ -55,6 +55,7 @@ class WatermarkDrawable(private val context: Context, private val watermark: Str
     override fun setAlpha(alpha: Int) {
     }
 
+    @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int {
         return PixelFormat.UNKNOWN
     }

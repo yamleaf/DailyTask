@@ -23,6 +23,7 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
@@ -318,13 +319,17 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 val startTime = System.currentTimeMillis()
                 Log.d(kTag, "================== 开始截屏 ==================")
 
-                // 伪息屏蒙层在显示时，临时移除
+                // 伪息屏蒙层 / 悬浮窗（倒计时·贴边宠物）临时隐藏，避免进截图
                 val maskShowing = MaskOverlayHelper.isShowing()
+                FloatingWindowController.hideForScreenshot()
                 if (maskShowing) {
                     MaskOverlayHelper.hideForScreenshot(this@CaptureImageService)
                     delay(400)
+                } else {
+                    delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
                 }
 
+                try {
                 val image = withTimeoutOrNull(1000L) {
                     Log.d(kTag, "进入等待......")
                     waitForImageAvailable(reader)
@@ -333,9 +338,6 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 val elapsed = System.currentTimeMillis() - startTime
                 if (image == null) {
                     Log.e(kTag, "获取图像失败: acquireNextImage返回null, 总耗时: ${elapsed}ms")
-                    if (maskShowing) {
-                        MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
-                    }
                     return@launch
                 }
                 Log.d(kTag, "图像获取成功, 耗时: ${elapsed}ms")
@@ -363,10 +365,12 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                     if (captureRetryCount < 2) {
                         captureRetryCount++
                         Log.w(kTag, "检测到黑色画面，第${captureRetryCount}次重试")
+                        delay(1000)
+                        // 重试前先恢复，再由递归 captureScreen 重新 hide
                         if (maskShowing) {
                             MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
                         }
-                        delay(1000)
+                        FloatingWindowController.restoreAfterScreenshot()
                         captureScreen()
                         return@launch
                     } else {
@@ -381,9 +385,11 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 finalBitmap.saveImage(imagePath)
                 LogFileManager.action("截屏成功: $imagePath")
                 emitCaptureResult(imagePath)
-
-                if (maskShowing) {
-                    MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
+                } finally {
+                    if (maskShowing) {
+                        MaskOverlayHelper.restoreAfterScreenshot(this@CaptureImageService)
+                    }
+                    FloatingWindowController.restoreAfterScreenshot()
                 }
             } catch (_: RemoteException) {
                 Log.w(kTag, "RemoteException during capture")

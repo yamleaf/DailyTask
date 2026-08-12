@@ -65,6 +65,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 import java.util.Date
 
 import com.pengxh.daily.app.extensions.format
@@ -229,7 +230,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 订阅超时回主页信号（宿主负责，与具体 Tab 无关）
         lifecycleScope.launch {
             TaskScheduler.returnToApp.collectLatest {
-                backToMainActivity()
+                // 与打卡成功一致：走「回桌面再拉回本 App」，避免只停在桌面
+                backToMainActivity(true)
             }
         }
 
@@ -407,6 +409,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         return true
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         // 单 Activity 无页面栈，返回键统一最小化应用（与原「返回即退出」语义一致）
         moveTaskToBack(true)
@@ -427,6 +430,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             is MonitorEvent.ClockInSuccess -> {
                 TaskScheduler.notifyClockIn() // 通知 TaskScheduler：打卡成功，取消超时等待分支
                 MqttAgentService.pushTaskIncrement() // 打卡完成 → 增量推送控制端刷新日历/任务
+                // 末段截屏可能仍藏着悬浮窗；回跳前恢复，保证安卓 15+ 可见窗豁免
+                FloatingWindowController.restoreAfterScreenshot()
+                FloatingWindowController.stopFloatSession()
                 backToMainActivity(true)
             }
 
@@ -515,6 +521,16 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                     } finally {
                         // 遥控截屏会话结束：无论正常完成还是异常，统一收起悬浮窗倒计时
                         FloatingWindowController.stopFloatSession()
+                        val restoreMask = NotificationMonitorService.pendingScreenshotMaskRestore
+                        val releaseWake = NotificationMonitorService.pendingScreenshotKeepAwakeRelease
+                        NotificationMonitorService.pendingScreenshotMaskRestore = false
+                        NotificationMonitorService.pendingScreenshotKeepAwakeRelease = false
+                        if (restoreMask) {
+                            MaskOverlayHelper.show(this@MainActivity)
+                        }
+                        if (releaseWake) {
+                            IdlePseudoMaskController.releaseKeepAwakeForPunch(this@MainActivity)
+                        }
                     }
                 }
             }
@@ -542,11 +558,11 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             } else if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)) {
                 // 模拟点击Home键
                 startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
-                // 等桌面切换稳定后再从桌面拉起本 App，避免直接从打卡软件跳回造成界面闪烁
+                // 等桌面切换稳定后再从桌面拉起本 App，避免直接从打卡软件跳回造成界面闪烁。
+                // 注意：不可再判断 isInActivePunch()——打卡刚结束时 runningDetail 仍含「等待打卡」，
+                // 会把本次回跳误拦掉，表现为倒计时结束后停在目标 App/桌面、不回被控端。
                 mainHandler.postDelayed({
-                    if (!TaskScheduler.isInActivePunch()) {
-                        bringDailyTaskToFront()
-                    }
+                    bringDailyTaskToFront()
                 }, 800L)
             }
             return
@@ -568,13 +584,32 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             return
         }
 
+        val resetHour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
+        val nowHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        // 未到今日重置点：不抢先标记，留给精确闹钟 / TIME_TICK
+        if (nowHour < resetHour) {
+            LogFileManager.writeLog("今日尚未到重置点（${resetHour}点），跳过补重置")
+            return
+        }
+
         LogFileManager.writeLog("检测到今日尚未重置，执行重置操作")
-        SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
 
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
             && !KeepAliveReceiver.isPaused()
         ) {
-            TaskScheduler.startTask()
+            // 仅在启动成功（或已在跑）后落库日期，避免 scope 未就绪导致整日漏调度
+            if (TaskScheduler.isRunning()) {
+                SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+            } else {
+                TaskScheduler.startTask()
+                if (TaskScheduler.isRunning()) {
+                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+                } else {
+                    LogFileManager.error("补重置启动任务失败（scope 可能未就绪），不标记今日已重置")
+                }
+            }
+        } else {
+            SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
         }
     }
 
@@ -691,7 +726,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         if (ackVersion == BuildConfig.VERSION_CODE) {
             return
         }
-        UnifiedDialogKit.showSuccess(
+        UnifiedDialogKit.showConfirm(
             this,
             "使用须知",
             "本软件完全免费！仅供内部使用！严禁商用或者用作其他非法用途！\r\n" +

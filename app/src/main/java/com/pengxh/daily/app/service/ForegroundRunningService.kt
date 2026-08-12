@@ -436,8 +436,8 @@ val filter = IntentFilter().apply {
             val windowMs = 5 * 60 * 1000L // ±5 分钟
             if (now !in (warningTimeMs - windowMs)..(warningTimeMs + windowMs)) return
 
-            // 每日流程标记：用于区分「检测流程是否执行过」与「执行了但未触发」
-            val dayKey = now / 86400000
+            // 每日流程标记：用本地日历日，避免 UTC 日界（CST 08:00）导致重复发送
+            val dayKey = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(now))
             val sentKey = "battery_alert_sent_$dayKey"
             val flowKey = "battery_alert_flow_$dayKey"    // 窗口命中（流程启动）标记
             val resultKey = "battery_alert_logged_$dayKey" // 结果（触发/未触发/已发过）标记

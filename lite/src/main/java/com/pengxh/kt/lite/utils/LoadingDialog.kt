@@ -1,9 +1,15 @@
+@file:Suppress("DEPRECATION")
+
 package com.pengxh.kt.lite.utils
 
 import android.app.Activity
 import android.app.ProgressDialog
 import android.util.Log
 
+/**
+ * 全局加载框。底层仍用 ProgressDialog（API 已废弃），换 Material 实现会改视觉，
+ * 在不影响功能的前提下仅抑制 deprecation 告警。
+ */
 object LoadingDialog {
     private const val kTag = "LoadingDialog"
 

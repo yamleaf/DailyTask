@@ -16,6 +16,7 @@ private val threadLocalFormatters = ThreadLocal.withInitial { HashMap<String, Si
 
 fun Date.format(pattern: String, locale: Locale = Locale.CHINA): String {
     val cache = threadLocalFormatters.get()
-    val formatter = cache[pattern] ?: SimpleDateFormat(pattern, locale).also { cache[pattern] = it }
+        ?: HashMap<String, SimpleDateFormat>().also { threadLocalFormatters.set(it) }
+    val formatter = cache.getOrPut(pattern) { SimpleDateFormat(pattern, locale) }
     return formatter.format(this)
 }

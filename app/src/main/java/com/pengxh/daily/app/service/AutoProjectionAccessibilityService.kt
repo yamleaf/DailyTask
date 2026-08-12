@@ -17,6 +17,7 @@ import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
@@ -37,6 +38,7 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Date
 
+import com.pengxh.daily.app.extensions.LegacyWakeLockFlags
 import com.pengxh.daily.app.extensions.acquireWakeLock
 import com.pengxh.daily.app.extensions.format
 import java.util.concurrent.Executors
@@ -68,6 +70,16 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
 
         @Volatile
         private var instance: AutoProjectionAccessibilityService? = null
+
+        /** 关键字节点 dump 完成标记：命中关键字且允许 dump 时写一次后置位。
+         *  仅「运行日志」关闭→再开启时由 [resetNodeDumpFlag] 清除，才允许再 dump 一次。 */
+        @Volatile
+        private var nodeDumpDone = false
+
+        /** 重置关键字节点 dump 标记：运行日志关闭→开启时调用 */
+        fun resetNodeDumpFlag() {
+            nodeDumpDone = false
+        }
 
         /**
          * 检查无障碍服务是否已启用
@@ -108,17 +120,33 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
          * 建议在打卡任务窗口期开启，任务结束后关闭，避免误触发。
          */
         fun setTextDetectionEnabled(enabled: Boolean) {
-            instance?.apply {
-            textDetectionActive = enabled
-            textDetected = false
-            // 目标App进入前台时刻：首次扫描到目标App时记录（见 scanCurrentWindow），
-            // 此后 PUNCH_FOREGROUND_WAIT_MS 内不判定，等飞书极速打卡自触发 + 成功消息渲染完成。
-            foregroundEnterMillis = 0L
-            sawPunchButton = false
-            lastTextScanMillis = 0L
-            if (enabled) startActiveScan() else stopActiveScan()
-            Log.d(TAG, "文本检测状态: active=$enabled")
-            LogFileManager.writeLog("无障碍文本检测: active=$enabled")
+            val service = instance
+            if (service == null) {
+                if (enabled) {
+                    LogFileManager.error("无障碍文本识别开启失败：无障碍服务未连接")
+                }
+                return
+            }
+            service.apply {
+                if (!enabled && textDetectionActive) {
+                    // 本次识别窗口结束：统一落一条成功/忽略/失败，避免扫描过程刷屏
+                    finalizeTextDetectionSession()
+                }
+                textDetectionActive = enabled
+                textDetected = false
+                foregroundEnterMillis = 0L
+                sawPunchButton = false
+                lastTextScanMillis = 0L
+                if (enabled) {
+                    sessionOutcome = TextDetectOutcome.NONE
+                    sessionOutcomeDetail = null
+                    startActiveScan()
+                    // Release 仅落盘 A/E/W；文本识别启停必须用 action，否则诊断里只见截屏
+                    LogFileManager.action("无障碍文本识别已开启")
+                } else {
+                    stopActiveScan()
+                }
+                Log.d(TAG, "文本检测状态: active=$enabled")
             }
         }
 
@@ -162,6 +190,16 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     @Volatile
     private var lastForegroundPackage: String? = null
 
+    /** 本次文本识别窗口的最终结果（结束时统一记一条日志） */
+    private enum class TextDetectOutcome { NONE, IGNORED, SUCCESS }
+
+    @Volatile
+    private var sessionOutcome = TextDetectOutcome.NONE
+
+    /** 结束日志附带细节（如 keyword / 忽略原因） */
+    @Volatile
+    private var sessionOutcomeDetail: String? = null
+
     /** 上次文本扫描时间戳（节流用），避免无障碍事件高频触发反复扫描同一界面 */
     @Volatile
     private var lastTextScanMillis = 0L
@@ -172,12 +210,22 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     private var scanJob: Job? = null
 
     /** 打卡成功关键词（仅真正的成功提示，不含“上班打卡/下班打卡”等按钮文字） */
-    private val successKeywords = listOf(
+    private val builtinSuccessKeywords = listOf(
         "打卡成功",
         "已打卡",
         "打卡完成",
         "考勤成功"
     )
+
+    /** 有效成功关键词 = 内置关键字 + 用户自定义关键字（任务配置「打卡结果关键字」，逗号分隔） */
+    private val successKeywords: List<String>
+        get() {
+            val custom = SaveKeyValues.loadString(Constant.PUNCH_RESULT_KEYWORDS_KEY, "")
+                .split(",", "，")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            return builtinSuccessKeywords + custom
+        }
 
     /** 打卡按钮文字（本次会话见到过即说明确有打卡动作发生） */
     private val punchButtonMarkers = listOf("上班打卡", "下班打卡", "外出打卡")
@@ -189,6 +237,9 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        if (textDetectionActive) {
+            finalizeTextDetectionSession()
+        }
         instance = null
         textDetectionActive = false
         textDetected = false
@@ -226,10 +277,10 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
         if (!isScreenOn && powerManager != null) {
             try {
                 val wakeLock = acquireWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                    LegacyWakeLockFlags.SCREEN_BRIGHT,
                     "DailyTask:ScreenshotWakeLock",
                     10_000L,
-                    PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
+                    LegacyWakeLockFlags.CAUSES_WAKEUP or LegacyWakeLockFlags.ON_AFTER_RELEASE
                 )
                 activeWakeLock = wakeLock
             Log.d(TAG, "屏幕关闭，已请求 WakeLock 点亮")
@@ -239,12 +290,13 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 伪息屏蒙层在显示时，临时移除，否则 takeScreenshot 截到的是黑屏蒙层而非应用界面
+        // 伪息屏蒙层 / 悬浮窗临时隐藏，避免 takeScreenshot 截到黑屏或贴边宠物
+        FloatingWindowController.hideForScreenshot()
         if (maskShowing) {
             MaskOverlayHelper.hideForScreenshot(this)
         }
 
-        // 等待屏幕唤醒 + 蒙层移除 + 应用重绘，再执行 takeScreenshot
+        // 等待屏幕唤醒 + 蒙层/悬浮窗移除 + 应用重绘，再执行 takeScreenshot
         val wakeDelayMs = when {
             !isScreenOn -> 800L   // 屏幕唤醒 + 蒙层移除 + 重绘
             maskShowing -> 400L   // 蒙层移除 + 重绘
@@ -292,6 +344,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                         if (maskShowing) {
                             MaskOverlayHelper.restoreAfterScreenshot(this@AutoProjectionAccessibilityService)
                         }
+                        FloatingWindowController.restoreAfterScreenshot()
                         releaseScreenshotWakeLock()
                     }
                 }
@@ -302,6 +355,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                     if (maskShowing) {
                         MaskOverlayHelper.restoreAfterScreenshot(this@AutoProjectionAccessibilityService)
                     }
+                    FloatingWindowController.restoreAfterScreenshot()
                     releaseScreenshotWakeLock()
                 }
             })
@@ -331,7 +385,6 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 // 目标打卡App进入前台：重置5秒等待计时起点（飞书极速打卡自触发+消息渲染需要时间）
                 if (textDetectionActive && pkg == Constant.getTargetApp() && pkg != lastForegroundPackage) {
                     foregroundEnterMillis = System.currentTimeMillis()
-                    LogFileManager.writeLog("无障碍目标App进入前台，开始5秒等待：pkg=$pkg")
                 }
                 if (pkg != lastForegroundPackage) {
                     lastForegroundPackage = pkg
@@ -390,13 +443,10 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             // 避免飞书极速打卡尚未自触发、成功消息尚未渲染时扫到历史消息抢答。
             if (foregroundEnterMillis == 0L) {
                 foregroundEnterMillis = now
-                LogFileManager.writeLog("无障碍首次观察到目标App，开始${PUNCH_FOREGROUND_WAIT_MS}ms等待")
             }
             if (now - foregroundEnterMillis < PUNCH_FOREGROUND_WAIT_MS) {
                 return
             }
-
-            LogFileManager.writeLog("无障碍读取文本：package=$packageName, text=${text.take(120)}")
 
             // 记录本次会话是否见到打卡按钮（用于“已打卡”状态变化判定）
             if (punchButtonMarkers.any { text.contains(it) }) {
@@ -414,6 +464,13 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
                 val keywordIndex = successKeywords.indexOfFirst { text.contains(it) }
                 if (keywordIndex < 0) return
                 successKeywords[keywordIndex] to text.indexOf(successKeywords[keywordIndex])
+            }
+
+            // 命中关键字：若 dump 标记允许，则 dump 关键字附近节点树（父/兄弟/自身/子），并置位；
+            // 仅「运行日志」关闭→再开启后才允许再 dump 一次。
+            if (!nodeDumpDone) {
+                dumpKeywordNeighborhood(root, matchedKeyword, packageName)
+                nodeDumpDone = true
             }
 
             // 时间戳优先取自命中节点的「兄弟节点」（飞书把 08:38 与「上班极速打卡成功」
@@ -437,14 +494,21 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
             if (accepted) {
                 textDetected = true
                 val diffMs = candidateMillis?.let { kotlin.math.abs(now - it) } ?: -1L
-                LogFileManager.action("无障碍检测到打卡成功（keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，diff=${diffMs}ms，groupIsToday=$groupIsToday）")
+                sessionOutcome = TextDetectOutcome.SUCCESS
+                sessionOutcomeDetail =
+                    "keyword=$matchedKeyword，candidateMillis=${candidateMillis ?: now}，diff=${diffMs}ms，groupIsToday=$groupIsToday"
                 val snippet = extractSnippet(text, matchedKeyword)
                 handleTextDetected(snippet, matchedKeyword, packageName, candidateMillis)
             } else {
-                // 命中成功词但被拒（历史消息/时间不在 ±窗口内）：正常路径，仅记一行便于核对。
-                LogFileManager.writeLog("无障碍忽略成功词（历史/非本次）：keyword=$matchedKeyword，candidateMillis=$candidateMillis，diff=${candidateMillis?.let { kotlin.math.abs(now - it) } ?: -1}ms，groupIsToday=$groupIsToday")
+                // 命中成功词但被拒：不在扫描循环里刷日志，记入会话结果，结束时统一写一条「忽略」
+                if (sessionOutcome != TextDetectOutcome.SUCCESS) {
+                    sessionOutcome = TextDetectOutcome.IGNORED
+                    sessionOutcomeDetail =
+                        "keyword=$matchedKeyword，candidateMillis=$candidateMillis，diff=${candidateMillis?.let { kotlin.math.abs(now - it) } ?: -1}ms，groupIsToday=$groupIsToday"
+                }
             }
         } finally {
+            @Suppress("DEPRECATION")
             root.recycle()
         }
     }
@@ -467,6 +531,71 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
     private fun stopActiveScan() {
         scanJob?.cancel()
         scanJob = null
+    }
+
+    /** 文本识别窗口关闭时统一记一条结果，避免扫描过程中反复打日志。 */
+    private fun finalizeTextDetectionSession() {
+        val label = when (sessionOutcome) {
+            TextDetectOutcome.SUCCESS -> "成功"
+            TextDetectOutcome.IGNORED -> "忽略"
+            TextDetectOutcome.NONE -> "失败"
+        }
+        val detail = sessionOutcomeDetail?.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()
+        LogFileManager.action("无障碍文本识别结束：$label$detail")
+        sessionOutcome = TextDetectOutcome.NONE
+        sessionOutcomeDetail = null
+    }
+
+    /**
+     * 关键字命中节点邻域 dump：自身 / 父 / 兄弟 / 子（及祖父摘要）。
+     * 仅在 [nodeDumpDone]==false 时调用一次；调用方负责置位。
+     */
+    private fun dumpKeywordNeighborhood(
+        root: AccessibilityNodeInfo,
+        keyword: String,
+        packageName: String
+    ) {
+        val nodes = runCatching { root.findAccessibilityNodeInfosByText(keyword) }.getOrNull().orEmpty()
+        if (nodes.isEmpty()) {
+            LogFileManager.action(
+                "无障碍关键字节点dump：pkg=$packageName，keyword=$keyword，未找到节点（仅定向文本命中）"
+            )
+            return
+        }
+        val sb = StringBuilder()
+        sb.append("无障碍关键字节点dump：pkg=$packageName，keyword=$keyword，命中=${nodes.size}")
+        nodes.take(3).forEachIndexed { idx, node ->
+            sb.append("\n--- hit#$idx ---")
+            sb.append("\n[自身] ").append(formatNodeBrief(node))
+            val parent = runCatching { node.parent }.getOrNull()
+            if (parent != null) {
+                sb.append("\n[父] ").append(formatNodeBrief(parent))
+                val selfBounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+                for (i in 0 until parent.childCount.coerceAtMost(12)) {
+                    val sib = runCatching { parent.getChild(i) }.getOrNull() ?: continue
+                    val sibBounds = android.graphics.Rect().also { sib.getBoundsInScreen(it) }
+                    val mark = if (sibBounds == selfBounds) "*" else ""
+                    sb.append("\n[兄弟$i$mark] ").append(formatNodeBrief(sib))
+                }
+                runCatching { parent.parent }.getOrNull()?.let {
+                    sb.append("\n[祖父] ").append(formatNodeBrief(it))
+                }
+            }
+            for (i in 0 until node.childCount.coerceAtMost(8)) {
+                val child = runCatching { node.getChild(i) }.getOrNull() ?: continue
+                sb.append("\n[子$i] ").append(formatNodeBrief(child))
+            }
+        }
+        LogFileManager.action(sb.toString())
+    }
+
+    private fun formatNodeBrief(node: AccessibilityNodeInfo): String {
+        val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+        val text = node.text?.toString()?.replace('\n', ' ')?.take(80).orEmpty()
+        val desc = node.contentDescription?.toString()?.replace('\n', ' ')?.take(60).orEmpty()
+        return "class=${node.className} id=${node.viewIdResourceName ?: "-"} " +
+            "text='$text' desc='$desc' bounds=$bounds " +
+            "vis=${node.isVisibleToUser} click=${node.isClickable}"
     }
 
     /**
@@ -539,6 +668,7 @@ class AutoProjectionAccessibilityService : AccessibilityService() {
 
         if (feedbackMode == 1) {
             // 文本反馈：直接发文本
+            LogFileManager.action("无障碍文本识别命中：$keyword（$appName）")
             MessageDispatcher.sendMessage(
                 messageTitle,
                 StatusReporter.buildClockInTextResultHtml(snippet, keyword, appName, clockInTime = clockInTime),

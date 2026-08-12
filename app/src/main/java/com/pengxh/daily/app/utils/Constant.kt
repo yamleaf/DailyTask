@@ -42,6 +42,8 @@ object Constant {
     const val NOTIFICATION_TRANSFER_KEY = "NOTIFICATION_TRANSFER_KEY" // 通知转移：将目标打卡应用通知经现有消息渠道(企业微信/邮箱)转发到目标手机(Boolean)
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY" // 省电模式(Boolean)
     const val LOG_ENABLED_KEY = "LOG_ENABLED_KEY" // 运行时日志总开关(Boolean)，关闭后不再记录任何日志
+    /** 自定义打卡结果关键字（逗号分隔存储），识别打卡成功时与内置关键字合并匹配 */
+    const val PUNCH_RESULT_KEYWORDS_KEY = "PUNCH_RESULT_KEYWORDS_KEY"
     /** 强制伪息屏：离开 App 超过设定秒数主动盖黑屏蒙层 */
     const val FORCE_PSEUDO_MASK_KEY = "FORCE_PSEUDO_MASK_KEY" // Boolean
     /** 强制伪息屏：离开 App 多少秒后进入伪息屏（Int，秒，默认 60，范围 10~3600） */

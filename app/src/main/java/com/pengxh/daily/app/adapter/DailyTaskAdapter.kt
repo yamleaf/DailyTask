@@ -4,10 +4,12 @@ import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.view.isVisible
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.extensions.collapse
 import com.pengxh.daily.app.extensions.expand
@@ -18,13 +20,37 @@ import com.pengxh.kt.lite.extensions.convertColor
 class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
     ListAdapter<DailyTaskBean, ViewHolder>(DIFF_CALLBACK) {
 
+    /** 调度中、仍待执行的任务实际时间（过点后自动不展示） */
+    data class PendingActualHint(val displayTime: String, val millis: Long)
+
     var mPosition = -1
     private var actualTime = "--:--:--"
+    private var schedulerRunning = false
+    private var pendingActualById: Map<Int, PendingActualHint> = emptyMap()
     private var onItemClickListener: OnItemClickListener? = null
 
     init {
         // 防御性拷贝：避免外部后续修改同一 List 实例影响适配器内部状态
         submitList(ArrayList(dataBeans))
+    }
+
+    /**
+     * 更新「实际执行 HH:mm:ss」小字状态。
+     * - [running] 为 false 时全部隐藏
+     * - [pending] 仅含待执行任务；已过点/已执行的不要放进来
+     */
+    fun setActualHintState(running: Boolean, pending: Map<Int, PendingActualHint>) {
+        schedulerRunning = running
+        pendingActualById = if (running) pending else emptyMap()
+        if (itemCount > 0) {
+            notifyItemRangeChanged(0, itemCount, PAYLOAD_ACTUAL_HINT)
+        }
+    }
+
+    /** 时钟滴答：已过点的待执行项自动隐藏小字（不重建整行） */
+    fun refreshActualHintVisibility() {
+        if (!schedulerRunning || pendingActualById.isEmpty() || itemCount == 0) return
+        notifyItemRangeChanged(0, itemCount, PAYLOAD_ACTUAL_HINT)
     }
 
     fun updateCurrentTaskState(position: Int) {
@@ -52,14 +78,23 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
         return ViewHolder(itemView)
     }
 
+    override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.contains(PAYLOAD_ACTUAL_HINT)) {
+            bindActualHint(holder, getItem(position))
+            return
+        }
+        super.onBindViewHolder(holder, position, payloads)
+    }
+
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val taskBean = getItem(position)
         holder.setText(R.id.taskTimeView, taskBean.time)
         // 备注独立成行展示（无备注时隐藏，不再内联拼进时间文本）
         val name = taskBean.name.orEmpty()
-        val taskNameView = holder.getView<android.widget.TextView>(R.id.taskNameView)
+        val taskNameView = holder.getView<TextView>(R.id.taskNameView)
         taskNameView.text = name
         taskNameView.isVisible = name.isNotBlank()
+        bindActualHint(holder, taskBean)
         val arrowView = holder.getView<AppCompatImageView>(R.id.arrowView)
         val actualTimeCardView = holder.getView<LinearLayout>(R.id.actualTimeCardView)
         if (position == mPosition) {
@@ -82,13 +117,18 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
             }
         }
 
+        // 用 bindingAdapterPosition + 当前列表项，避免闭包捕获过期 position / 与 taskBeans 脱节
         holder.itemView.setOnClickListener {
-            onItemClickListener?.onItemClick(position)
+            val pos = holder.bindingAdapterPosition
+            if (pos == RecyclerView.NO_POSITION) return@setOnClickListener
+            onItemClickListener?.onItemClick(getItem(pos))
         }
 
         holder.itemView.setOnLongClickListener {
-            onItemClickListener?.onItemLongClick(position)
-            return@setOnLongClickListener true
+            val pos = holder.bindingAdapterPosition
+            if (pos == RecyclerView.NO_POSITION) return@setOnLongClickListener true
+            onItemClickListener?.onItemLongClick(getItem(pos))
+            true
         }
     }
 
@@ -98,16 +138,29 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
     }
 
     interface OnItemClickListener {
-        fun onItemClick(position: Int)
+        fun onItemClick(item: DailyTaskBean)
 
-        fun onItemLongClick(position: Int)
+        fun onItemLongClick(item: DailyTaskBean)
     }
 
     fun setOnItemClickListener(listener: OnItemClickListener) {
         this.onItemClickListener = listener
     }
 
+    private fun bindActualHint(holder: ViewHolder, taskBean: DailyTaskBean) {
+        val actualHintView = holder.getView<TextView>(R.id.taskActualHintView)
+        val hint = pendingActualById[taskBean.id]
+        if (schedulerRunning && hint != null && hint.millis > System.currentTimeMillis()) {
+            actualHintView.isVisible = true
+            actualHintView.text = "实际执行  ${hint.displayTime}"
+        } else {
+            actualHintView.isVisible = false
+        }
+    }
+
     companion object {
+        private const val PAYLOAD_ACTUAL_HINT = "actual_hint"
+
         val DIFF_CALLBACK = object : DiffUtil.ItemCallback<DailyTaskBean>() {
             override fun areItemsTheSame(old: DailyTaskBean, new: DailyTaskBean): Boolean {
                 // 以主键 id 作为稳定标识，决定 item 是否同一对象（决定复用/动画）

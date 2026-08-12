@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.pengxh.kt.lite.extensions
 
 import android.content.Context

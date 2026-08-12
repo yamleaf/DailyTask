@@ -193,8 +193,10 @@ object BatteryPredictor {
         // 此处放宽到 warningTimeMs+5min，避免丢弃 ±窗口后半段导致仅在 19:55~20:00 触发）
         val nowBeforeWarning = now <= warningTimeMs + 5 * 60 * 1000L
 
-        // 检查是否已预警过（每日一次）
-        val todayKey = "battery_alert_sent_${now / 86400000}"
+        // 检查是否已预警过（每日一次，本地日历日）
+        val dayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date(now))
+        val todayKey = "battery_alert_sent_$dayKey"
         val alreadySent = SaveKeyValues.loadBoolean(todayKey, false)
 
         val shouldAlert = targetInDangerZone && nowBeforeWarning && !alreadySent
@@ -217,7 +219,9 @@ object BatteryPredictor {
      * 标记今日预警已发送。调用者在发送预警后调用此方法。
      */
     fun markAlertSent(ctx: Context) {
-        val todayKey = "battery_alert_sent_${System.currentTimeMillis() / 86400000}"
+        val dayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        val todayKey = "battery_alert_sent_$dayKey"
         SaveKeyValues.saveBoolean(todayKey, true)
     }
 

@@ -43,6 +43,7 @@ import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.FragmentRemoteControlBinding
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.CaptureImageService
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.ConfigImportSignal
@@ -553,6 +554,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     // ═══════════════════════ MQTT 服务 ═══════════════════════
 
     private fun startMqttService() {
+        if (KeepAliveReceiver.isPaused()) return
         if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false) &&
             isMqttConfigValid() && !MqttAgentService.isRunning()
         ) {
@@ -562,6 +564,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
 
     private fun restartMqttService() {
         ctx.stopService(Intent(ctx, MqttAgentService::class.java))
+        if (KeepAliveReceiver.isPaused()) return
         if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false) && isMqttConfigValid()) {
             ctx.startForegroundService(Intent(ctx, MqttAgentService::class.java))
         }
@@ -572,6 +575,9 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         if (!enabled) {
             ctx.stopService(Intent(ctx, MqttAgentService::class.java))
             updateStatusUI(false)
+            updateHeroUI()
+        } else if (KeepAliveReceiver.isPaused()) {
+            // 暂停使用中只持久化开关，恢复暂停后再由 resumeAllServices 拉起
             updateHeroUI()
         } else {
             if (isMqttConfigValid()) {
@@ -623,7 +629,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     private fun generateAndShowQR() {
         val broker = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "")
         if (broker.isBlank()) {
-            UnifiedDialogKit.showWarning(
+            UnifiedDialogKit.showConfirm(
                 ctx,
                 "MQTT 未配置",
                 "请先设置 MQTT 服务器（可点「MQTT 配置引导」查看获取方式），再生成绑定二维码。",
@@ -638,7 +644,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             return
         }
         if (!MqttAgentService.isRunning()) {
-            UnifiedDialogKit.showWarning(
+            UnifiedDialogKit.showConfirm(
                 ctx,
                 "远程控制服务未启动",
                 "需先开启远程控制服务，控制端才能扫描二维码完成配对。是否立即开启？",
@@ -655,12 +661,14 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             return
         }
         if (MqttAgentService.isBound()) {
-            UnifiedDialogKit.showWarning(
+            UnifiedDialogKit.showConfirm(
                 ctx,
                 "设备已绑定",
                 "当前设备已与控制端配对。如需重新绑定，请先「强制解绑」再生成二维码。",
                 confirmText = "强制解绑",
                 cancelText = "我知道了",
+                danger = true,
+                icon = UnifiedDialogKit.IconType.WARNING,
                 onConfirm = { forceUnbind() }
             )
             return
@@ -910,7 +918,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     .get()
                     .build()
                 client.newCall(request).execute().use { resp ->
-                    val body = resp.body?.string().orEmpty()
+                    val body = resp.body.string()
                     if (resp.code in 200..299) {
                         val count = JSONObject(body).optJSONArray("data")?.length() ?: 0
                         withContext(Dispatchers.Main) {
@@ -982,7 +990,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     .readTimeout(10, TimeUnit.SECONDS)
                     .build()
                 client.newCall(builder.build()).execute().use { resp ->
-                    val respBody = resp.body?.string().orEmpty()
+                    val respBody = resp.body.string()
                     if (resp.code in 200..299) {
                         // 兼容两种响应形态：{"data":[...]} 对象，或 /clients/{id}/subscriptions 直接返回裸数组
                         val json = when {

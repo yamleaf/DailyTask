@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.pengxh.daily.app.utils
 
 import android.content.Context

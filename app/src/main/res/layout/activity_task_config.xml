@@ -127,6 +127,52 @@
                 android:layout_marginHorizontal="@dimen/dp_16"
                 android:background="@color/md_outlineVariant" />
 
+            <RelativeLayout
+                android:id="@+id/punchKeywordLayout"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/itemLayoutHeight"
+                android:background="@android:color/transparent"
+                android:paddingHorizontal="@dimen/dp_16">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:text="打卡结果关键字"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dp_4"
+                        android:singleLine="true"
+                        android:text="内置：打卡成功/已打卡/打卡完成/考勤成功"
+                        android:textColor="@color/md_onSurfaceVariant"
+                        android:textSize="@dimen/sp_10" />
+                </LinearLayout>
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/punchKeywordView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:gravity="center_vertical"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+            </RelativeLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/dividerLine"
+                android:layout_marginHorizontal="@dimen/dp_16"
+                android:background="@color/md_outlineVariant" />
+
             <LinearLayout
                 android:id="@+id/workdayLayout"
                 android:layout_width="match_parent"

@@ -26,9 +26,9 @@
     <string name="settings_power_save_title">节能模式</string>
     <string name="settings_power_save_tip">降低倒计时通知、内存监控和息屏蒙层动画刷新频率</string>
     <string name="settings_keep_alive_title">暂停使用</string>
-    <string name="settings_keep_alive_tip">开启后立即暂停软件所有功能，软件无法正常工作</string>
+    <string name="settings_keep_alive_tip">开启后立即停止前台/后台服务与全部闹钟；关闭后自动恢复，功能恢复正常</string>
     <string name="settings_keep_alive_confirm_title">开启暂停使用？</string>
-    <string name="settings_keep_alive_confirm_tip">开启后将暂停软件所有功能，直至关闭暂停使用开关后功能才恢复正常。</string>
+    <string name="settings_keep_alive_confirm_tip">开启后将停止前台保活、MQTT、悬浮窗、截屏服务，并取消心跳/重置/电量/MQTT 复活闹钟；通知监听与无障碍由系统托管但仍会忽略业务。关闭本开关后自动恢复全部服务。</string>
     <string name="settings_keep_alive_confirm_second_title">确认暂停使用？</string>
     <string name="settings_keep_alive_confirm_second_tip">再次确认：开启后所有前台、后台与闹钟服务将立即停止，无法打卡、无法接收远程指令、进程被杀不自动重启。\n\n此操作会彻底暂停软件，请确认不是误操作。</string>
     <string name="settings_pseudo_mask_group_title">伪息屏增强</string>
@@ -52,7 +52,7 @@
     <string name="settings_capture_test">截屏测试</string>
     <string name="settings_status_query">状态查询</string>
     <string name="settings_diagnostic">诊断日志</string>
-    <string name="settings_log_record_title">运行时日志</string>
+    <string name="settings_log_record_title">运行日志</string>
     <string name="settings_log_record_tip">关闭后将不再记录任何运行日志（含关键动作与异常）</string>
     <string name="settings_faq">常见问题</string>
     <string name="settings_current_version">当前版本</string>

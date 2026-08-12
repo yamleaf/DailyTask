@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 
+import com.pengxh.daily.app.extensions.LegacyWakeLockFlags
 import com.pengxh.daily.app.extensions.acquireWakeLock
 import android.provider.Settings
 import android.view.Gravity
@@ -236,9 +237,9 @@ object IdlePseudoMaskController {
      */
     fun keepAwakeForPunch(context: Context) {
         punchWakeLock = context.acquireWakeLock(
-            PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+            LegacyWakeLockFlags.SCREEN_BRIGHT,
             "DailyTask:PunchKeepAwake",
-            extraFlags = PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
+            extraFlags = LegacyWakeLockFlags.CAUSES_WAKEUP or LegacyWakeLockFlags.ON_AFTER_RELEASE
         )
         ensureKeepAwake(context)
         LogFileManager.writeLog("打卡期间：唤醒并保持亮屏，防止屏幕休眠")
@@ -424,10 +425,10 @@ object IdlePseudoMaskController {
     private fun wakeScreen(context: Context) {
         try {
             context.acquireWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                LegacyWakeLockFlags.SCREEN_BRIGHT,
                 "DailyTask:IdlePseudoMask",
                 WAKE_LOCK_MS,
-                PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE
+                LegacyWakeLockFlags.CAUSES_WAKEUP or LegacyWakeLockFlags.ON_AFTER_RELEASE
             )
         } catch (e: Exception) {
             LogFileManager.error("wakeScreen 失败: ${e.message}")

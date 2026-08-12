@@ -9,14 +9,18 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
+import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import java.util.Calendar
 
@@ -123,43 +127,70 @@ class KeepAliveReceiver : BroadcastReceiver() {
         fun isPaused(): Boolean = !isKeepAliveEnabled()
 
         /**
-         * 暂停所有服务：前台保活服务、MQTT 代理、悬浮窗全部停止，退出伪息屏蒙层，
-         * 取消心跳 / 每日重置 / 电量预警闹钟。进程随之可被系统正常回收，实现「彻底安静」。
-         * 由设置页「暂停使用」开关触发；不停止通知监听组件（其由系统按授权管理，暂停结束后自动重连）。
+         * 暂停所有服务：前台保活、MQTT 代理、悬浮窗、截屏服务全部停止；
+         * 停止进行中的打卡任务；退出伪息屏；取消心跳 / 每日重置 / 电量预警 / MQTT 复活闹钟。
+         * 通知监听与无障碍由系统托管，无法 stopService，但其业务入口均已 isPaused() 守卫。
+         * 由设置页「暂停使用」开关触发。
          */
         fun pauseAllServices(context: Context) {
+            val appCtx = context.applicationContext
             LogFileManager.action("暂停使用已开启：停止所有服务与闹钟")
+            // 先停任务，避免前台服务销毁时打卡协程半截残留
+            runCatching { TaskScheduler.stopTask() }
+            runCatching { FloatingWindowController.stopFloatSession() }
             runCatching {
-                context.stopService(Intent(context, ForegroundRunningService::class.java))
+                appCtx.stopService(Intent(appCtx, ForegroundRunningService::class.java))
             }
             runCatching {
-                context.stopService(Intent(context, MqttAgentService::class.java))
+                appCtx.stopService(Intent(appCtx, MqttAgentService::class.java))
             }
             runCatching {
-                context.stopService(Intent(context, FloatingWindowService::class.java))
+                appCtx.stopService(Intent(appCtx, FloatingWindowService::class.java))
+            }
+            runCatching {
+                appCtx.stopService(Intent(appCtx, CaptureImageService::class.java))
             }
             runCatching { IdlePseudoMaskController.cancel() }
-            runCatching { MaskOverlayHelper.hide(context) }
-            cancel(context)
-            cancelResetAlarm(context)
-            cancelBatteryAlert(context)
+            // SYNC：卸蒙层但不拉前台，避免暂停瞬间抢回控制界面
+            runCatching {
+                MaskOverlayHelper.hide(appCtx, MaskOverlayHelper.HideReason.SYNC)
+            }
+            cancel(appCtx)
+            cancelResetAlarm(appCtx)
+            cancelBatteryAlert(appCtx)
+            // 即使 MQTT 服务已销毁，也取消可能残留的复活 PendingIntent
+            runCatching { MqttAgentService.cancelResurrectAlarms(appCtx) }
         }
 
         /**
-         * 恢复所有服务：重新拉起前台保活服务（其内部会重建心跳 / 每日重置 / 电量预警闹钟
-         * 并依开关拉起 MQTT 代理），并恢复悬浮窗。由「暂停使用」开关关闭时触发。
+         * 恢复所有服务：拉起前台保活（内部重建心跳 / 每日重置 / 电量预警并按开关拉 MQTT）、
+         * 显式确保 MQTT 与闹钟已调度，并恢复悬浮窗。由「暂停使用」开关关闭时触发。
          */
         fun resumeAllServices(context: Context) {
+            val appCtx = context.applicationContext
             LogFileManager.action("暂停使用已关闭：恢复所有服务")
             runCatching {
-                context.startForegroundService(
-                    Intent(context, ForegroundRunningService::class.java)
+                appCtx.startForegroundService(
+                    Intent(appCtx, ForegroundRunningService::class.java)
                 )
             }
+            // 与 FGS.onStartCommand 互补：FGS 启动失败时仍尽量恢复远程通道与闹钟
+            startMqttAgentIfEnabled(appCtx)
+            schedule(appCtx)
+            scheduleResetAlarm(appCtx)
+            scheduleBatteryAlert(appCtx)
             runCatching {
-                if (Settings.canDrawOverlays(context)) {
-                    context.startService(Intent(context, FloatingWindowService::class.java))
+                if (Settings.canDrawOverlays(appCtx)) {
+                    appCtx.startService(Intent(appCtx, FloatingWindowService::class.java))
                 }
+            }
+            // 暂停时 stopTask 会停掉当日调度；恢复后按「每日循环」补启（等 FGS attach scope）
+            if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!isPaused() && !TaskScheduler.isRunning()) {
+                        TaskScheduler.startTask()
+                    }
+                }, 1500L)
             }
         }
 
@@ -209,6 +240,10 @@ class KeepAliveReceiver : BroadcastReceiver() {
          * 当「每日循环」关闭时，取消已设置的闹钟。
          */
         fun scheduleResetAlarm(context: Context, hour: Int = -1) {
+            if (!isKeepAliveEnabled()) {
+                cancelResetAlarm(context)
+                return
+            }
             val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
             if (!autoRecycle) {
                 cancelResetAlarm(context)
@@ -246,6 +281,10 @@ class KeepAliveReceiver : BroadcastReceiver() {
          * 智能预警开关关闭时取消闹钟。
          */
         fun scheduleBatteryAlert(context: Context) {
+            if (!isKeepAliveEnabled()) {
+                cancelBatteryAlert(context)
+                return
+            }
             if (!SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)) {
                 cancelBatteryAlert(context)
                 return

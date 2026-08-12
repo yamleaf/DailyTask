@@ -79,7 +79,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
             )
             ConfigImportSignal.notifyRemoteChanged(context)
 
-            UnifiedDialogKit.showSuccess(
+            UnifiedDialogKit.showConfirm(
                 this,
                 "测试消息",
                 "企业微信配置完成，可以发送企业微信消息。\n\n是否继续？",
@@ -177,7 +177,7 @@ class MessageChannelActivity : KotlinBaseActivity<ActivityMessageChannelBinding>
     }
 
     private fun sendTestEmail() {
-        UnifiedDialogKit.showSuccess(
+        UnifiedDialogKit.showConfirm(
             this,
             "测试邮件",
             "QQ邮箱配置完成，可以发送QQ邮件。\n\n是否继续？",

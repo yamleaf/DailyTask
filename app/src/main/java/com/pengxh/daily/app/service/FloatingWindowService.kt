@@ -11,7 +11,10 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.PathInterpolator
 import androidx.appcompat.view.ContextThemeWrapper
+import kotlin.math.abs
+import kotlin.math.pow
 import com.pengxh.daily.app.databinding.WindowFloatingBinding
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.Constant
@@ -19,7 +22,6 @@ import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.widget.DesktopPetController
-import com.pengxh.daily.app.widget.DesktopPetView
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,13 +41,29 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     private var floatViewParams: WindowManager.LayoutParams? = null
     private var memoryMonitorJob: Job? = null
     private var lastMemoryAlertAt = 0L
-    // 悬浮窗可见性由两个独立维度决定：
+    // 悬浮窗可见性由三个独立维度决定：
     // 1) floatSessionActive —— 是否处于「被控端主动跳到目标 App」的操作会话中（由 openApplication 统一 start、各操作结束 stop）
     // 2) visibilityAllowed —— 蒙层是否未遮挡（由 show/hide 控制，蒙层显示时临时隐藏避免截到黑屏）
+    // 3) hiddenForScreenshot —— 截屏流水线进行中强制 GONE，避免倒计时/贴边宠物进图
     // 形态切换：会话中显示完整倒计时卡片；空闲（非打卡、蒙层未遮挡）显示桌面小宠物，
     // 保证悬浮窗窗口常驻可见可拖动，为安卓 15+ 后台跳转提供可见窗口豁免；蒙层遮挡时整体隐藏。
     private var floatSessionActive = false
     private var visibilityAllowed = true
+    private var hiddenForScreenshot = false
+    /** 末段渐隐期间窗口透传触摸，避免挡关键信息点击 / 截图操作区 */
+    private var countdownTouchPassthrough = false
+
+    companion object {
+        /** 与预截图触发对齐（NotificationMonitorService / TaskScheduler：tick <= 5） */
+        private const val SCREENSHOT_AT_SECONDS = 5
+        /** 更早开始渐隐，秒级目标之间用近 1s 动画衔接，避免跳变 */
+        private const val COUNTDOWN_FADE_START = 10
+        private const val COUNTDOWN_FADE_MIN_ALPHA = 0.04f
+        /** 预截图时刻目标透明度（由曲线平滑落到此附近，不再瞬间跳变） */
+        private const val COUNTDOWN_ALPHA_AT_SCREENSHOT = 0.14f
+        /** 与倒计时 tick 间隔对齐，连续收淡 */
+        private const val COUNTDOWN_FADE_STEP_MS = 920L
+    }
 
     /**
      * 桌面宠物交互控制器（拖拽 / 左右贴边 / 点击反馈）。
@@ -78,15 +96,15 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
 
         // 收集悬浮窗控制事件
-        // 倒计时数字只负责刷新文本；是否可见由 recomputeVisibility() 统一决定（打卡中且蒙层未遮挡）
+        // 倒计时数字刷新 + 末段渐隐；是否可见由 recomputeVisibility() 统一决定（打卡中且蒙层未遮挡）
         launch {
             FloatingWindowController.timeTick.collect { tick ->
-                binding.timeView.text = "${tick}s"
+                applyCountdownTick(tick)
             }
         }
         launch {
             FloatingWindowController.overtime.collect { seconds ->
-                binding.timeView.text = "${seconds}s"
+                applyCountdownTick(seconds)
             }
         }
         launch {
@@ -104,13 +122,21 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                     val time = SaveKeyValues.loadInt(
                         Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
                     )
-                    binding.timeView.text = "${time}s"
+                    resetCountdownPresentation()
+                    applyCountdownTick(time)
                 } else {
                     binding.timeView.text = "0s"
                     binding.waveProgressView.stopWaveAnimation()
+                    resetCountdownPresentation()
                 }
                 // 打卡会话联动宠物：开始→COUNTDOWN 停动画/计时器；结束→恢复 blink + 重启计时器
                 petController?.onCountdownChanged(active)
+                recomputeVisibility()
+            }
+        }
+        launch {
+            FloatingWindowController.hiddenForScreenshot.collect { hide ->
+                hiddenForScreenshot = hide
                 recomputeVisibility()
             }
         }
@@ -135,7 +161,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             petController = DesktopPetController(
                 context = this,
                 windowManager = windowManager,
-                petView = binding.idlePetView as DesktopPetView,
+                petView = binding.idlePetView,
                 windowView = binding.root,
                 params = params
             )
@@ -158,16 +184,92 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
     }
 
+    /** 刷新倒计时文案；末段从 10s 起按曲线平滑渐隐（每秒目标用近 1s 动画衔接）。 */
+    private fun applyCountdownTick(tick: Int) {
+        if (!::binding.isInitialized) return
+        binding.timeView.text = "${tick}s"
+        if (!floatSessionActive || !visibilityAllowed) return
+        val card = binding.countdownCardView
+        if (tick > COUNTDOWN_FADE_START) {
+            card.animate().cancel()
+            card.alpha = 1f
+            setCountdownTouchPassthrough(false)
+            return
+        }
+        setCountdownTouchPassthrough(true)
+        animateCountdownAlpha(countdownAlphaFor(tick))
+    }
+
+    /**
+     * 幂曲线：10s≈不透明 → 5s≈0.14 → 0s≈min。
+     * 相邻 tick 差值小，再配合 [COUNTDOWN_FADE_STEP_MS] 动画，观感连续不跳。
+     */
+    private fun countdownAlphaFor(tick: Int): Float {
+        if (tick <= 0) return COUNTDOWN_FADE_MIN_ALPHA
+        if (tick >= COUNTDOWN_FADE_START) return 1f
+        val t = tick.toFloat() / COUNTDOWN_FADE_START
+        // 略加速收淡，保证截屏秒已接近 COUNTDOWN_ALPHA_AT_SCREENSHOT
+        val shaped = t.toDouble().pow(1.65).toFloat()
+        val alpha = COUNTDOWN_FADE_MIN_ALPHA + (1f - COUNTDOWN_FADE_MIN_ALPHA) * shaped
+        // 截屏窗口内再夹到上限，避免曲线偶发偏高
+        return if (tick <= SCREENSHOT_AT_SECONDS) {
+            alpha.coerceAtMost(COUNTDOWN_ALPHA_AT_SCREENSHOT)
+        } else {
+            alpha
+        }
+    }
+
+    private fun animateCountdownAlpha(target: Float) {
+        val card = binding.countdownCardView
+        card.animate().cancel()
+        if (abs(card.alpha - target) < 0.012f) {
+            card.alpha = target
+            return
+        }
+        // 快进慢收：前半段跟手，后半段柔和落稳，避免生硬跳档
+        val ease = PathInterpolator(0.33f, 0f, 0.20f, 1f)
+        card.animate()
+            .alpha(target)
+            .setDuration(COUNTDOWN_FADE_STEP_MS)
+            .setInterpolator(ease)
+            .start()
+    }
+
+    private fun resetCountdownPresentation() {
+        if (!::binding.isInitialized) return
+        binding.countdownCardView.animate().cancel()
+        binding.countdownCardView.alpha = 1f
+        setCountdownTouchPassthrough(false)
+    }
+
+    private fun setCountdownTouchPassthrough(passthrough: Boolean) {
+        if (passthrough == countdownTouchPassthrough) return
+        countdownTouchPassthrough = passthrough
+        val params = floatViewParams ?: return
+        params.flags = if (passthrough) {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
+        if (!::binding.isInitialized || !binding.root.isAttachedToWindow) return
+        try {
+            windowManager.updateViewLayout(binding.root, params)
+        } catch (e: IllegalArgumentException) {
+            Log.d(kTag, "setCountdownTouchPassthrough skipped: ${e.message}")
+        }
+    }
+
     // 统一计算悬浮窗可见性与形态：
-    // · 蒙层遮挡时整体隐藏（用 View.GONE：GONE 的窗口不参与绘制与 hit-test，触摸事件穿透到下层 App）；
+    // · 蒙层遮挡或截屏临时隐藏时整体 GONE（不参与绘制与 hit-test）；
     // · 打卡会话中展开完整倒计时卡片；
     // · 空闲（非打卡、蒙层未遮挡）时显示桌面小宠物，窗口保持常驻可见可拖动，
     //   为安卓 15+ 后台跳转提供可见窗口豁免。
     private fun recomputeVisibility() {
-        if (!visibilityAllowed) {
+        if (!visibilityAllowed || hiddenForScreenshot) {
             binding.root.visibility = View.GONE
             binding.root.alpha = 0.0f
             binding.waveProgressView.stopWaveAnimation()
+            setCountdownTouchPassthrough(false)
             return
         }
         if (floatSessionActive) {
@@ -182,9 +284,16 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             binding.root.visibility = View.VISIBLE
             binding.root.alpha = 1.0f
             binding.waveProgressView.stopWaveAnimation()
+            resetCountdownPresentation()
         }
         // WRAP_CONTENT 窗口在宠物/卡片形态切换后需重新布局以匹配新尺寸
-        floatViewParams?.let { windowManager.updateViewLayout(binding.root, it) }
+        floatViewParams?.let {
+            try {
+                windowManager.updateViewLayout(binding.root, it)
+            } catch (e: IllegalArgumentException) {
+                Log.d(kTag, "recomputeVisibility update skipped: ${e.message}")
+            }
+        }
     }
 
     private fun restartMemoryMonitoring() {

@@ -63,7 +63,8 @@ object RemoteSnapshot {
         synchronized(this) {
             if (cacheJson != null && now - cacheTs < CACHE_TTL_MS) hit = cacheJson
         }
-        if (hit != null) return hit!!
+        val cached = hit
+        if (cached != null) return cached
         val json = buildDelta(context, ALL_SECTIONS)
         synchronized(this) {
             cacheJson = json

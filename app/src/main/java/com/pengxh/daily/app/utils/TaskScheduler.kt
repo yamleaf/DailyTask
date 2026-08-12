@@ -89,6 +89,8 @@ object TaskScheduler {
 
     /** 是否处于打开目标 App / 等待打卡成功的窗口期（此期间不宜盖黑屏） */
     fun isInActivePunch(): Boolean {
+        // 定时任务「等待打卡」或任意 float 会话（远程打卡/截屏）均视为活跃操作窗
+        if (FloatingWindowController.isSessionActive) return true
         if (!_isRunning.value) return false
         return runningDetail.contains("等待打卡")
     }
@@ -175,9 +177,6 @@ object TaskScheduler {
                 .toLocalDate()
             if (shouldSkipDay(execDate)) {
                 skippedCount++
-                LogFileManager.writeLog(
-                    "第 ${task.displayIndex} 个任务执行日($execDate)为休息日/节假日，跳过"
-                )
                 continue
             }
 
@@ -268,11 +267,13 @@ object TaskScheduler {
                             if (resultSource == 1) {
                                 // 截屏模式：MediaProjection
                                 hasCaptured = true
+                                delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
                                 captureDeferred = CaptureImageService.requestCaptureScreen()
                             } else if (resultSource == 2) {
                                 // 无障碍模式（文本/截屏反馈）：AccessibilityService.takeScreenshot 兜底截屏。
                                 // 文本反馈模式下识别不到成功结果时，也截一张发过去，作为“看不到文本”时的兜底。
                                 hasCaptured = true
+                                delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
                                 val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
                                 captureDeferred = a11yDeferred
                                     ?: CompletableDeferred<String?>().apply { complete("") }
@@ -300,9 +301,13 @@ object TaskScheduler {
             // 关闭无障碍文本检测
             AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
 
-            // 超时路径——打卡失败，回到主页 + 兜底通知 + 继续下一个任务
+            // 超时路径——先完成兜底截屏（仍停在目标 App），恢复悬浮窗后再回桌面/本 App。
+            // 截屏期间 hideForScreenshot 会 GONE 整窗；若先跳转再等截屏，宠物迟迟不出现，
+            // 安卓 15+ 缺少「可见悬浮窗」豁免时 bringDailyTaskToFront 会被拦，表现为停在目标 App。
             if (!clockInSuccess) {
-                _returnToApp.emit(Unit)
+                if (runningDetail.contains("等待打卡")) {
+                    runningDetail = runningDetail.replace("等待打卡", "打卡超时")
+                }
 
                 // 兜底截图：按「实际权限」优先级选择截屏方式（与 resultSource 配置无关）：
                 // 1) 已有预截图（打卡过程中的 MediaProjection 实截）→ 直接使用
@@ -316,6 +321,9 @@ object TaskScheduler {
                 if (imagePath.isEmpty()) {
                     imagePath = runCatching { tryFallbackScreenshot() }.getOrNull() ?: ""
                 }
+                // 截屏结束：先恢复悬浮窗（贴边宠物），再发回跳信号
+                FloatingWindowController.restoreAfterScreenshot()
+                _returnToApp.emit(Unit)
 
                 if (imagePath.isNotEmpty()) {
                     // force=true：超时兜底通知是关键告警，跳过去重，保证一定送达（防「什么都没收到」）
@@ -352,6 +360,10 @@ object TaskScheduler {
                         LogFileManager.error("写入打卡超时记录失败: ${e.message}")
                     }
                 }
+            } else {
+                // 成功路径：丢弃末段预截图，立刻恢复悬浮窗，便于后续回跳
+                captureDeferred?.cancel()
+                FloatingWindowController.restoreAfterScreenshot()
             }
 
             if (maskWasShowing) {
@@ -474,6 +486,10 @@ object TaskScheduler {
      * 效果：完成 clockInDeferred，select{} 走分支 B，推进到下一个任务
      */
     fun notifyClockIn() {
+        // 成功瞬间结束「等待打卡」窗口，避免伪息屏门禁 / 其它逻辑仍把本段当作活跃打卡
+        if (runningDetail.contains("等待打卡")) {
+            runningDetail = runningDetail.replace("等待打卡", "打卡完成")
+        }
         clockInDeferred?.complete(Unit)
     }
 
@@ -515,7 +531,7 @@ object TaskScheduler {
      * 剩余时间较长时降低刷新频率，以降低通知栏与 CPU 唤醒开销。
      */
     private suspend fun CoroutineScope.updateCountdownWithNotification(
-        totalMs: Long, onTick: (remainingMs: Long) -> Unit
+        totalMs: Long, onTick: suspend (remainingMs: Long) -> Unit
     ) {
         val target = SystemClock.elapsedRealtime() + totalMs
         while (isActive) {
@@ -540,6 +556,16 @@ object TaskScheduler {
         }
     }
 
+    /** 节假日/休息日跳过日志去重：相同文案连续只打一次，避免多任务循环刷屏 */
+    @Volatile
+    private var lastSkipDayLogMsg: String? = null
+
+    private fun logSkipDayOnce(msg: String) {
+        if (msg == lastSkipDayLogMsg) return
+        lastSkipDayLogMsg = msg
+        LogFileManager.writeLog(msg)
+    }
+
     private fun shouldSkipDay(date: LocalDate): Boolean {
         val skipEnabled = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
         if (!skipEnabled) return false
@@ -548,19 +574,19 @@ object TaskScheduler {
 
         // 法定节假日
         if (ChinaHolidayManager.isHoliday(date)) {
-            LogFileManager.writeLog("${date} 为法定节假日，跳过任务")
+            logSkipDayOnce("$date 为法定节假日，跳过任务")
             return true
         }
 
         // 调休补班日（例外：周末但要上班）
         if (ChinaHolidayManager.isWorkday(date)) {
-            LogFileManager.writeLog("${date} 为调休补班日，正常执行任务")
+            logSkipDayOnce("$date 为调休补班日，正常执行任务")
             return false
         }
 
         // 不在自定义工作日内，即为休息日
         if (date.dayOfWeek !in customWorkdays) {
-            LogFileManager.writeLog("${date} 不在自定义工作日内，跳过任务")
+            logSkipDayOnce("$date 不在自定义工作日内，跳过任务")
             return true
         }
 
