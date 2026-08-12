@@ -8,9 +8,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.util.Log
-import android.view.Gravity
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.view.ContextThemeWrapper
@@ -20,6 +18,8 @@ import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter
+import com.pengxh.daily.app.widget.DesktopPetController
+import com.pengxh.daily.app.widget.DesktopPetView
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,10 +37,6 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     private val activityManager by lazy { getSystemService(ActivityManager::class.java) }
     private lateinit var binding: WindowFloatingBinding
     private var floatViewParams: WindowManager.LayoutParams? = null
-    private var initialX = 0
-    private var initialY = 0
-    private var initialTouchX = 0f
-    private var initialTouchY = 0f
     private var memoryMonitorJob: Job? = null
     private var lastMemoryAlertAt = 0L
     // 悬浮窗可见性由两个独立维度决定：
@@ -51,30 +47,33 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     private var floatSessionActive = false
     private var visibilityAllowed = true
 
+    /**
+     * 桌面宠物交互控制器（拖拽 / 左右贴边 / 点击反馈）。
+     * 由 DesktopPetController 内部管理 idlePetView 的位置/尺寸/状态切换与触摸事件，
+     * 本 service 不再处理 onTouchListener 与贴边计算。
+     */
+    private var petController: DesktopPetController? = null
+
     override fun onBind(intent: Intent?): IBinder? {
         return null
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
         super.onCreate()
         // 浮动窗口由 Service 上下文 inflate；Service 不会自动套用 App 的 Material 主题，
         // 必须用 ContextThemeWrapper 显式包一层 Theme.DailyTask，否则 MaterialCardView/MaterialTextView 会 inflate 崩溃。
         binding = WindowFloatingBinding.inflate(LayoutInflater.from(ContextThemeWrapper(this, R.style.Theme_DailyTask)))
-        // 默认贴右边缘、垂直居中显示。
-        // 用 Gravity.END 锚定右缘，不依赖视图测量宽度——
-        // 避免 addView 后首帧未测量导致 width=0、被推到屏幕外不可见的旧 bug。
-        // x 为相对 END 锚点的偏移：负值=向左留间隙，窗口整体贴边且完全可见。
-        val edgeMarginPx = edgeMarginPx()
+        // 用 WRAP_CONTENT 起步；尺寸由 DesktopPetController 按 WINDOW_*_DP / 贴边头宽同步。
         floatViewParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            // NOT_TOUCH_MODAL：热区外点击可落到下层；配合 controller 对透明边的穿透处理
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            x = -edgeMarginPx
-        }.also {
+        ).also {
             windowManager.addView(binding.root, it)
         }
 
@@ -93,6 +92,8 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         launch {
             FloatingWindowController.visibility.collect { allowed ->
                 visibilityAllowed = allowed
+                // 蒙层遮挡 → DIMMED：取消随机/离场计时，避免 GONE 期间仍离场贴边
+                petController?.onDimmedChanged(!allowed)
                 recomputeVisibility()
             }
         }
@@ -108,9 +109,12 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                     binding.timeView.text = "0s"
                     binding.waveProgressView.stopWaveAnimation()
                 }
+                // 打卡会话联动宠物：开始→COUNTDOWN 停动画/计时器；结束→恢复 blink + 重启计时器
+                petController?.onCountdownChanged(active)
                 recomputeVisibility()
             }
         }
+        // 伪息屏开关变更不直接驱动宠物；DIMMED 由蒙层可见性（visibility）驱动
         launch {
             AppRuntimeConfig.powerSaveMode.collect {
                 restartMemoryMonitoring()
@@ -118,18 +122,28 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
 
-        // 初始状态：空闲（非打卡、蒙层未遮挡）显示桌面小宠物，默认贴右边缘、垂直居中停靠。
-        // 宠物极小巧（emoji），常驻可见但不明显遮挡交互，为安卓 15+ 后台跳转提供常驻可见窗口豁免；
-        // 可拖动到任意位置（松手即停），打卡会话开始后由 recomputeVisibility() 自动展开为完整倒计时卡片。
+        // 初始状态：空闲（非打卡、蒙层未遮挡）显示桌面小宠物；窗口默认参数由 controller 接管
         binding.countdownCardView.visibility = View.GONE
         binding.idlePetView.visibility = View.VISIBLE
         binding.root.visibility = View.VISIBLE
         binding.root.alpha = 1.0f
         binding.timeView.text = "0s"
-        dockPetToEdge()
-
-        // 移动悬浮窗（宠物与卡片都可拖动到任意位置）
-        onDragMove()
+        floatViewParams?.let { params ->
+            // DesktopPetView 是 binding.idlePetView 的实际类型（自定义 FrameLayout），
+            // 此处创建 controller 接管触摸/位置/状态/动画，service 仅负责可见性与生命周期。
+            // 注意：updateViewLayout 必须作用于 addView 的窗口根视图（binding.root），不能传子 View。
+            petController = DesktopPetController(
+                context = this,
+                windowManager = windowManager,
+                petView = binding.idlePetView as DesktopPetView,
+                windowView = binding.root,
+                params = params
+            )
+            // 补同步：collect 块在 controller 创建前注册，若开关/会话已是激活态，
+            // replay 不会在 controller 就绪后重发——这里手动拉齐一次当前状态。
+            petController?.onCountdownChanged(floatSessionActive)
+            petController?.onDimmedChanged(!visibilityAllowed)
+        }
 
         restartMemoryMonitoring()
         applyWaveAnimation()
@@ -171,41 +185,6 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
         // WRAP_CONTENT 窗口在宠物/卡片形态切换后需重新布局以匹配新尺寸
         floatViewParams?.let { windowManager.updateViewLayout(binding.root, it) }
-    }
-
-    private fun edgeMarginPx() = (10 * resources.displayMetrics.density).toInt()
-
-    // 桌面宠物初始化停靠：贴右边缘、垂直居中
-    private fun dockPetToEdge() {
-        floatViewParams?.let {
-            it.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            it.x = -edgeMarginPx()
-            it.y = 0
-            windowManager.updateViewLayout(binding.root, it)
-        }
-    }
-
-    // 松手自动吸附到较近的屏幕边缘（保留纵向位置），保证宠物始终贴边停靠。
-    private fun dockPetToNearestEdge() {
-        val params = floatViewParams ?: return
-        val screenWidth = resources.displayMetrics.widthPixels
-        val width = binding.root.width.coerceAtLeast(1)
-        // END 锚点下 x 为窗口右缘相对屏幕右缘的偏移：负=屏内留边距，正=越出屏幕右侧
-        val windowRight = screenWidth + params.x
-        val windowLeft = windowRight - width
-        val distRight = (screenWidth - windowRight).coerceAtLeast(0)
-        val distLeft = windowLeft.coerceAtLeast(0)
-        // 记录当前纵向偏移，贴边时保留（CENTER_VERTICAL 下 y 为相对垂直居中的偏移）
-        val keepY = params.y
-        if (distRight <= distLeft) {
-            params.gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            params.x = -edgeMarginPx()
-        } else {
-            params.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            params.x = edgeMarginPx()
-        }
-        params.y = keepY
-        windowManager.updateViewLayout(binding.root, params)
     }
 
     private fun restartMemoryMonitoring() {
@@ -253,44 +232,11 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun onDragMove() {
-        binding.root.setOnTouchListener(object : View.OnTouchListener {
-            override fun onTouch(v: View?, event: MotionEvent?): Boolean {
-                event ?: return false
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialX = floatViewParams?.x ?: 0
-                        initialY = floatViewParams?.y ?: 0
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
-                        return true
-                    }
-
-                    MotionEvent.ACTION_MOVE -> {
-                        floatViewParams?.let {
-                            it.x = initialX + (event.rawX - initialTouchX).toInt()
-                            it.y = initialY + (event.rawY - initialTouchY).toInt()
-                            windowManager.updateViewLayout(binding.root, it)
-                        }
-                        return true
-                    }
-
-                    // 松手自动吸附到较近的屏幕边缘（宠物始终贴边停靠）
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        dockPetToNearestEdge()
-                        return true
-                    }
-
-                    else -> return false
-                }
-            }
-        })
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         memoryMonitorJob?.cancel()
+        petController?.destroy()
+        petController = null
         cancel()
         if (::binding.isInitialized && binding.root.isAttachedToWindow) {
             try {

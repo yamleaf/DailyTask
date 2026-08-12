@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 下贴边态：与上贴边对称，身体隐藏在下外，露出上半脸 + 两只前爪扒在下边缘。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="80dp"
+    android:height="80dp"
+    android:viewportWidth="80"
+    android:viewportHeight="80">
+    <!-- 主体：下半圆被裁，只留上半圆 -->
+    <path
+        android:fillColor="#FFE5CC"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M12,40 A28,28 0 1,0 68,40 L40,40 Z" />
+    <!-- 左爪（扒在屏幕底边） -->
+    <path
+        android:fillColor="#FFD1A1"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M22,78 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <!-- 右爪 -->
+    <path
+        android:fillColor="#FFD1A1"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M58,78 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <!-- 左眼 -->
+    <path
+        android:fillColor="#3B2A20"
+        android:pathData="M28,28 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <!-- 右眼 -->
+    <path
+        android:fillColor="#3B2A20"
+        android:pathData="M52,28 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <!-- 嘴 -->
+    <path
+        android:fillColor="#E87A7A"
+        android:pathData="M34,12 Q40,17 46,12" />
+</vector>

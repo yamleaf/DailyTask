@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 右贴边态：与左贴边对称，身体隐藏在屏幕右外，露出左侧脸 + 右手扒在右边缘。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="80dp"
+    android:height="80dp"
+    android:viewportWidth="80"
+    android:viewportHeight="80">
+    <!-- 主体 -->
+    <path
+        android:fillColor="#FFE5CC"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M40,12 A28,28 0 1,1 40,68 A28,28 0 1,1 40,12 Z" />
+    <!-- 右耳 -->
+    <path
+        android:fillColor="#FFD1A1"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M66,28 L54,12 L50,32 Z" />
+    <!-- 左眼 -->
+    <path
+        android:fillColor="#3B2A20"
+        android:pathData="M22,38 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <!-- 嘴 -->
+    <path
+        android:fillColor="#E87A7A"
+        android:pathData="M15,52 Q20,57 25,52" />
+    <!-- 右手爪 -->
+    <path
+        android:fillColor="#FFE5CC"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M75,40 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 M66,42 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自由悬浮态：完整猫咪。Lottie 资产到位时此图不再显示。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="150dp"
+    android:height="150dp"
+    android:viewportWidth="150"
+    android:viewportHeight="150">
+    <!-- 身体 -->
+    <path
+        android:fillColor="#FFE5CC"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M75,18 A57,57 0 1,1 75,132 A57,57 0 1,1 75,18 Z" />
+    <!-- 左耳 -->
+    <path
+        android:fillColor="#FFD1A1"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M30,38 L48,18 L52,46 Z" />
+    <!-- 右耳 -->
+    <path
+        android:fillColor="#FFD1A1"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M120,38 L102,18 L98,46 Z" />
+    <!-- 左眼 -->
+    <path
+        android:fillColor="#3B2A20"
+        android:pathData="M55,65 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <!-- 右眼 -->
+    <path
+        android:fillColor="#3B2A20"
+        android:pathData="M95,65 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <!-- 腮红 -->
+    <path
+        android:fillColor="#FFB3B3"
+        android:fillAlpha="0.6"
+        android:pathData="M40,82 m-7,0 a7,4 0 1,0 14,0 a7,4 0 1,0 -14,0" />
+    <path
+        android:fillColor="#FFB3B3"
+        android:fillAlpha="0.6"
+        android:pathData="M110,82 m-7,0 a7,4 0 1,0 14,0 a7,4 0 1,0 -14,0" />
+    <!-- 嘴 -->
+    <path
+        android:fillColor="#E87A7A"
+        android:pathData="M70,86 Q75,93 80,86" />
+</vector>

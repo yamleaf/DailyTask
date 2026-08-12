@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 桌面小宠物可视容器：透明背景，仅承载 Lottie；贴边用烘焙 JSON，不做 View 旋转/镜像。 -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/petLottieView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        app:lottie_autoPlay="false"
+        app:lottie_loop="false" />
+</merge>

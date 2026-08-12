@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 点击反馈：漂浮的小星星，向上飘动并淡出 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="80dp"
+    android:height="80dp"
+    android:viewportWidth="80"
+    android:viewportHeight="80">
+    <!-- 主星 -->
+    <path
+        android:fillColor="#FFD96A"
+        android:pathData="M40,8 L44,28 L64,28 L48,40 L54,60 L40,48 L26,60 L32,40 L16,28 L36,28 Z" />
+    <!-- 左小星 -->
+    <path
+        android:fillColor="#FFB7B7"
+        android:pathData="M20,40 L22,46 L28,46 L23,50 L25,56 L20,52 L15,56 L17,50 L12,46 L18,46 Z" />
+    <!-- 右小星 -->
+    <path
+        android:fillColor="#A4DCFF"
+        android:pathData="M60,40 L62,46 L68,46 L63,50 L65,56 L60,52 L55,56 L57,50 L52,46 L58,46 Z" />
+</vector>

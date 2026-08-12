@@ -4,18 +4,14 @@
     android:layout_width="wrap_content"
     android:layout_height="wrap_content">
 
-    <!-- 非打卡期间的「桌面小宠物」形态：默认贴边停靠、可自由拖到任意位置，
-         让悬浮窗保持常驻可见，为安卓 15+ 提供可见窗口豁免，规避后台跳转被系统限制。
-         换宠物：直接改 text 的 emoji 字符即可。 -->
-    <TextView
+    <!-- 非打卡期间的「桌面小宠物」：进场/眨眼/随机/挥手/离场；贴边播 blink_dock_left/right。
+         视觉与交互由 DesktopPetView + DesktopPetController 承载。 -->
+    <com.pengxh.daily.app.widget.DesktopPetView
         android:id="@+id/idlePetView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:background="@drawable/bg_idle_pet"
-        android:padding="6dp"
-        android:text="🐧"
-        android:textSize="32sp"
+        android:background="@android:color/transparent"
         android:visibility="gone" />
 
     <!-- 打卡期间展开的完整倒计时卡片 -->

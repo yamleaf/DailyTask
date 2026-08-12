@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 左贴边态：身体大部分隐藏在屏幕左外，露出右侧脸 + 左手扒在左边缘。
+     视觉上猫脸朝向右侧、爪从窗口左侧探出。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="80dp"
+    android:height="80dp"
+    android:viewportWidth="80"
+    android:viewportHeight="80">
+    <!-- 主体：身体从左侧被裁，只露右半圆 -->
+    <path
+        android:fillColor="#FFE5CC"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M40,12 A28,28 0 1,1 40,68 A28,28 0 1,1 40,12 Z" />
+    <!-- 左耳（贴左边那只） -->
+    <path
+        android:fillColor="#FFD1A1"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M14,28 L26,12 L30,32 Z" />
+    <!-- 右眼（露出的半脸上唯一可见眼） -->
+    <path
+        android:fillColor="#3B2A20"
+        android:pathData="M58,38 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <!-- 嘴 -->
+    <path
+        android:fillColor="#E87A7A"
+        android:pathData="M55,52 Q60,57 65,52" />
+    <!-- 左手爪（扒在屏幕左边缘，从窗口左下角伸出） -->
+    <path
+        android:fillColor="#FFE5CC"
+        android:strokeColor="#E8B98D"
+        android:strokeWidth="1.5"
+        android:pathData="M5,40 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 M14,42 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>

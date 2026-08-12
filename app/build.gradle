@@ -216,4 +216,6 @@ dependencies {
     implementation 'com.google.zxing:core:3.4.1'
     // 磨砂玻璃（悬浮导航模糊背景；API 31+ 走硬件 RenderEffect，低版本走 RenderScript）
     implementation 'com.github.Dimezis:BlurView:version-2.0.4'
+    // 桌面小宠物动画（呼吸/眨眼/尾巴摆动/张望/点击反馈），用户后续把 Lottie JSON 投到 assets/pet/ 即可
+    implementation 'com.airbnb.android:lottie:6.5.0'
 }
