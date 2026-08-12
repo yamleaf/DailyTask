@@ -58,7 +58,17 @@ class MaskViewController(
         onMaskVisibilityChanged?.invoke(true)
     }
 
-    fun hideMaskView() {
+    /**
+     * @param syncOverlay true 时同时隐藏系统悬浮蒙层；由 [MaskOverlayHelper] 回调同步解除时传 false，避免递归。
+     */
+    fun hideMaskView(syncOverlay: Boolean = true) {
+        if (!binding.maskView.isVisible) {
+            if (syncOverlay && MaskOverlayHelper.isShowing()) {
+                MaskOverlayHelper.hide(activity, MaskOverlayHelper.HideReason.SYNC)
+            }
+            return
+        }
+
         FloatingWindowController.show()
 
         stopClockAnimation()
@@ -79,7 +89,9 @@ class MaskViewController(
 
         binding.maskView.visibility = View.GONE
         binding.rootView.visibility = View.VISIBLE
-        MaskOverlayHelper.hide(activity)
+        if (syncOverlay) {
+            MaskOverlayHelper.hide(activity, MaskOverlayHelper.HideReason.SYNC)
+        }
         onMaskVisibilityChanged?.invoke(false)
     }
 

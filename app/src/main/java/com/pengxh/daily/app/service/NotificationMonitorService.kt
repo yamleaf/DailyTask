@@ -356,7 +356,11 @@ class NotificationMonitorService : NotificationListenerService() {
 
             command.contains("亮屏") -> {
                 LogFileManager.writeLog("收到亮屏指令")
-                MaskOverlayHelper.hide(this)
+                // 由 bringMainActivityForMask(false) 拉起并卸 Activity 蒙层；此处仅 SYNC 卸 overlay，避免抢前台竞态
+                MaskOverlayHelper.hide(
+                    this@NotificationMonitorService,
+                    MaskOverlayHelper.HideReason.SYNC
+                )
                 bringMainActivityForMask(showMask = false)
                 emitMonitorEvent(MonitorEvent.HideMaskCommand)
             }
@@ -492,7 +496,10 @@ class NotificationMonitorService : NotificationListenerService() {
         val maskWasShowing = MaskOverlayHelper.isShowing()
         if (maskWasShowing) {
             LogFileManager.writeLog("远程打卡：伪息屏蒙层显示中，临时移除以确保障碍不遮挡目标App")
-            MaskOverlayHelper.hide(this@NotificationMonitorService)
+            MaskOverlayHelper.hide(
+                this@NotificationMonitorService,
+                MaskOverlayHelper.HideReason.TEMP_PUNCH
+            )
         }
         try {
             openApplication {

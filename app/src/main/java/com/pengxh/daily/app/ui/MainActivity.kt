@@ -154,6 +154,16 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 禁止系统自动息屏，保持常亮 + 伪息屏策略
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        // 悬浮蒙层上滑解除时，同步卸掉 Activity 内蒙层（一次上滑同时出控制界面）
+        MaskOverlayHelper.activityMaskHider = {
+            if (maskViewController.isMaskVisible()) {
+                maskViewController.hideMaskView(syncOverlay = false)
+                true
+            } else {
+                false
+            }
+        }
+
         // 磨砂玻璃悬浮导航：模糊其下方的全部 Tab 内容
         binding.bottomNavBar.root.setupWith(binding.rootView)
             .setBlurRadius(24f)
@@ -386,9 +396,11 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
 
             0 -> {
-                MaskOverlayHelper.hide(this)
+                // Activity 蒙层优先走 hideMaskView（内部 SYNC 卸 overlay）；仅 overlay 时用户解锁语义拉起界面
                 if (maskViewController.isMaskVisible()) {
                     maskViewController.hideMaskView()
+                } else {
+                    MaskOverlayHelper.hide(this, MaskOverlayHelper.HideReason.USER_UNLOCK)
                 }
             }
         }
@@ -401,6 +413,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun onDestroy() {
+        if (MaskOverlayHelper.activityMaskHider != null) {
+            MaskOverlayHelper.activityMaskHider = null
+        }
         stopIdleMaskTimer()
         super.onDestroy()
         mainHandler.removeCallbacksAndMessages(null)
@@ -438,9 +453,10 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             }
 
             is MonitorEvent.HideMaskCommand -> {
-                MaskOverlayHelper.hide(this)
                 if (maskViewController.isMaskVisible()) {
                     maskViewController.hideMaskView()
+                } else {
+                    MaskOverlayHelper.hide(this, MaskOverlayHelper.HideReason.USER_UNLOCK)
                 }
                 resetIdleMaskTimer()
             }

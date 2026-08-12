@@ -9,7 +9,6 @@ import android.os.Looper
 import android.os.PowerManager
 
 import com.pengxh.daily.app.extensions.acquireWakeLock
-import com.pengxh.daily.app.utils.Constant
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import android.provider.Settings
 import android.util.TypedValue
@@ -22,20 +21,47 @@ import android.widget.FrameLayout
 import android.widget.TextClock
 import androidx.core.content.res.ResourcesCompat
 import com.pengxh.daily.app.R
+import com.pengxh.daily.app.extensions.bringDailyTaskToFront
 
 /**
  * 伪息屏蒙层（系统悬浮窗）。
  * 可在 NotificationListenerService 等后台组件中直接显示，不依赖 MainActivity 是否在前台。
+ *
+ * 与 [MaskViewController] 成对：进入时通常两层都盖上；用户解锁时同步卸掉 Activity 内蒙层。
  */
 object MaskOverlayHelper {
+
+    /**
+     * 隐藏蒙层的意图，决定副作用（拉前台 / 同步 Activity / 通知 idle / 显示浮窗）。
+     */
+    enum class HideReason {
+        /** 用户上滑 / 音量键解锁：同步 Activity 蒙层；仅 overlay 时拉起控制界面 */
+        USER_UNLOCK,
+
+        /** Activity / 远程指令已处理 UI：只卸 overlay，不 bringFront */
+        SYNC,
+
+        /**
+         * 打卡前临时卸蒙层：释放 SCREEN_DIM（调用方已 keepAwakeForPunch）、显示浮窗倒计时；
+         * 不拉前台、不同步 Activity、不 onBlackMaskHidden（结束时由调用方按需 show 恢复）。
+         */
+        TEMP_PUNCH,
+    }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var rootView: View? = null
     private var touchDownY = 0f
+    private var dismissLatch = false
 
     /** 截图前临时隐藏标记：只有为 true 时 restoreAfterScreenshot 才会重新显示 */
     @Volatile
     private var hiddenForScreenshot = false
+
+    /**
+     * 由 MainActivity 注册：若 Activity 内蒙层仍在，则同步隐藏并返回 true。
+     */
+    @Volatile
+    var activityMaskHider: (() -> Boolean)? = null
 
     fun isShowing(): Boolean = rootView != null
 
@@ -70,6 +96,7 @@ object MaskOverlayHelper {
                 return@post
             }
             val windowManager = appCtx.getSystemService(WindowManager::class.java) ?: return@post
+            dismissLatch = false
 
             val frame = FrameLayout(appCtx).apply {
                 setBackgroundColor(Color.BLACK)
@@ -81,7 +108,7 @@ object MaskOverlayHelper {
                     if (event.action == KeyEvent.ACTION_DOWN &&
                         keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
                     ) {
-                        hide(appCtx)
+                        hide(appCtx, HideReason.USER_UNLOCK)
                         true
                     } else false
                 }
@@ -94,7 +121,6 @@ object MaskOverlayHelper {
                     typeface = ResourcesCompat.getFont(appCtx, R.font.ds_digital)
                 }
             }
-            // 伪息屏隐藏时钟：开启后只显示黑屏，不添加时钟视图（省电）
             if (!SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)) {
                 frame.addView(
                     clock,
@@ -108,11 +134,6 @@ object MaskOverlayHelper {
                 LogFileManager.writeLog("伪息屏：已隐藏时钟（仅黑屏）")
             }
 
-            // 注：蒙层本身不加 FLAG_KEEP_SCREEN_ON（避免全亮整夜耗电）。
-            // 但为满足「保持解锁（微亮）」需求，蒙层显示期间额外持有 SCREEN_DIM_WAKE_LOCK：
-            // 屏幕维持低亮度、不触发系统锁屏，既比全亮省电，又保证打卡/无障碍截图不被锁屏打断。
-            // 该 WakeLock 仅在蒙层被完整 hide() 时释放（见 releaseKeepAwake）；
-            // 截图前临时移除蒙层时仍保持持有，避免截图中途锁屏导致截图失败。
             val flags = (WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                     or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
             val params = WindowManager.LayoutParams(
@@ -141,18 +162,61 @@ object MaskOverlayHelper {
         }
     }
 
+    /** 用户解锁默认入口（上滑 / 兼容旧调用） */
     fun hide(context: Context) {
+        hide(context, HideReason.USER_UNLOCK)
+    }
+
+    fun hide(context: Context, reason: HideReason) {
         val appCtx = context.applicationContext
-        mainHandler.post {
-            val view = rootView ?: return@post
+        val run = Runnable { hideInternal(appCtx, reason) }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            run.run()
+        } else {
+            mainHandler.post(run)
+        }
+    }
+
+    private fun hideInternal(appCtx: Context, reason: HideReason) {
+        val hadOverlay = rootView != null
+        rootView?.let { view ->
             runCatching {
                 appCtx.getSystemService(WindowManager::class.java)?.removeView(view)
             }
             rootView = null
+            // 打卡路径调用方已持有 SCREEN_BRIGHT；用户/同步路径释放 SCREEN_DIM
             releaseKeepAwake(appCtx)
-            FloatingWindowController.show()
-            LogFileManager.writeLog("伪息屏蒙层已隐藏")
-            IdlePseudoMaskController.onBlackMaskHidden(appCtx)
+        }
+        dismissLatch = false
+
+        when (reason) {
+            HideReason.USER_UNLOCK -> {
+                val activityHidMask = activityMaskHider?.invoke() == true
+                if (hadOverlay && !activityHidMask) {
+                    appCtx.bringDailyTaskToFront(showMask = false)
+                }
+                FloatingWindowController.show()
+                if (hadOverlay) {
+                    LogFileManager.writeLog("伪息屏蒙层已隐藏（用户解锁）")
+                    IdlePseudoMaskController.onBlackMaskHidden(appCtx)
+                }
+            }
+
+            HideReason.SYNC -> {
+                FloatingWindowController.show()
+                if (hadOverlay) {
+                    LogFileManager.writeLog("伪息屏蒙层已隐藏（同步）")
+                    IdlePseudoMaskController.onBlackMaskHidden(appCtx)
+                }
+            }
+
+            HideReason.TEMP_PUNCH -> {
+                // 允许打卡倒计时浮窗；不拉前台、不扰动 Activity 蒙层 / idle 计时
+                FloatingWindowController.show()
+                if (hadOverlay) {
+                    LogFileManager.writeLog("伪息屏蒙层已临时移除（打卡）")
+                }
+            }
         }
     }
 
@@ -191,9 +255,7 @@ object MaskOverlayHelper {
     }
 
     /**
-     * 统一封装「截图/操作前临时移除蒙层 → 执行 block → 操作后恢复蒙层」，
-     * 收敛各处散落的 hideForScreenshot/restoreAfterScreenshot 调用（P1-3）。
-     * 仅当蒙层确实在显示时才移除并恢复，无副作用。
+     * 统一封装「截图/操作前临时移除蒙层 → 执行 block → 操作后恢复蒙层」。
      */
     suspend fun <T> withMaskSuspended(context: Context, block: suspend () -> T): T {
         val maskShowing = isShowing()
@@ -210,28 +272,31 @@ object MaskOverlayHelper {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     touchDownY = event.rawY
-                    true // 开始追踪，消费 DOWN 事件
+                    dismissLatch = false
+                    true
                 }
 
                 MotionEvent.ACTION_MOVE -> {
                     val deltaY = event.rawY - touchDownY
                     val isSwipe = kotlin.math.abs(deltaY) > 200f
-                    if (isSwipe) {
-                        hide(view.context)
+                    if (isSwipe && !dismissLatch) {
+                        dismissLatch = true
+                        hide(view.context, HideReason.USER_UNLOCK)
                     }
-                    isSwipe // 仅滑动手势消费 MOVE 事件，其他移动事件透传给下层窗口
+                    isSwipe
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val deltaY = event.rawY - touchDownY
                     val isSwipe = kotlin.math.abs(deltaY) > 200f
-                    if (isSwipe) {
-                        hide(view.context)
+                    if (isSwipe && !dismissLatch) {
+                        dismissLatch = true
+                        hide(view.context, HideReason.USER_UNLOCK)
                     }
-                    isSwipe // 仅滑动手势消费 UP/CANCEL 事件
+                    isSwipe
                 }
 
-                else -> false // 其他事件（如点击）透传给下层窗口，不拦截桌面操作
+                else -> false
             }
         }
     }

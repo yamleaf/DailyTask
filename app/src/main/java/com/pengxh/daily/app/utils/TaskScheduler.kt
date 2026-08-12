@@ -234,7 +234,10 @@ object TaskScheduler {
                 // 蒙层 hide 会释放 SCREEN_DIM_WAKE_LOCK，若先 hide 后保活，释放瞬间系统可能按屏幕超时休眠锁屏
                 // （真机复现：打卡瞬间 goToSleep + keyguard + 指纹图标，打卡界面被锁屏挡住空跑）。
                 withContext(Dispatchers.Main) {
-                    MaskOverlayHelper.hide(DailyTaskApplication.get())
+                    MaskOverlayHelper.hide(
+                        DailyTaskApplication.get(),
+                        MaskOverlayHelper.HideReason.TEMP_PUNCH
+                    )
                 }
             }
 
