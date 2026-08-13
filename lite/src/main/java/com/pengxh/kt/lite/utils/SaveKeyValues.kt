@@ -78,11 +78,11 @@ object SaveKeyValues {
         }
     }
 
-    fun saveBoolean(key: String, value: Boolean) {
+    fun saveBoolean(key: String, value: Boolean, commit: Boolean = false) {
         if (key.isBlank()) return
         if (!::sp.isInitialized) return
         try {
-            sp.edit { putBoolean(key, value) }
+            sp.edit(commit = commit) { putBoolean(key, value) }
         } catch (e: Exception) {
             Log.e(kTag, "SaveKeyValues operation failed", e)
         }

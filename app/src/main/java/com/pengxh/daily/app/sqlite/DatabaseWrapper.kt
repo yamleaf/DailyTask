@@ -10,31 +10,36 @@ import kotlinx.coroutines.withContext
 object DatabaseWrapper {
     private val dailyTaskDao by lazy { DailyTaskApplication.get().dataBase.dailyTaskDao() }
 
-    suspend fun loadAllTask(): MutableList<DailyTaskBean> {
-        return dailyTaskDao.loadAll()
+    /**
+     * 底层 Dao 为 Java 阻塞式 API（非 Room suspend），必须在 IO 线程执行。
+     * 否则从 Main（FGS serviceScope / lifecycleScope）调用会抛
+     * “Cannot access database on the main thread”，开机自动调度会被误判为任务列表为空。
+     */
+    suspend fun loadAllTask(): MutableList<DailyTaskBean> = withContext(Dispatchers.IO) {
+        dailyTaskDao.loadAll()
     }
 
-    suspend fun isTaskTimeExist(time: String): Boolean {
-        return dailyTaskDao.queryTaskByTime(time) > 0
+    suspend fun isTaskTimeExist(time: String): Boolean = withContext(Dispatchers.IO) {
+        dailyTaskDao.queryTaskByTime(time) > 0
     }
 
-    suspend fun updateTask(bean: DailyTaskBean) {
+    suspend fun updateTask(bean: DailyTaskBean) = withContext(Dispatchers.IO) {
         dailyTaskDao.update(bean)
     }
 
-    suspend fun deleteTask(bean: DailyTaskBean) {
+    suspend fun deleteTask(bean: DailyTaskBean) = withContext(Dispatchers.IO) {
         dailyTaskDao.delete(bean)
     }
 
-    suspend fun insert(bean: DailyTaskBean) {
+    suspend fun insert(bean: DailyTaskBean) = withContext(Dispatchers.IO) {
         dailyTaskDao.insert(bean)
     }
 
     /*****************************************************************************************/
     private val noticeDao by lazy { DailyTaskApplication.get().dataBase.noticeDao() }
 
-    suspend fun loadCurrentDayNotice(): MutableList<NotificationBean> {
-        return noticeDao.loadCurrentDayNotice("${LocalDate.now()}")
+    suspend fun loadCurrentDayNotice(): MutableList<NotificationBean> = withContext(Dispatchers.IO) {
+        noticeDao.loadCurrentDayNotice("${LocalDate.now()}")
     }
 
     /**
@@ -51,7 +56,7 @@ object DatabaseWrapper {
     suspend fun loadPunchResults(start: LocalDate, endExclusive: LocalDate): PunchDateResult {
         val from = "${start} 00:00:00"
         val to = "${endExclusive} 00:00:00"
-        val notices = noticeDao.loadBetween(from, to)
+        val notices = withContext(Dispatchers.IO) { noticeDao.loadBetween(from, to) }
         val successDates = notices.filter { it.noticeMessage.contains("考勤打卡成功") }
             .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull() }
             .toSet()
