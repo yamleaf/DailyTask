@@ -293,7 +293,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             applyHeroPowerBg(R.drawable.bg_hero_power_off)
             binding.heroDesc.text = "开启后启动远控服务功能，控制端可远程查看与操作本机。关闭则完全停止本机远控相关服务。"
         }
-        binding.heroVersion.text = BuildConfig.VERSION_NAME
+        binding.heroVersion.text = BuildConfig.GIT_SHA
 
         if (retrying) {
             binding.retryHint.text = if (nextReconnectIn <= 0) "正在尝试重连…" else "断线，约 $nextReconnectIn 秒后自动重连"

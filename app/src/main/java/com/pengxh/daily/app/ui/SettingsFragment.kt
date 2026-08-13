@@ -182,7 +182,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     override fun initOnCreate(savedInstanceState: Bundle?) {
         applyTargetAppIcon()
-        binding.appVersion.text = BuildConfig.VERSION_NAME
+        binding.appVersion.text = BuildConfig.GIT_SHA
         binding.versionRow.setOnClickListener { showVersionInfo() }
         if (ctx.notificationEnable()) {
             turnOnNotificationMonitorService()
@@ -2062,10 +2062,10 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     private fun showVersionInfo() {
         val appInfo = ctx.packageManager.getApplicationInfo(ctx.packageName, 0)
         val info = linkedMapOf(
+            "Git 提交" to BuildConfig.GIT_SHA,
             "版本号" to BuildConfig.VERSION_NAME,
             "Version Code" to BuildConfig.VERSION_CODE.toString(),
             "构建来源" to BuildConfig.BUILD_SOURCE,
-            "Git 提交" to BuildConfig.GIT_SHA,
             "构建时间" to BuildConfig.BUILD_TIME,
             "基线版本" to BuildConfig.BASELINE_VERSION,
             "包名" to ctx.packageName,
