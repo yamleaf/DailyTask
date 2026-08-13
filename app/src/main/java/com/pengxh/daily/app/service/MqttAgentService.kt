@@ -9,11 +9,12 @@ import android.content.Context
 import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -122,12 +123,14 @@ class MqttAgentService : Service() {
         }
 
         /**
-         * 取消 MQTT 复活闹钟（服务实例可能已销毁，仍按相同 PendingIntent 取消）。
+         * 取消 MQTT 复活/救援闹钟（服务实例可能已销毁，仍按相同 PendingIntent 取消）。
          * 「暂停使用」路径必须调用，避免残留闹钟在暂停期间再次拉起服务。
          */
         fun cancelResurrectAlarms(context: Context) {
             nextReconnectAtMs = 0L
             instance?.cancelResurrect()
+            KeepAliveReceiver.cancelRescueAlarm(context.applicationContext)
+            // 兼容旧版：取消曾指向本服务的 getForegroundService PendingIntent
             val appCtx = context.applicationContext
             val alarmManager = appCtx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
             val intent = Intent(appCtx, MqttAgentService::class.java)
@@ -165,6 +168,16 @@ class MqttAgentService : Service() {
 
     /** A2：复活闹钟退避计数。0 表示刚连上/无失败；随连续失败递增，连接成功后重置为 0 */
     private var resurrectAttempt = 0
+
+    /** startForeground 因 FGS 配额失败时置位，避免 onDestroy 再排短间隔复活连撞限额 */
+    @Volatile
+    private var quitDueToFgsQuota = false
+
+    /** 网络恢复时触发重连（息屏/Doze 下比干等退避更省空窗） */
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    @Volatile
+    private var lastNetworkReconnectAtMs = 0L
 
     /** 被控端本地数据变更广播接收器：收到后增量推送受影响区块给控制端（不再由控制端轮询全量） */
     private val remoteChangedReceiver = object : BroadcastReceiver() {
@@ -212,8 +225,11 @@ class MqttAgentService : Service() {
         // MQTT 由 KeepAliveReceiver / 复活闹钟 / 前台打开 App 在配额恢复后重新拉起。
         if (!startForegroundNotification()) {
             LogFileManager.error("MQTT 服务前台启动被系统拒绝（后台 FGS 配额限制），已降级退出，等待配额恢复后重试")
+            quitDueToFgsQuota = true
+            KeepAliveReceiver.scheduleFgsQuotaBackoff(this)
             return
         }
+        registerNetworkCallback()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
         Thread { initMqtt() }.start()
@@ -306,6 +322,13 @@ class MqttAgentService : Service() {
                 onDisconnected()
                 // Paho 自动重连在息屏/Doze 下可能失效，额外安排复活闹钟兜底（带退避）
                 scheduleResurrectWithBackoff()
+                // 进程仍在时优先进程内重连，少触发 Android 15 FGS 冷启动
+                scope.launch {
+                    kotlinx.coroutines.delay(3_000)
+                    if (!_connected) {
+                        runCatching { reconnect() }
+                    }
+                }
             }
 
             override fun messageArrived(topic: String?, message: MqttMessage?) {
@@ -1070,54 +1093,56 @@ class MqttAgentService : Service() {
         scheduleResurrect(delay)
     }
 
-    /** 复活闹钟：进程/服务被杀或长时间断线后兜底重启服务 */
+    /** 复活闹钟：进程/服务被杀或长时间断线后兜底 —— 统一走 KeepAliveReceiver，避免直接狂拉 FGS */
     private fun scheduleResurrect(delayMs: Long) {
         if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
-        // 「后台自启」总开关：关闭时不安排复活闹钟
         if (!KeepAliveReceiver.isKeepAliveEnabled()) return
         nextReconnectAtMs = System.currentTimeMillis() + delayMs
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val intent = Intent(this, MqttAgentService::class.java)
-        // Android 8+ 后台启动前台服务必须用 getForegroundService，否则 startService 会抛 IllegalStateException
-        val pi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            PendingIntent.getForegroundService(
-                this, 2001, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        } else {
-            PendingIntent.getService(
-                this, 2001, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        }
-        val triggerAt = SystemClock.elapsedRealtime() + delayMs
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
-            } else {
-                alarmManager.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "caught exception", e)
-        }
+        KeepAliveReceiver.scheduleRescue(this, delayMs, "mqtt_resurrect")
     }
 
     private fun cancelResurrect() {
         nextReconnectAtMs = 0L
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val intent = Intent(this, MqttAgentService::class.java)
-        val pi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            PendingIntent.getForegroundService(
-                this, 2001, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        } else {
-            PendingIntent.getService(
-                this, 2001, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
+        KeepAliveReceiver.cancelRescueAlarm(this)
+    }
+
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // 已连接则无需打扰；短时间去抖，避免 WiFi↔蜂窝抖动连着重连费电
+                if (_connected) return
+                val now = System.currentTimeMillis()
+                if (now - lastNetworkReconnectAtMs < 8_000L) return
+                lastNetworkReconnectAtMs = now
+                if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
+                if (KeepAliveReceiver.isPaused()) return
+                LogFileManager.writeLog("网络恢复：尝试 MQTT 重连")
+                scope.launch {
+                    try {
+                        reconnect()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "网络恢复重连失败", e)
+                    }
+                }
+            }
         }
-        alarmManager.cancel(pi)
+        try {
+            cm.registerDefaultNetworkCallback(cb)
+            networkCallback = cb
+        } catch (e: Exception) {
+            Log.e(TAG, "注册网络回调失败", e)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val cb = networkCallback ?: return
+        networkCallback = null
+        try {
+            getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb)
+        } catch (_: Exception) {
+        }
     }
 
     /** 任务时间点格式 HH:mm:ss（与控制端约定一致） */
@@ -1153,6 +1178,7 @@ class MqttAgentService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterNetworkCallback()
         try { unregisterReceiver(remoteChangedReceiver) } catch (_: Exception) { }
         _connected = false
         instance = null
@@ -1170,7 +1196,10 @@ class MqttAgentService : Service() {
         }
         // 如果开关仍开启且未暂停使用，安排复活闹钟兜底重连；
         // 「暂停使用」或正常关 MQTT 开关时一律取消复活闹钟，避免安静期被再次拉起。
-        if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
+        // FGS 配额失败路径已单独排了 10 分钟救援，此处不再短退避连撞。
+        if (quitDueToFgsQuota) {
+            // keep scheduled FgsQuotaBackoff
+        } else if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
             && KeepAliveReceiver.isKeepAliveEnabled()
         ) {
             scheduleResurrectWithBackoff()

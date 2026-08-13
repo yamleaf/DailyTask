@@ -127,6 +127,9 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.pengxh.daily.action.RESURRECT" />
                 <action android:name="com.pengxh.daily.action.RESET_TASK" />
+                <action android:name="com.pengxh.daily.action.BATTERY_ALERT" />
+                <action android:name="com.pengxh.daily.action.PUNCH_PREWARM" />
+                <action android:name="com.pengxh.daily.action.PUNCH_DUE" />
             </intent-filter>
         </receiver>
 

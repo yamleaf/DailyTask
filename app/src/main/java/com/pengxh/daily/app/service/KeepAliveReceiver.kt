@@ -40,10 +40,26 @@ class KeepAliveReceiver : BroadcastReceiver() {
         const val ACTION_RESURRECT = "com.pengxh.daily.action.RESURRECT"
         const val ACTION_RESET_TASK = "com.pengxh.daily.action.RESET_TASK"
         const val ACTION_BATTERY_ALERT = "com.pengxh.daily.action.BATTERY_ALERT"
+        /** 打卡前预热：只拉服务/悬浮窗/MQTT，不亮屏（省电） */
+        const val ACTION_PUNCH_PREWARM = "com.pengxh.daily.action.PUNCH_PREWARM"
+        /** 打卡到点：确保服务存活；若调度意图仍在但未运行则续跑 */
+        const val ACTION_PUNCH_DUE = "com.pengxh.daily.action.PUNCH_DUE"
         private const val ALARM_REQUEST_CODE = 1003
         private const val RESET_ALARM_REQUEST_CODE = 1004
         private const val BATTERY_ALARM_REQUEST_CODE = 1005
+        private const val PUNCH_PREWARM_REQUEST_CODE = 1006
+        private const val PUNCH_DUE_REQUEST_CODE = 1007
+        /** MQTT/FGS 配额失败等紧急救援，与 15 分钟心跳 PendingIntent 分离 */
+        private const val RESCUE_ALARM_REQUEST_CODE = 1008
         private const val INTERVAL_MS = 15 * 60 * 1000L
+        /** 到点前预热提前量：兼顾 MQTT 重连与安卓 15+ 服务拉起，又不过早耗电 */
+        private const val PUNCH_PREWARM_BEFORE_MS = 90_000L
+        private const val ENSURE_SERVICES_DEBOUNCE_MS = 8_000L
+        /** FGS 配额耗尽后救援间隔：避免 30s 连撞 Android 15 后台 FGS 限额 */
+        private const val FGS_QUOTA_BACKOFF_MS = 10 * 60 * 1000L
+
+        @Volatile
+        private var lastEnsureServicesAtMs = 0L
 
         private fun resurrectIntent(context: Context): Intent =
             Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_RESURRECT }
@@ -54,10 +70,24 @@ class KeepAliveReceiver : BroadcastReceiver() {
         private fun batteryAlertIntent(context: Context): Intent =
             Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_BATTERY_ALERT }
 
+        private fun punchPrewarmIntent(context: Context): Intent =
+            Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_PUNCH_PREWARM }
+
+        private fun punchDueIntent(context: Context): Intent =
+            Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_PUNCH_DUE }
+
         private fun pendingIntent(context: Context): PendingIntent =
             PendingIntent.getBroadcast(
                 context,
                 ALARM_REQUEST_CODE,
+                resurrectIntent(context),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+        private fun rescuePendingIntent(context: Context): PendingIntent =
+            PendingIntent.getBroadcast(
+                context,
+                RESCUE_ALARM_REQUEST_CODE,
                 resurrectIntent(context),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -75,6 +105,22 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 context,
                 BATTERY_ALARM_REQUEST_CODE,
                 batteryAlertIntent(context),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+        private fun punchPrewarmPendingIntent(context: Context): PendingIntent =
+            PendingIntent.getBroadcast(
+                context,
+                PUNCH_PREWARM_REQUEST_CODE,
+                punchPrewarmIntent(context),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+        private fun punchDuePendingIntent(context: Context): PendingIntent =
+            PendingIntent.getBroadcast(
+                context,
+                PUNCH_DUE_REQUEST_CODE,
+                punchDueIntent(context),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
@@ -158,6 +204,8 @@ class KeepAliveReceiver : BroadcastReceiver() {
             cancel(appCtx)
             cancelResetAlarm(appCtx)
             cancelBatteryAlert(appCtx)
+            cancelPunchAlarms(appCtx)
+            cancelRescueAlarm(appCtx)
             // 即使 MQTT 服务已销毁，也取消可能残留的复活 PendingIntent
             runCatching { MqttAgentService.cancelResurrectAlarms(appCtx) }
         }
@@ -252,6 +300,102 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 appCtx.startService(Intent(appCtx, FloatingWindowService::class.java))
             } catch (e: Exception) {
                 Log.e(javaClass.simpleName, "拉起 FloatingWindowService 失败", e)
+            }
+        }
+
+        /**
+         * 合并拉起 FGS + MQTT + 悬浮窗；短时间去抖，降低 Android 15+ 后台 FGS 配额连撞。
+         */
+        fun ensureServicesAlive(context: Context, reason: String) {
+            if (isPaused()) return
+            val now = System.currentTimeMillis()
+            if (now - lastEnsureServicesAtMs < ENSURE_SERVICES_DEBOUNCE_MS) {
+                Log.d(javaClass.simpleName, "ensureServicesAlive 去抖跳过 reason=$reason")
+                return
+            }
+            lastEnsureServicesAtMs = now
+            LogFileManager.writeLog("保活拉起服务 reason=$reason")
+            startMqttAgentIfEnabled(context)
+            ensureFloatingWindow(context)
+            if (!ForegroundRunningService.isRunning) {
+                tryStartForegroundServiceStatic(context)
+            }
+        }
+
+        /** 调度意图仍在但 TaskScheduler 未跑时补启（复活 / 到点闹钟） */
+        fun tryResumeSchedulerIfWanted(context: Context, allowRetryStartFgs: Boolean = true) {
+            if (isPaused()) return
+            if (!SaveKeyValues.loadBoolean(Constant.SCHEDULER_WANTED_KEY, false)) return
+            if (TaskScheduler.isRunning()) return
+            if (!ForegroundRunningService.isRunning) {
+                tryStartForegroundServiceStatic(context)
+                // 仅再试一次：FGS 成功 onCreate 内还会再调；失败则等心跳/救援闹钟，避免死循环
+                if (allowRetryStartFgs) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        tryResumeSchedulerIfWanted(context.applicationContext, allowRetryStartFgs = false)
+                    }, 1200L)
+                }
+                return
+            }
+            Handler(Looper.getMainLooper()).post {
+                if (isPaused() || TaskScheduler.isRunning()) return@post
+                if (!SaveKeyValues.loadBoolean(Constant.SCHEDULER_WANTED_KEY, false)) return@post
+                LogFileManager.action("保活续调度：自动 startTask")
+                TaskScheduler.startTask()
+            }
+        }
+
+        /**
+         * 为下一场打卡排精确闹钟：到点执行 + 提前预热。
+         * 协程 delay 仍保留（进程存活时省一次冷启动）；闹钟负责进程被杀后的兜底。
+         */
+        fun scheduleNextPunchAlarms(context: Context, punchAtMs: Long) {
+            val appCtx = context.applicationContext
+            cancelPunchAlarms(appCtx)
+            if (!isKeepAliveEnabled() || isPaused()) return
+            val now = System.currentTimeMillis()
+            if (punchAtMs <= now) return
+            setExactAlarm(appCtx, punchAtMs, punchDuePendingIntent(appCtx))
+            val prewarmAt = punchAtMs - PUNCH_PREWARM_BEFORE_MS
+            if (prewarmAt > now + 5_000L) {
+                setExactAlarm(appCtx, prewarmAt, punchPrewarmPendingIntent(appCtx))
+            }
+            LogFileManager.writeLog(
+                "已排打卡闹钟 due=${punchAtMs} prewarm=${if (prewarmAt > now + 5_000L) prewarmAt else 0}"
+            )
+        }
+
+        fun cancelPunchAlarms(context: Context) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            alarmManager.cancel(punchPrewarmPendingIntent(context))
+            alarmManager.cancel(punchDuePendingIntent(context))
+        }
+
+        /**
+         * MQTT 断线 / FGS 配额失败的救援闹钟（与 15 分钟心跳分离，避免互相覆盖）。
+         * 目标统一走 ACTION_RESURRECT → ensureServicesAlive，减少直接 startForegroundService 连撞。
+         */
+        fun scheduleRescue(context: Context, delayMs: Long, reason: String) {
+            if (!isKeepAliveEnabled() || isPaused()) return
+            val triggerAt = System.currentTimeMillis() + delayMs.coerceAtLeast(5_000L)
+            setExactAlarm(context.applicationContext, triggerAt, rescuePendingIntent(context))
+            LogFileManager.writeLog("安排保活救援 delay=${delayMs}ms reason=$reason")
+        }
+
+        fun scheduleFgsQuotaBackoff(context: Context) {
+            scheduleRescue(context, FGS_QUOTA_BACKOFF_MS, "fgs_quota")
+        }
+
+        fun cancelRescueAlarm(context: Context) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            alarmManager.cancel(rescuePendingIntent(context))
+        }
+
+        private fun tryStartForegroundServiceStatic(context: Context) {
+            try {
+                context.startForegroundService(Intent(context, ForegroundRunningService::class.java))
+            } catch (e: Exception) {
+                Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
             }
         }
 
@@ -409,18 +553,19 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 schedule(context)
             }
             ACTION_RESURRECT -> {
-                // 关键修复：无论本次是否拉起服务，都先续约下一次心跳闹钟。
-                // 原实现在服务存活时直接 return、拉起后也只续重置闹钟，导致 15 分钟心跳只触发一次，
-                // 进程被杀后无复活闹钟，只能苦等每日重置点。现改为每次心跳都自续约，链条永不中断。
+                // 无论本次是否拉起服务，都先续约下一次心跳闹钟，链条不中断。
                 schedule(context)
-                // 心跳复活：无论保活前台服务是否存活，都确保 MQTT 代理在运行，
-                // 覆盖「进程被杀后 ForegroundRunningService 仍存活但 MQTT 已死」的情况
-                startMqttAgentIfEnabled(context)
-                ensureFloatingWindow(context)
-                if (ForegroundRunningService.isRunning) return
-                tryStartForegroundService(context)
-                // 复活后同时确保每日重置闹钟存在
                 scheduleResetAlarm(context)
+                ensureServicesAlive(context, "resurrect")
+                tryResumeSchedulerIfWanted(context)
+            }
+            ACTION_PUNCH_PREWARM -> {
+                // 到点前只预热服务，不亮屏，降低自然息屏下的耗电
+                ensureServicesAlive(context, "punch_prewarm")
+            }
+            ACTION_PUNCH_DUE -> {
+                ensureServicesAlive(context, "punch_due")
+                tryResumeSchedulerIfWanted(context)
             }
             ACTION_RESET_TASK -> {
                 if (!SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) return

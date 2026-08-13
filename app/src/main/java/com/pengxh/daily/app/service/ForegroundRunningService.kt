@@ -158,10 +158,16 @@ class ForegroundRunningService : Service() {
         } catch (e: Exception) {
             LogFileManager.error("ForegroundRunningService startForeground 被系统拒绝：${e.message}")
             Log.e(javaClass.simpleName, "startForeground 失败（后台 FGS 配额限制）", e)
+            isRunning = false
+            // 配额耗尽：拉长救援间隔，避免短时间连撞 Android 15 FGS 限额
+            KeepAliveReceiver.scheduleFgsQuotaBackoff(this)
             stopSelf()
             false
         }
         if (!foregroundOk) return
+
+        // 进程复活后：按调度意图自动续跑（与开机自动调度独立）
+        KeepAliveReceiver.tryResumeSchedulerIfWanted(this)
 
         serviceScope.launch {
             notificationText.collect { text ->
@@ -180,7 +186,7 @@ class ForegroundRunningService : Service() {
             }
         }
 
-val filter = IntentFilter().apply {
+        val filter = IntentFilter().apply {
             addAction(Intent.ACTION_TIME_TICK)
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_SCREEN_OFF)

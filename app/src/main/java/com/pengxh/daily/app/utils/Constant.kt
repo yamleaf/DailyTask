@@ -39,6 +39,11 @@ object Constant {
     const val TASK_AUTO_RECYCLE_KEY = "TASK_AUTO_RECYCLE_KEY" // 任务每日自动循环(Boolean)
     /** 开机自动调度：开启且任务列表非空时，重启后自动 startTask（Boolean，默认 false） */
     const val BOOT_AUTO_SCHEDULE_KEY = "BOOT_AUTO_SCHEDULE_KEY"
+    /**
+     * 用户/远程意图：调度应处于运行态（Boolean）。
+     * 进程被杀后由保活复活根据此标志自动 startTask；主动停止/暂停时清除。
+     */
+    const val SCHEDULER_WANTED_KEY = "SCHEDULER_WANTED_KEY"
     const val RANDOM_TIME_KEY = "RANDOM_TIME_KEY" // 随机时间(Boolean)
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
     const val NOTIFICATION_TRANSFER_KEY = "NOTIFICATION_TRANSFER_KEY" // 通知转移：将目标打卡应用通知经现有消息渠道(企业微信/邮箱)转发到目标手机(Boolean)

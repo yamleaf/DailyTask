@@ -46,6 +46,9 @@ import java.util.Calendar
  * 任务调度器
  */
 object TaskScheduler {
+    /** 进程被杀后闹钟略晚于计划点时，仍允许执行的宽限（毫秒） */
+    private const val PUNCH_LATE_GRACE_MS = 120_000L
+
     /**
      * 调度器是否在运行中
      * */
@@ -128,6 +131,7 @@ object TaskScheduler {
         // 远程/开机启动时确保悬浮窗在跑，否则打卡倒计时不可见且安卓 15+ 后台跳转易失败
         KeepAliveReceiver.ensureFloatingWindow(DailyTaskApplication.get())
 
+        SaveKeyValues.saveBoolean(Constant.SCHEDULER_WANTED_KEY, true)
         _isRunning.value = true
         runningDetail = "初始化排程"
         // 运行态变化会影响快照的 schedulerRunning：失效全量快照缓存，
@@ -188,18 +192,24 @@ object TaskScheduler {
                 continue
             }
 
-            // 任务时间已过，跳过
+            // 任务时间已过：超过宽限则跳过；宽限内仍执行（进程被杀后闹钟略晚拉起的场景）
             if (task.actualTimeMillis <= now) {
-                skippedCount++
+                val lateBy = now - task.actualTimeMillis
+                if (lateBy > PUNCH_LATE_GRACE_MS) {
+                    skippedCount++
+                    LogFileManager.writeLog(
+                        "第 ${task.displayIndex} 个任务已过期（计划=${task.plannedTime}，" +
+                                "实际=${task.actualTime}），跳过"
+                    )
+                    continue
+                }
                 LogFileManager.writeLog(
-                    "第 ${task.displayIndex} 个任务已过期（计划=${task.plannedTime}，" +
-                            "实际=${task.actualTime}），跳过"
+                    "第 ${task.displayIndex} 个任务略过期 ${lateBy}ms，宽限内仍执行"
                 )
-                continue
             }
 
             // ====== 阶段 1：倒计时等待 ======
-            val delayMs = task.actualTimeMillis - now
+            val delayMs = (task.actualTimeMillis - now).coerceAtLeast(0L)
             runningDetail =
                 "等待第 ${task.displayIndex}/${schedule.size} 个任务 ${task.actualTime}"
             _tipsEvent.emit(
@@ -218,10 +228,20 @@ object TaskScheduler {
                         "延迟=${delayMs / 1000}s"
             )
 
-            updateCountdownWithNotification(delayMs) { remaining ->
-                val seconds = (remaining / 1000).toInt()
-                ForegroundRunningService.emitNotificationText("${seconds.formatTime()}后执行第${task.displayIndex}个任务")
+            // 精确闹钟兜底：进程被杀后仍能到点唤醒；进程存活时与协程 delay 并行，到点闹钟多为空操作
+            KeepAliveReceiver.scheduleNextPunchAlarms(
+                DailyTaskApplication.get(),
+                task.actualTimeMillis
+            )
+
+            if (delayMs > 0L) {
+                updateCountdownWithNotification(delayMs) { remaining ->
+                    val seconds = (remaining / 1000).toInt()
+                    ForegroundRunningService.emitNotificationText("${seconds.formatTime()}后执行第${task.displayIndex}个任务")
+                }
             }
+            // 进入打卡阶段前取消本场闹钟，避免与执行中的流程叠触发
+            KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
 
             // ====== 阶段 2：打开目标 App，等待打卡或超时 ======
             val timeoutSeconds = SaveKeyValues.loadInt(
@@ -399,6 +419,7 @@ object TaskScheduler {
         runningDetail = message
         LogFileManager.writeLog(message)
         ForegroundRunningService.emitNotificationText(message)
+        KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
         // 本轮全部被跳过（如整日休息/节假日）→ 维持"今日休息"UI 高亮
         if (executedCount == 0 && skippedCount > 0) {
             _tipsEvent.emit(TipsEvent.Skip)
@@ -547,6 +568,8 @@ object TaskScheduler {
         }
 
         LogFileManager.action("停止执行每日任务")
+        SaveKeyValues.saveBoolean(Constant.SCHEDULER_WANTED_KEY, false)
+        KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
         job?.cancel()
         job = null
         _isRunning.value = false
@@ -565,6 +588,8 @@ object TaskScheduler {
      */
     fun requestStopDueToError(reason: String) {
         LogFileManager.error("因错误请求停止：$reason")
+        SaveKeyValues.saveBoolean(Constant.SCHEDULER_WANTED_KEY, false)
+        KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
         job?.cancel()
         job = null
         _isRunning.value = false
