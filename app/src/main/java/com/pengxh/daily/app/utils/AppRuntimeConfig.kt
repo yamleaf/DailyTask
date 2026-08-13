@@ -15,9 +15,14 @@ object AppRuntimeConfig {
     private val _forcePseudoMask = MutableStateFlow(false)
     val forcePseudoMask = _forcePseudoMask.asStateFlow()
 
+    private val _desktopPetEnabled = MutableStateFlow(Constant.DESKTOP_PET_ENABLED_DEFAULT)
+    val desktopPetEnabled = _desktopPetEnabled.asStateFlow()
+
     fun isPowerSaveMode(): Boolean = _powerSaveMode.value
 
     fun isForcePseudoMask(): Boolean = _forcePseudoMask.value
+
+    fun isDesktopPetEnabled(): Boolean = _desktopPetEnabled.value
 
     fun setPowerSaveMode(enabled: Boolean) {
         SaveKeyValues.saveBoolean(Constant.POWER_SAVE_MODE_KEY, enabled)
@@ -32,10 +37,19 @@ object AppRuntimeConfig {
         }
     }
 
+    fun setDesktopPetEnabled(enabled: Boolean) {
+        SaveKeyValues.saveBoolean(Constant.DESKTOP_PET_ENABLED_KEY, enabled)
+        _desktopPetEnabled.value = enabled
+    }
+
     fun refreshFromStore() {
         _powerSaveMode.value =
             SaveKeyValues.loadBoolean(Constant.POWER_SAVE_MODE_KEY, false)
         _forcePseudoMask.value =
             SaveKeyValues.loadBoolean(Constant.FORCE_PSEUDO_MASK_KEY, false)
+        _desktopPetEnabled.value = SaveKeyValues.loadBoolean(
+            Constant.DESKTOP_PET_ENABLED_KEY,
+            Constant.DESKTOP_PET_ENABLED_DEFAULT
+        )
     }
 }

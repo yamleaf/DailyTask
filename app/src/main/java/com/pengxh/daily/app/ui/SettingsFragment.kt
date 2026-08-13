@@ -651,6 +651,10 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 ConfigImportSignal.notifyRemoteChanged(ctx)
             }
         }
+        binding.desktopPetSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncingSwitchState) return@setOnCheckedChangeListener
+            AppRuntimeConfig.setDesktopPetEnabled(checked)
+        }
         binding.powerSaveSwitch.setOnCheckedChangeListener { _, checked ->
             if (syncingSwitchState) return@setOnCheckedChangeListener
             AppRuntimeConfig.setPowerSaveMode(checked)
@@ -904,6 +908,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         try {
             binding.gestureDetectSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
             binding.backToHomeSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
+            binding.desktopPetSwitch.isChecked = AppRuntimeConfig.isDesktopPetEnabled()
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
             binding.keepAliveSwitch.isChecked = KeepAliveReceiver.isPaused()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()

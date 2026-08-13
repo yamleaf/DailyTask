@@ -2,10 +2,20 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="wrap_content"
-    android:layout_height="wrap_content">
+    android:layout_height="wrap_content"
+    android:clipChildren="true"
+    android:clipToPadding="true">
 
-    <!-- 非打卡期间的「桌面小宠物」：进场/眨眼/随机/挥手/离场；贴边播 blink_dock_left/right。
-         视觉与交互由 DesktopPetView + DesktopPetController 承载。 -->
+    <!-- 非打卡空闲：七彩状态球（桌宠关）；贴边 8dp 色条。gravity 必须 start，center 会导致色条裁空 -->
+    <com.pengxh.daily.app.widget.IdleStatusBallView
+        android:id="@+id/idleBallView"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="start|center_vertical"
+        android:elevation="3dp"
+        android:visibility="gone" />
+
+    <!-- 非打卡空闲：桌面小宠物（设置开关打开时）；贴边播 blink_dock_left/right -->
     <com.pengxh.daily.app.widget.DesktopPetView
         android:id="@+id/idlePetView"
         android:layout_width="wrap_content"

@@ -13,6 +13,8 @@
     <string name="settings_update_holiday">更新节假日数据</string>
     <string name="settings_floating_title">悬浮窗权限</string>
     <string name="settings_floating_tip">服务未开启，打完卡无法自动跳回本软件</string>
+    <string name="settings_desktop_pet_title">桌面宠物</string>
+    <string name="settings_desktop_pet_tip">关闭时显示悬浮小球；开启后显示动画桌宠</string>
     <string name="settings_notice_title">通知监听</string>
     <string name="settings_notice_tip">服务未开启，无法监听打卡结果和接收远程指令</string>
     <string name="settings_transfer_title">通知转发</string>

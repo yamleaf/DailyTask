@@ -41,6 +41,9 @@ object Constant {
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
     const val NOTIFICATION_TRANSFER_KEY = "NOTIFICATION_TRANSFER_KEY" // 通知转移：将目标打卡应用通知经现有消息渠道(企业微信/邮箱)转发到目标手机(Boolean)
     const val POWER_SAVE_MODE_KEY = "POWER_SAVE_MODE_KEY" // 省电模式(Boolean)
+    /** 桌面小宠物：关闭时显示悬浮小球，开启时显示 Lottie 桌宠（默认关闭） */
+    const val DESKTOP_PET_ENABLED_KEY = "DESKTOP_PET_ENABLED_KEY"
+    const val DESKTOP_PET_ENABLED_DEFAULT = false
     const val LOG_ENABLED_KEY = "LOG_ENABLED_KEY" // 运行时日志总开关(Boolean)，关闭后不再记录任何日志
     /** 自定义打卡结果关键字（逗号分隔存储），识别打卡成功时与内置关键字合并匹配 */
     const val PUNCH_RESULT_KEYWORDS_KEY = "PUNCH_RESULT_KEYWORDS_KEY"

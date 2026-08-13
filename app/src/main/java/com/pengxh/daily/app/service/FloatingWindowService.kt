@@ -22,6 +22,7 @@ import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.widget.DesktopPetController
+import com.pengxh.daily.app.widget.IdleBallController
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +46,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     // 1) floatSessionActive —— 是否处于「被控端主动跳到目标 App」的操作会话中（由 openApplication 统一 start、各操作结束 stop）
     // 2) visibilityAllowed —— 蒙层是否未遮挡（由 show/hide 控制，蒙层显示时临时隐藏避免截到黑屏）
     // 3) hiddenForScreenshot —— 截屏流水线进行中强制 GONE，避免倒计时/贴边宠物进图
-    // 形态切换：会话中显示完整倒计时卡片；空闲（非打卡、蒙层未遮挡）显示桌面小宠物，
+    // 形态切换：会话中显示完整倒计时卡片；空闲显示悬浮小球或桌宠（由桌宠开关决定），
     // 保证悬浮窗窗口常驻可见可拖动，为安卓 15+ 后台跳转提供可见窗口豁免；蒙层遮挡时整体隐藏。
     private var floatSessionActive = false
     private var visibilityAllowed = true
@@ -65,12 +66,9 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         private const val COUNTDOWN_FADE_STEP_MS = 920L
     }
 
-    /**
-     * 桌面宠物交互控制器（拖拽 / 左右贴边 / 点击反馈）。
-     * 由 DesktopPetController 内部管理 idlePetView 的位置/尺寸/状态切换与触摸事件，
-     * 本 service 不再处理 onTouchListener 与贴边计算。
-     */
+    /** 桌宠控制器（开关打开时）；小球控制器（默认 / 开关关闭时）。二者互斥。 */
     private var petController: DesktopPetController? = null
+    private var ballController: IdleBallController? = null
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
@@ -129,7 +127,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                     binding.waveProgressView.stopWaveAnimation()
                     resetCountdownPresentation()
                 }
-                // 打卡会话联动宠物：开始→COUNTDOWN 停动画/计时器；结束→恢复 blink + 重启计时器
+                // 打卡会话联动桌宠：开始→COUNTDOWN；结束→恢复 blink（小球无此状态机）
                 petController?.onCountdownChanged(active)
                 recomputeVisibility()
             }
@@ -140,39 +138,64 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                 recomputeVisibility()
             }
         }
-        // 伪息屏开关变更不直接驱动宠物；DIMMED 由蒙层可见性（visibility）驱动
         launch {
             AppRuntimeConfig.powerSaveMode.collect {
                 restartMemoryMonitoring()
                 applyWaveAnimation()
             }
         }
+        launch {
+            AppRuntimeConfig.desktopPetEnabled.collect {
+                applyIdleController()
+                recomputeVisibility()
+            }
+        }
 
-        // 初始状态：空闲（非打卡、蒙层未遮挡）显示桌面小宠物；窗口默认参数由 controller 接管
+        // 初始：倒计时隐藏；空闲 chrome 由 applyIdleController + recomputeVisibility 决定
         binding.countdownCardView.visibility = View.GONE
-        binding.idlePetView.visibility = View.VISIBLE
+        binding.idlePetView.visibility = View.GONE
+        binding.idleBallView.visibility = View.GONE
         binding.root.visibility = View.VISIBLE
         binding.root.alpha = 1.0f
         binding.timeView.text = "0s"
-        floatViewParams?.let { params ->
-            // DesktopPetView 是 binding.idlePetView 的实际类型（自定义 FrameLayout），
-            // 此处创建 controller 接管触摸/位置/状态/动画，service 仅负责可见性与生命周期。
-            // 注意：updateViewLayout 必须作用于 addView 的窗口根视图（binding.root），不能传子 View。
-            petController = DesktopPetController(
-                context = this,
-                windowManager = windowManager,
-                petView = binding.idlePetView,
-                windowView = binding.root,
-                params = params
-            )
-            // 补同步：collect 块在 controller 创建前注册，若开关/会话已是激活态，
-            // replay 不会在 controller 就绪后重发——这里手动拉齐一次当前状态。
-            petController?.onCountdownChanged(floatSessionActive)
-            petController?.onDimmedChanged(!visibilityAllowed)
-        }
+        applyIdleController()
+        recomputeVisibility()
 
         restartMemoryMonitoring()
         applyWaveAnimation()
+    }
+
+    /** 按桌宠开关创建/销毁 pet 或 ball 控制器（互斥）。 */
+    private fun applyIdleController() {
+        val params = floatViewParams ?: return
+        val wantPet = AppRuntimeConfig.isDesktopPetEnabled()
+        if (wantPet) {
+            ballController?.destroy()
+            ballController = null
+            if (petController == null) {
+                petController = DesktopPetController(
+                    context = this,
+                    windowManager = windowManager,
+                    petView = binding.idlePetView,
+                    windowView = binding.root,
+                    params = params
+                )
+                petController?.onCountdownChanged(floatSessionActive)
+                petController?.onDimmedChanged(!visibilityAllowed)
+            }
+        } else {
+            petController?.destroy()
+            petController = null
+            if (ballController == null) {
+                ballController = IdleBallController(
+                    context = this,
+                    windowManager = windowManager,
+                    ballView = binding.idleBallView,
+                    windowView = binding.root,
+                    params = params
+                )
+            }
+        }
     }
 
     private fun applyWaveAnimation() {
@@ -260,10 +283,9 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     }
 
     // 统一计算悬浮窗可见性与形态：
-    // · 蒙层遮挡或截屏临时隐藏时整体 GONE（不参与绘制与 hit-test）；
-    // · 打卡会话中展开完整倒计时卡片；
-    // · 空闲（非打卡、蒙层未遮挡）时显示桌面小宠物，窗口保持常驻可见可拖动，
-    //   为安卓 15+ 后台跳转提供可见窗口豁免。
+    // · 蒙层遮挡或截屏临时隐藏时整体 GONE；
+    // · 打卡会话中展开倒计时卡片；
+    // · 空闲时：桌宠开→宠物，关→悬浮小球（窗口常驻，供安卓 15+ 后台跳转豁免）。
     private fun recomputeVisibility() {
         if (!visibilityAllowed || hiddenForScreenshot) {
             binding.root.visibility = View.GONE
@@ -274,19 +296,27 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         }
         if (floatSessionActive) {
             binding.idlePetView.visibility = View.GONE
+            binding.idleBallView.visibility = View.GONE
             binding.countdownCardView.visibility = View.VISIBLE
             binding.root.visibility = View.VISIBLE
             binding.root.alpha = 1.0f
+            // 小球模式窗口为固定小尺寸，进倒计时需放开为 WRAP_CONTENT 以免裁切卡片
+            floatViewParams?.let {
+                it.width = WindowManager.LayoutParams.WRAP_CONTENT
+                it.height = WindowManager.LayoutParams.WRAP_CONTENT
+            }
             applyWaveAnimation()
         } else {
             binding.countdownCardView.visibility = View.GONE
-            binding.idlePetView.visibility = View.VISIBLE
+            val petOn = AppRuntimeConfig.isDesktopPetEnabled()
+            binding.idlePetView.visibility = if (petOn) View.VISIBLE else View.GONE
+            binding.idleBallView.visibility = if (petOn) View.GONE else View.VISIBLE
             binding.root.visibility = View.VISIBLE
             binding.root.alpha = 1.0f
             binding.waveProgressView.stopWaveAnimation()
             resetCountdownPresentation()
+            if (!petOn) ballController?.ensureLayout()
         }
-        // WRAP_CONTENT 窗口在宠物/卡片形态切换后需重新布局以匹配新尺寸
         floatViewParams?.let {
             try {
                 windowManager.updateViewLayout(binding.root, it)
@@ -346,6 +376,8 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
         memoryMonitorJob?.cancel()
         petController?.destroy()
         petController = null
+        ballController?.destroy()
+        ballController = null
         cancel()
         if (::binding.isInitialized && binding.root.isAttachedToWindow) {
             try {
