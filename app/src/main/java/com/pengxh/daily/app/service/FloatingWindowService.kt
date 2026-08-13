@@ -35,6 +35,22 @@ import kotlinx.coroutines.withContext
 
 class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispatchers.Main) {
 
+    companion object {
+        @Volatile
+        var isRunning: Boolean = false
+            private set
+
+        /** 与预截图触发对齐（NotificationMonitorService / TaskScheduler：tick <= 5） */
+        private const val SCREENSHOT_AT_SECONDS = 5
+        /** 更早开始渐隐，秒级目标之间用近 1s 动画衔接，避免跳变 */
+        private const val COUNTDOWN_FADE_START = 10
+        private const val COUNTDOWN_FADE_MIN_ALPHA = 0.04f
+        /** 预截图时刻目标透明度（由曲线平滑落到此附近，不再瞬间跳变） */
+        private const val COUNTDOWN_ALPHA_AT_SCREENSHOT = 0.14f
+        /** 与倒计时 tick 间隔对齐，连续收淡 */
+        private const val COUNTDOWN_FADE_STEP_MS = 920L
+    }
+
     private val kTag = "FloatingWindowService"
     private val windowManager by lazy { getSystemService(WindowManager::class.java) }
     private val activityManager by lazy { getSystemService(ActivityManager::class.java) }
@@ -54,18 +70,6 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     /** 末段渐隐期间窗口透传触摸，避免挡关键信息点击 / 截图操作区 */
     private var countdownTouchPassthrough = false
 
-    companion object {
-        /** 与预截图触发对齐（NotificationMonitorService / TaskScheduler：tick <= 5） */
-        private const val SCREENSHOT_AT_SECONDS = 5
-        /** 更早开始渐隐，秒级目标之间用近 1s 动画衔接，避免跳变 */
-        private const val COUNTDOWN_FADE_START = 10
-        private const val COUNTDOWN_FADE_MIN_ALPHA = 0.04f
-        /** 预截图时刻目标透明度（由曲线平滑落到此附近，不再瞬间跳变） */
-        private const val COUNTDOWN_ALPHA_AT_SCREENSHOT = 0.14f
-        /** 与倒计时 tick 间隔对齐，连续收淡 */
-        private const val COUNTDOWN_FADE_STEP_MS = 920L
-    }
-
     /** 桌宠控制器（开关打开时）；小球控制器（默认 / 开关关闭时）。二者互斥。 */
     private var petController: DesktopPetController? = null
     private var ballController: IdleBallController? = null
@@ -77,6 +81,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         // 浮动窗口由 Service 上下文 inflate；Service 不会自动套用 App 的 Material 主题，
         // 必须用 ContextThemeWrapper 显式包一层 Theme.DailyTask，否则 MaterialCardView/MaterialTextView 会 inflate 崩溃。
         binding = WindowFloatingBinding.inflate(LayoutInflater.from(ContextThemeWrapper(this, R.style.Theme_DailyTask)))
@@ -387,6 +392,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             }
         }
         Log.d(kTag, "onDestroy: FloatingWindowService")
+        isRunning = false
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

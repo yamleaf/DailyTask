@@ -9,7 +9,9 @@ import com.pengxh.daily.app.extensions.bringDailyTaskToFront
 import com.pengxh.daily.app.extensions.resolveExecutionTime
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
+import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.ForegroundRunningService
+import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
@@ -119,6 +121,9 @@ object TaskScheduler {
             LogFileManager.error("TaskScheduler scope 未初始化")
             return
         }
+
+        // 远程/开机启动时确保悬浮窗在跑，否则打卡倒计时不可见且安卓 15+ 后台跳转易失败
+        KeepAliveReceiver.ensureFloatingWindow(DailyTaskApplication.get())
 
         _isRunning.value = true
         runningDetail = "初始化排程"
@@ -240,6 +245,10 @@ object TaskScheduler {
                 }
             }
 
+            KeepAliveReceiver.ensureFloatingWindow(DailyTaskApplication.get())
+            if (!FloatingWindowService.isRunning) {
+                delay(500)
+            }
             DailyTaskApplication.get().openApplication()
 
             // 开启无障碍文本检测（仅「文本反馈」模式；「截屏反馈」不遍历无障碍节点树）

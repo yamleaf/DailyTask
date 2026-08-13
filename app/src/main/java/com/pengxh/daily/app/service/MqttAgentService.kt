@@ -493,6 +493,21 @@ class MqttAgentService : Service() {
             val result = runCatching {
                 when (action) {
                     Protocol.ACTION_START -> {
+                        // 重启后未点开被控端时：确保 FGS 作用域 + 悬浮窗就绪，再启动调度
+                        if (!ForegroundRunningService.isRunning) {
+                            try {
+                                startForegroundService(
+                                    Intent(this@MqttAgentService, ForegroundRunningService::class.java)
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "ACTION_START 拉起 FGS 失败", e)
+                            }
+                            kotlinx.coroutines.delay(1200)
+                        }
+                        KeepAliveReceiver.ensureFloatingWindow(this@MqttAgentService)
+                        if (!FloatingWindowService.isRunning) {
+                            kotlinx.coroutines.delay(500)
+                        }
                         TaskScheduler.startTask()
                         "SUCCESS"
                     }

@@ -10,6 +10,8 @@ import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import com.pengxh.daily.app.DailyTaskApplication
+import com.pengxh.daily.app.service.KeepAliveReceiver
+import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.FloatingWindowController
@@ -17,6 +19,9 @@ import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.RomDetector
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.extensions.show
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 
 /**
  * 检测通知监听服务是否被授权
@@ -84,6 +89,7 @@ fun Context.openApplication(onOpened: (() -> Unit)? = null): Boolean {
     }
 
     // 后台启动限制（Android 10+ / MIUI 后台弹出界面）：从后台直接启动目标 App 可能被系统拦截。
+    // 安卓 15+ 另需「可见悬浮窗」豁免——重启后若未点开被控端，须先拉起 FloatingWindowService。
     fun startTarget(): Boolean {
         val intent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
@@ -103,17 +109,41 @@ fun Context.openApplication(onOpened: (() -> Unit)? = null): Boolean {
         }
         val info = activities.first()
         intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
-        startActivity(intent)
+        // 先进入倒计时会话（展开悬浮窗），再 startActivity，提升 BAL 豁免成功率
         FloatingWindowController.startFloatSession()
+        startActivity(intent)
         onOpened?.invoke()
         return true
+    }
+
+    val needWarmup = !FloatingWindowService.isRunning
+    KeepAliveReceiver.ensureFloatingWindow(this)
+    if (!Settings.canDrawOverlays(this)) {
+        LogFileManager.error("openApplication：无悬浮窗权限，后台跳转可能被系统拦截")
     }
 
     if (isAppInForeground()) {
         return startTarget()
     }
     return try {
-        startTarget()
+        if (needWarmup) {
+            // 刚拉起悬浮窗服务时，等 addView 完成再跳转
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    startTarget()
+                } catch (e: Exception) {
+                    LogFileManager.error("openApplication 延迟启动目标 App 失败: ${e.message}")
+                    if (TaskScheduler.isRunning()) {
+                        TaskScheduler.requestStopDueToError(
+                            "启动目标 App 失败，请检查「后台弹出界面」权限: ${e.message}"
+                        )
+                    }
+                }
+            }, 450L)
+            true
+        } else {
+            startTarget()
+        }
     } catch (e: Exception) {
         LogFileManager.error("openApplication 后台启动目标 App 失败: ${e.message}")
         if (TaskScheduler.isRunning()) {
