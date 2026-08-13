@@ -37,6 +37,8 @@ object Constant {
     /** 后台自启（保活复活）总开关：默认开启。关闭后进程被杀不再尝试拉起任何服务，需手动打开 App 恢复 */
     const val KEEP_ALIVE_ENABLED_KEY = "KEEP_ALIVE_ENABLED_KEY" // Boolean，默认 true
     const val TASK_AUTO_RECYCLE_KEY = "TASK_AUTO_RECYCLE_KEY" // 任务每日自动循环(Boolean)
+    /** 开机自动调度：开启且任务列表非空时，重启后自动 startTask（Boolean，默认 false） */
+    const val BOOT_AUTO_SCHEDULE_KEY = "BOOT_AUTO_SCHEDULE_KEY"
     const val RANDOM_TIME_KEY = "RANDOM_TIME_KEY" // 随机时间(Boolean)
     const val SKIP_HOLIDAY_KEY = "SKIP_HOLIDAY_KEY" // 跳过节假日(Boolean)
     const val NOTIFICATION_TRANSFER_KEY = "NOTIFICATION_TRANSFER_KEY" // 通知转移：将目标打卡应用通知经现有消息渠道(企业微信/邮箱)转发到目标手机(Boolean)

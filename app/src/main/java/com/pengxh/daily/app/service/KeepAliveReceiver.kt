@@ -236,6 +236,29 @@ class KeepAliveReceiver : BroadcastReceiver() {
         }
 
         /**
+         * 确保悬浮窗服务在跑（倒计时卡片 / 空闲小球）。
+         * 安卓 15+ 后台拉起目标 App 依赖「可见悬浮窗」豁免；开机/远程启动调度时若未点开被控端，
+         * 必须在此显式拉起，否则会出现无倒计时窗、无法跳转打卡 App。
+         */
+        fun ensureFloatingWindow(context: Context) {
+            if (isPaused()) return
+            val appCtx = context.applicationContext
+            if (!Settings.canDrawOverlays(appCtx)) {
+                Log.w(javaClass.simpleName, "无悬浮窗权限，跳过拉起 FloatingWindowService")
+                return
+            }
+            if (FloatingWindowService.isRunning) return
+            try {
+                appCtx.startService(Intent(appCtx, FloatingWindowService::class.java))
+            } catch (e: Exception) {
+                Log.e(javaClass.simpleName, "拉起 FloatingWindowService 失败", e)
+            }
+        }
+
+        /** 开机后由 FGS 处理：拉悬浮窗 + 可选自动调度 */
+        const val ACTION_BOOT_SETUP = "com.pengxh.daily.action.BOOT_SETUP"
+
+        /**
          * 调度每日重置闹钟：精确到自定义重置点整点（或下一个重置点）。
          * 当「每日循环」关闭时，取消已设置的闹钟。
          */
@@ -367,11 +390,23 @@ class KeepAliveReceiver : BroadcastReceiver() {
         }
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED -> {
-                tryStartForegroundService(context)
+                // 带 BOOT_SETUP：FGS 内补拉悬浮窗，并按开关尝试开机自动调度
+                try {
+                    context.startForegroundService(
+                        Intent(context, ForegroundRunningService::class.java).apply {
+                            action = ACTION_BOOT_SETUP
+                        }
+                    )
+                } catch (e: Exception) {
+                    Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
+                    tryStartForegroundService(context)
+                }
                 // 开机自启：恢复远程控制 MQTT 代理（远程开关开启时），否则重启后控制端命令下发失效
                 startMqttAgentIfEnabled(context)
                 // 无论保活是否开启，只要每日循环开启就调度重置闹钟（开机后生效）
                 scheduleResetAlarm(context)
+                scheduleBatteryAlert(context)
+                schedule(context)
             }
             ACTION_RESURRECT -> {
                 // 关键修复：无论本次是否拉起服务，都先续约下一次心跳闹钟。
@@ -381,6 +416,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 // 心跳复活：无论保活前台服务是否存活，都确保 MQTT 代理在运行，
                 // 覆盖「进程被杀后 ForegroundRunningService 仍存活但 MQTT 已死」的情况
                 startMqttAgentIfEnabled(context)
+                ensureFloatingWindow(context)
                 if (ForegroundRunningService.isRunning) return
                 tryStartForegroundService(context)
                 // 复活后同时确保每日重置闹钟存在

@@ -60,6 +60,7 @@ import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
@@ -239,6 +240,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
         // 兜底检查是否有错过的每日重置
         checkMissedReset()
+        // 开机自动调度兜底：若开机广播路径未成功 startTask，打开 App 时再补一次
+        ensureBootAutoScheduleIfNeeded()
 
         // 首次启动（含覆盖安装/清除数据/卸载重装）弹出使用须知
         binding.rootView.post { maybeShowUsageNotice() }
@@ -570,6 +573,31 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)) {
             // 模拟点击Home键
             startActivity(Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) })
+        }
+    }
+
+    /**
+     * 开机自动调度兜底：开关已开且未在跑时，打开 App 补启（覆盖开机广播未落到调度的情况）。
+     */
+    private fun ensureBootAutoScheduleIfNeeded() {
+        if (KeepAliveReceiver.isPaused()) return
+        if (!SaveKeyValues.loadBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, false)) return
+        if (TaskScheduler.isRunning()) return
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(1500)
+            if (KeepAliveReceiver.isPaused() || TaskScheduler.isRunning()) return@launch
+            val tasks = runCatching {
+                withContext(Dispatchers.IO) {
+                    com.pengxh.daily.app.sqlite.DatabaseWrapper.loadAllTask()
+                }
+            }.getOrElse { emptyList() }
+            if (tasks.isEmpty()) {
+                LogFileManager.action("开机自动调度兜底：任务列表为空，跳过")
+                return@launch
+            }
+            KeepAliveReceiver.ensureFloatingWindow(this@MainActivity)
+            LogFileManager.action("开机自动调度兜底：打开 App 补启调度，任务 ${tasks.size} 个")
+            TaskScheduler.startTask()
         }
     }
 

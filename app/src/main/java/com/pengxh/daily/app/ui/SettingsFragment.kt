@@ -660,6 +660,17 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             AppRuntimeConfig.setPowerSaveMode(checked)
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
+        binding.bootAutoScheduleSwitch.setOnCheckedChangeListener { _, checked ->
+            if (syncingSwitchState) return@setOnCheckedChangeListener
+            // commit 同步落盘，避免刚开开关就重启时 apply 尚未写入
+            SaveKeyValues.saveBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, checked, commit = true)
+            LogFileManager.action(
+                if (checked) "已开启开机自动调度" else "已关闭开机自动调度"
+            )
+            if (checked) {
+                "已开启开机自动调度：重启后若有任务将自动启动调度".show(requireContext())
+            }
+        }
         // 强制伪息屏功能开关（子项内）：确认弹窗 + 应用状态
         val applyForceMask = { enabled: Boolean ->
             AppRuntimeConfig.setForcePseudoMask(enabled)
@@ -910,6 +921,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.backToHomeSwitch.isChecked = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
             binding.desktopPetSwitch.isChecked = AppRuntimeConfig.isDesktopPetEnabled()
             binding.powerSaveSwitch.isChecked = AppRuntimeConfig.isPowerSaveMode()
+            binding.bootAutoScheduleSwitch.isChecked =
+                SaveKeyValues.loadBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, false)
             binding.keepAliveSwitch.isChecked = KeepAliveReceiver.isPaused()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
             // 分组开关仅控制展开；内容显隐随持久化的展开状态

@@ -33,9 +33,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 import com.pengxh.daily.app.extensions.format
@@ -52,6 +54,10 @@ class ForegroundRunningService : Service() {
         /** 服务进程是否存活（保活闹钟据此判断是否需重启） */
         @Volatile
         var isRunning = false
+
+        /** 本进程内是否已尝试过开机自动调度（避免每次 onStartCommand 重复拉起） */
+        @Volatile
+        private var bootAutoScheduleTried = false
 
         private val _notificationText = MutableSharedFlow<String>(extraBufferCapacity = 1)
         val notificationText = _notificationText.asSharedFlow()
@@ -218,6 +224,11 @@ val filter = IntentFilter().apply {
             }
             cleanupTempDiagnosticFiles()
         }
+        // 开机路径必须拉悬浮窗；自动调度在 maybeTryBootAutoSchedule 中统一处理
+        if (intent?.action == KeepAliveReceiver.ACTION_BOOT_SETUP) {
+            KeepAliveReceiver.ensureFloatingWindow(this)
+        }
+        maybeTryBootAutoSchedule(intent?.action ?: "onStart")
         if (intent?.action == KeepAliveReceiver.ACTION_BATTERY_ALERT) {
             checkBatterySmartAlert()
         }
@@ -530,6 +541,51 @@ val filter = IntentFilter().apply {
     }
 
     /**
+     * 开机自动调度：本进程只尝试一次。
+     * 开关开启 + 任务非空 + 未在跑 → startTask。
+     * 不仅依赖 BOOT_SETUP（粘性重启可能丢 action），进程内首次 onStartCommand 也会兜底。
+     */
+    private fun maybeTryBootAutoSchedule(reason: String) {
+        val enabled = SaveKeyValues.loadBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, false)
+        Log.i(javaClass.simpleName, "maybeTryBootAutoSchedule reason=$reason enabled=$enabled tried=$bootAutoScheduleTried running=${TaskScheduler.isRunning()}")
+        if (!enabled) return
+        if (bootAutoScheduleTried) return
+        if (KeepAliveReceiver.isPaused()) return
+        if (TaskScheduler.isRunning()) {
+            bootAutoScheduleTried = true
+            return
+        }
+        bootAutoScheduleTried = true
+        KeepAliveReceiver.ensureFloatingWindow(this)
+        serviceScope.launch {
+            val tasks = runCatching {
+                withContext(Dispatchers.IO) {
+                    com.pengxh.daily.app.sqlite.DatabaseWrapper.loadAllTask()
+                }
+            }.getOrElse { e ->
+                // 读库失败不永久占坑，允许后续 BOOT_SETUP / 打开 App 再试
+                bootAutoScheduleTried = false
+                LogFileManager.error("开机自动调度读任务失败: ${e.message}")
+                emptyList()
+            }
+            if (tasks.isEmpty()) {
+                // 真正空列表才占坑；若是读失败上面已复位
+                LogFileManager.action("开机自动调度已开启，但任务列表为空，跳过（$reason）")
+                return@launch
+            }
+            delay(800)
+            if (!TaskScheduler.isRunning() && !KeepAliveReceiver.isPaused()) {
+                LogFileManager.action("开机自动调度：任务 ${tasks.size} 个，启动调度（$reason）")
+                TaskScheduler.startTask()
+                if (!TaskScheduler.isRunning()) {
+                    bootAutoScheduleTried = false
+                    LogFileManager.error("开机自动调度 startTask 后仍未运行（scope 可能未就绪）")
+                }
+            }
+        }
+    }
+
+    /**
      * 每分钟检查是否需要触发任务重置
      * 作为协程 delay 的兜底，防止长时间运行后协程异常退出导致任务不重置
      */
@@ -587,6 +643,7 @@ val filter = IntentFilter().apply {
 
     override fun onDestroy() {
         isRunning = false
+        bootAutoScheduleTried = false
         // 注意：此处不再调用 KeepAliveReceiver.cancel(this)。
         // 关闭保活时已由 SettingsActivity 显式取消闹钟；若此处取消，会在服务被系统杀死时
         // 误删“下一次复活闹钟”，导致进程被杀后无法被 RESURRECT 心跳拉起。

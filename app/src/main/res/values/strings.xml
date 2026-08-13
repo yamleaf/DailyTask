@@ -27,6 +27,8 @@
     <string name="settings_gesture_tip">开启后，双指下滑开启伪息屏，单指/双指上滑关闭</string>
     <string name="settings_power_save_title">节能模式</string>
     <string name="settings_power_save_tip">降低倒计时通知、内存监控和息屏蒙层动画刷新频率</string>
+    <string name="settings_boot_auto_schedule_title">开机自动调度</string>
+    <string name="settings_boot_auto_schedule_tip">开启且任务列表不为空时，手机重启后自动启动任务调度</string>
     <string name="settings_keep_alive_title">暂停使用</string>
     <string name="settings_keep_alive_tip">开启后立即停止前台/后台服务与全部闹钟；关闭后自动恢复，功能恢复正常</string>
     <string name="settings_keep_alive_confirm_title">开启暂停使用？</string>
