@@ -79,6 +79,8 @@ class NotificationMonitorService : NotificationListenerService() {
         fun emitMonitorEvent(event: MonitorEvent) {
             _events.tryEmit(event)
             if (event is MonitorEvent.ClockInSuccess) {
+                // 开机自动调度时 MainActivity 可能未启动，必须在此通知调度器，否则只会走超时分支
+                TaskScheduler.notifyClockIn()
                 val now = System.currentTimeMillis()
                 if (now - lastSuccessWriteMs > 1500L) {
                     lastSuccessWriteMs = now

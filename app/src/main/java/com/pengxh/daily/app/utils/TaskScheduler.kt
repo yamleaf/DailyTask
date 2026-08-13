@@ -1,6 +1,9 @@
 package com.pengxh.daily.app.utils
 
+import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
@@ -330,9 +333,10 @@ object TaskScheduler {
                 if (imagePath.isEmpty()) {
                     imagePath = runCatching { tryFallbackScreenshot() }.getOrNull() ?: ""
                 }
-                // 截屏结束：先恢复悬浮窗（贴边宠物），再发回跳信号
+                // 截屏结束：先恢复悬浮窗并回跳，再发超时邮件（邮件可能较慢，勿挡回被控端）
+                // 不可只依赖 _returnToApp：开机自动调度时 MainActivity 可能从未启动，无人收集 SharedFlow。
                 FloatingWindowController.restoreAfterScreenshot()
-                _returnToApp.emit(Unit)
+                returnAfterPunch(restoreMask = maskWasShowing)
 
                 if (imagePath.isNotEmpty()) {
                     // force=true：超时兜底通知是关键告警，跳过去重，保证一定送达（防「什么都没收到」）
@@ -370,21 +374,12 @@ object TaskScheduler {
                     }
                 }
             } else {
-                // 成功路径：丢弃末段预截图，立刻恢复悬浮窗，便于后续回跳
+                // 成功路径：丢弃末段预截图，立刻恢复悬浮窗并回被控端
                 captureDeferred?.cancel()
                 FloatingWindowController.restoreAfterScreenshot()
+                returnAfterPunch(restoreMask = maskWasShowing)
             }
 
-            if (maskWasShowing) {
-                LogFileManager.action("定时任务结束，恢复伪息屏蒙层")
-                // 走完整伪息屏：先盖 overlay 保证 SCREEN_DIM 锁不间断（无空窗），
-                // 再拉起 MainActivity 由 MaskViewController 接管（隐藏系统栏 + activity 黑屏），
-                // 而非仅悬浮窗黑屏盖一层（那样状态栏仍显示）。
-                withContext(Dispatchers.Main) {
-                    MaskOverlayHelper.show(DailyTaskApplication.get())
-                }
-                DailyTaskApplication.get().bringDailyTaskToFront(true)
-            }
             // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
             if (keptAwakeForPunch) {
                 IdlePseudoMaskController.releaseKeepAwakeForPunch(DailyTaskApplication.get())
@@ -488,10 +483,53 @@ object TaskScheduler {
     }
 
     /**
+     * 打卡结束后回被控端。必须在调度器内执行：开机自动调度时 MainActivity 可能未创建，
+     * 仅 emit SharedFlow 会丢信号，真机（尤其 Android 15/16 BAL）会停在目标 App。
+     */
+    private suspend fun returnAfterPunch(restoreMask: Boolean) {
+        val app = DailyTaskApplication.get()
+        KeepAliveReceiver.ensureFloatingWindow(app)
+        // 贴边悬浮窗需可见，才有安卓 15+「可见 overlay」后台启动 Activity 豁免
+        FloatingWindowController.show()
+        delay(400)
+
+        withContext(Dispatchers.Main) {
+            val home = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            if (restoreMask) {
+                // 完整伪息屏：先盖 overlay 保证 SCREEN_DIM 锁不间断，再拉起 MainActivity 接管
+                LogFileManager.action("定时任务结束，恢复伪息屏蒙层")
+                MaskOverlayHelper.show(app)
+                app.startActivity(home)
+                Handler(Looper.getMainLooper()).postDelayed({
+                    app.bringDailyTaskToFront(true)
+                }, 800L)
+                LogFileManager.action("打卡结束：恢复伪息屏并拉起被控端")
+            } else if (AppRuntimeConfig.isForcePseudoMask()) {
+                // 伪息屏开启但打卡前未盖蒙层：回桌面，由后台伪息屏倒计时接管
+                app.startActivity(home)
+                LogFileManager.action("打卡结束：伪息屏开启，回桌面由后台蒙层接管")
+            } else if (SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)) {
+                app.startActivity(home)
+                Handler(Looper.getMainLooper()).postDelayed({
+                    app.bringDailyTaskToFront(false)
+                }, 800L)
+                LogFileManager.action("打卡结束：回桌面并拉起被控端")
+            } else {
+                // 与 backToMainActivity(isPunchReturn=true) 一致：关闭「返回桌面」时不拉起
+                LogFileManager.action("打卡结束：未开启返回桌面，保持当前界面")
+            }
+        }
+        // MainActivity 若存活：仅切任务 Tab（导航已由上方完成）
+        _returnToApp.tryEmit(Unit)
+    }
+
+    /**
      * 打卡成功通知
-     * 调用链：NotificationMonitorService.onNotificationPosted()
-     *       → MainActivity.onClockInSuccess()
-     *       → TaskScheduler.notifyClockIn()
+     * 调用链：NotificationMonitorService.emitMonitorEvent(ClockInSuccess)
+     *       （MainActivity 收集后也会再调一次，complete 幂等）
      * 效果：完成 clockInDeferred，select{} 走分支 B，推进到下一个任务
      */
     fun notifyClockIn() {

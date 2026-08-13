@@ -228,11 +228,11 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 }
         }
 
-        // 订阅超时回主页信号（宿主负责，与具体 Tab 无关）
+        // 订阅打卡结束信号：导航已由 TaskScheduler.returnAfterPunch 完成（开机无 Activity 时也能回跳），
+        // 此处仅切到任务 Tab，避免重复 Home/拉起。
         lifecycleScope.launch {
             TaskScheduler.returnToApp.collectLatest {
-                // 与打卡成功一致：走「回桌面再拉回本 App」，避免只停在桌面
-                backToMainActivity(true)
+                switchToTaskTab()
             }
         }
 
@@ -433,10 +433,10 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             is MonitorEvent.ClockInSuccess -> {
                 TaskScheduler.notifyClockIn() // 通知 TaskScheduler：打卡成功，取消超时等待分支
                 MqttAgentService.pushTaskIncrement() // 打卡完成 → 增量推送控制端刷新日历/任务
-                // 末段截屏可能仍藏着悬浮窗；回跳前恢复，保证安卓 15+ 可见窗豁免
+                // 末段截屏可能仍藏着悬浮窗；回跳由 TaskScheduler.returnAfterPunch 统一处理
                 FloatingWindowController.restoreAfterScreenshot()
                 FloatingWindowController.stopFloatSession()
-                backToMainActivity(true)
+                switchToTaskTab()
             }
 
             is MonitorEvent.StartTaskCommand -> {
