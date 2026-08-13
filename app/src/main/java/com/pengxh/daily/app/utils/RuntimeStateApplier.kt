@@ -7,6 +7,7 @@ import android.util.Log
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.DailyTaskApplication
+import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.utils.MessageDispatcher
@@ -153,12 +154,14 @@ object RuntimeStateApplier {
                 Protocol.FIELD_BATTERY_SMART_ALERT -> {
                     val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
                     SaveKeyValues.saveBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, v)
+                    KeepAliveReceiver.scheduleBatteryAlert(DailyTaskApplication.get())
                     ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
                     true
                 }
                 Protocol.FIELD_BATTERY_WARNING_HOUR -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
                     SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, v.coerceIn(0, 1439))
+                    KeepAliveReceiver.scheduleBatteryAlert(DailyTaskApplication.get())
                     ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
                     true
                 }
@@ -177,6 +180,29 @@ object RuntimeStateApplier {
                 Protocol.FIELD_BATTERY_ALERT_RANGE_DURATION -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: return@launch
                     SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_DURATION_KEY, v.coerceIn(1, 24))
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_BOOT_AUTO_SCHEDULE -> {
+                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
+                    SaveKeyValues.saveBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, v, commit = true)
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_DESKTOP_PET -> {
+                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
+                    AppRuntimeConfig.setDesktopPetEnabled(v)
+                    ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                    true
+                }
+                Protocol.FIELD_LOG_ENABLED -> {
+                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
+                    val wasEnabled = SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true)
+                    SaveKeyValues.saveBoolean(Constant.LOG_ENABLED_KEY, v)
+                    // 关闭→再开启：允许无障碍关键字节点再 dump 一次（与本机设置一致）
+                    if (!wasEnabled && v) {
+                        AutoProjectionAccessibilityService.resetNodeDumpFlag()
+                    }
                     ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
                     true
                 }

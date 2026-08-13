@@ -323,6 +323,9 @@ object RemoteSnapshot {
         add("rt", "随机时间", "bool", SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true))
         add("ga", "手势识别", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
         add("bh", "返回桌面", "bool", SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT))
+        add("bo", "开机自动调度", "bool", SaveKeyValues.loadBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, false))
+        add("dp", "桌面宠物", "bool", AppRuntimeConfig.isDesktopPetEnabled())
+        add("lg", "运行日志", "bool", SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true))
         // 离散档位与控制端伪息屏延迟滑块共用，确保两端可选延迟值完全一致
         // （非线性：时间越大档位间隔越大，缩短滑块行程），与被控端 showPseudoMaskDelayDialog 同源
         val tmOptions = intArrayOf(
@@ -342,7 +345,8 @@ object RemoteSnapshot {
         add("lb", "低电量阈值（%）", "int", SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80),
             min = 10, max = 80, step = 1)
         add("ba", "电量智能提醒", "bool", SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false))
-        add("bw", "智能提醒时间", "int", SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60).coerceIn(0, 1439),
+        // type=time：控制端用时间选择器；value 仍为当日分钟数 0~1439
+        add("bw", "智能提醒时间", "time", SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60).coerceIn(0, 1439),
             min = 0, max = 1439, step = 1)
         add("bs", "低电量提醒次数", "int", SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3).coerceIn(0, 3),
             min = 0, max = 3, step = 1)
