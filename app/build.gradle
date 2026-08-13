@@ -60,7 +60,8 @@ android {
         // 版本号策略（alpha 分支）：
         // - 基线版本号自动同步 master 分支的 app/build.gradle（alpha 即基于该主线版本）
         // - 默认（未设置或为 alpha）：自动版本
-        //     versionName = <master基线版本>-<构建来源>-<git短哈希>，如 2.4.2.1-local-9a76231
+        //     versionName = <git短哈希>，如 9a76231（安装时系统「已安装版本」直接显示短哈希，
+        //     ci/local、基线版本、构建时间等完整信息见 App 内「版本信息」弹窗）
         // - 仅当显式设置 BUILD_FLAVOR=release 时回退到 master 固定版本号（正式发版用）
         def baselineVersion = {
             try {
@@ -98,7 +99,7 @@ android {
             def ymd = cnFormat('yyMMdd', now).toInteger()
             def hh = cnFormat('HH', now).toInteger()
             def mm = cnFormat('mm', now).toInteger()
-            versionName "${baselineVersion}-${buildTag}"
+            versionName gitShort
             versionCode ymd * 1000 + 720 + (hh * 30 + (int) (mm / 2))
         } else {
             // 正式发版：CI 产物保持干净版本号；本机手工打的「正式包」强制带 -local 后缀，
