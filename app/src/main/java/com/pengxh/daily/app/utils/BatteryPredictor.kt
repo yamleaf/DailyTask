@@ -83,7 +83,8 @@ object BatteryPredictor {
             }
 
             if (discharge.size < MIN_SAMPLES) return null
-            if (discharge.last().level <= targetLevel) return null  // 已经低于目标值
+            // 已到/低于目标：无法再预测「降至该目标」；targetLevel=0 时表示预测耗尽，电量已为 0 才放弃
+            if (discharge.last().level <= targetLevel) return null
 
             // 计算窗口内总掉电百分比
             val first = discharge.first()
@@ -94,10 +95,11 @@ object BatteryPredictor {
 
             // 计算消耗速度（%/小时）
             val ratePerHour = totalDrop.toFloat() / elapsedMin * 60f
+            if (ratePerHour <= 0f) return null
 
-            // 预测到达目标值的时间
+            // 预测到达目标值的时间（targetLevel=0 即预计电量耗尽）
             val remainingDrop = last.level - targetLevel
-            val remainingMin = (remainingDrop / ratePerHour * 60).toLong()
+            val remainingMin = (remainingDrop / ratePerHour * 60).toLong().coerceAtLeast(0L)
             val targetTimeMs = last.ts + TimeUnit.MINUTES.toMillis(remainingMin)
 
             return Prediction(

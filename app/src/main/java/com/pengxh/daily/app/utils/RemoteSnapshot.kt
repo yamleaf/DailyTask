@@ -141,18 +141,42 @@ object RemoteSnapshot {
             }
         } catch (_: Exception) { }
         // B5：电量智能预测（复用被控端 BatteryPredictor，控制端直接展示避免算法不一致导致偏差）
+        // 仍高于阈值 → 预测降至阈值；已低于阈值 → 改预测耗尽（0%），避免「0.0 小时后降至阈值」
         try {
-            val pred = BatteryPredictor.predict(context)
-            if (pred != null) {
-                o.addProperty("batteryPredictHas", true)
-                o.addProperty("batteryPredictCharging", pred.isCharging)
-                o.addProperty("batteryPredictRate", String.format("%.1f", pred.ratePerHour))
-                if (!pred.isCharging && pred.targetTimeMs > 0) {
-                    o.addProperty("batteryPredictTime", BatteryPredictor.formatTime(pred.targetTimeMs))
-                    val threshold = SaveKeyValues.loadInt(
-                        Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
-                    ).coerceIn(10, 80)
+            val threshold = SaveKeyValues.loadInt(
+                Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD
+            ).coerceIn(10, 80)
+            val level = bm.capacity
+            val predToThreshold = BatteryPredictor.predict(context, threshold)
+            when {
+                predToThreshold != null && predToThreshold.isCharging -> {
+                    o.addProperty("batteryPredictHas", true)
+                    o.addProperty("batteryPredictCharging", true)
+                    o.addProperty("batteryPredictExhaust", false)
                     o.addProperty("batteryPredictThreshold", threshold)
+                }
+                predToThreshold != null && !predToThreshold.isCharging && predToThreshold.targetTimeMs > 0 -> {
+                    o.addProperty("batteryPredictHas", true)
+                    o.addProperty("batteryPredictCharging", false)
+                    o.addProperty("batteryPredictExhaust", false)
+                    o.addProperty("batteryPredictRate", String.format("%.1f", predToThreshold.ratePerHour))
+                    o.addProperty("batteryPredictTime", BatteryPredictor.formatTime(predToThreshold.targetTimeMs))
+                    o.addProperty("batteryPredictHours",
+                        String.format("%.1f", predToThreshold.minutesToTarget / 60.0))
+                    o.addProperty("batteryPredictThreshold", threshold)
+                }
+                level in 1..threshold -> {
+                    val predExhaust = BatteryPredictor.predict(context, 0)
+                    if (predExhaust != null && !predExhaust.isCharging && predExhaust.ratePerHour > 0f) {
+                        o.addProperty("batteryPredictHas", true)
+                        o.addProperty("batteryPredictCharging", false)
+                        o.addProperty("batteryPredictExhaust", true)
+                        o.addProperty("batteryPredictRate", String.format("%.1f", predExhaust.ratePerHour))
+                        o.addProperty("batteryPredictTime", BatteryPredictor.formatTime(predExhaust.targetTimeMs))
+                        o.addProperty("batteryPredictHours",
+                            String.format("%.1f", predExhaust.minutesToTarget / 60.0))
+                        o.addProperty("batteryPredictThreshold", threshold)
+                    }
                 }
             }
         } catch (_: Exception) { }
