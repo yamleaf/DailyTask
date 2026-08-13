@@ -39,6 +39,7 @@ import com.yample.mqttprotocol.MqttSigner
 import com.yample.mqttprotocol.PacketValue
 import com.yample.mqttprotocol.PacketValueAdapter
 import com.yample.mqttprotocol.Protocol
+import com.yample.mqttprotocol.SecretBox
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
@@ -368,9 +369,9 @@ class MqttAgentService : Service() {
                 Protocol.CMD_QUERY -> handleQuery(packet)
                 Protocol.CMD_TASK -> handleTask(packet)
                 Protocol.CMD_ACTION -> handleAction(packet)
-                Protocol.CMD_SYNC -> doPublishAck(packet.rid, "ONLINE")
+                Protocol.CMD_SYNC -> handleSync(packet)
                 Protocol.CMD_PAIR -> handlePair(packet)
-                Protocol.CMD_UNBOUND -> doUnbind(notifyController = false)
+                Protocol.CMD_UNBOUND -> handleUnbound(packet)
                 else -> { /* 其它命令暂忽略 */ }
             }
         } catch (e: Exception) {
@@ -606,19 +607,20 @@ class MqttAgentService : Service() {
         }
     }
 
-    /** 把快照 JSON 经 resp 主题回给控制端（带会话签名）；返回 true 表示成功发布 */
+    /** 把快照 JSON 经 resp 主题回给控制端（SecretBox 密封 + 会话签名）；返回 true 表示成功发布 */
     private fun publishResp(rid: String, field: String, json: String): Boolean {
         val client = mqttClient ?: return false
         if (!client.isConnected) return false
         val ts = System.currentTimeMillis()
         val session = MqttSecureConfig.loadSession()
+        val wire = if (session.isNotBlank()) SecretBox.seal(session, json) else json
         val sign = if (session.isNotBlank())
-            MqttSigner.sign(session, deviceId, ts, rid, field, "s", json, Protocol.CMD_RESP)
+            MqttSigner.sign(session, deviceId, ts, rid, field, "s", wire, Protocol.CMD_RESP)
         else ""
         val packet = MqttPacket(
             c = Protocol.CMD_RESP,
             f = field,
-            v = PacketValue.StringValue(json),
+            v = PacketValue.StringValue(wire),
             rid = rid,
             ts = ts,
             sign = sign
@@ -653,18 +655,16 @@ class MqttAgentService : Service() {
             "配对失败：控制端携带的配对码不一致或已过期，请在「远程控制」页重新生成二维码再扫码".showToast()
             return
         }
-        // 注意：这里【不消费】令牌。令牌在 PAIRING_TTL_MS 窗口内保持有效，
-        // 允许控制端在窗口内重复扫码重试（解决“首次因重连丢包导致配对失败后，重扫同一二维码仍失败”）；
-        // 令牌仅随 TTL 过期或强制解绑而清除。
+        // 令牌在 PAIRING_TTL_MS 内可重复用于重试（防 PA 丢包）；PA 本身用令牌签名，防伪造 accept。
         Log.d(TAG, "配对令牌匹配 rid=${packet.rid}，开始派生会话密钥")
-
-        val session = Hkdf.deriveHex(active.first, deviceId, Protocol.PAIRING_INFO, Protocol.SESSION_KEY_LEN)
+        val pairingToken = active.first
+        val session = Hkdf.deriveHex(pairingToken, deviceId, Protocol.PAIRING_INFO, Protocol.SESSION_KEY_LEN)
         MqttSecureConfig.saveSession(session)
         SaveKeyValues.saveBoolean(Constant.IS_BOUND_KEY, true)
         _bound = true
         lastUnbindReason = "" // 重新配对成功，清除此前的解绑原因
 
-        publishPairAccept()
+        publishPairAccept(pairRid = packet.rid, pairingToken = pairingToken)
         // 配对成功后立即发布 online retained status，覆盖此前解绑时发布的 force_unbound/unbound，
         // 否则控制端重连订阅 status 时仍会收到旧的 retained 解绑消息，误触发解绑流程。
         scope.launch { publishStatus("online") }
@@ -673,25 +673,57 @@ class MqttAgentService : Service() {
         "已与控制端完成配对".showToast()
     }
 
+    /** 已配对时要求 UB 会话签名，防止公共 Broker 上仅凭 deviceId 伪造解绑 */
+    private fun handleUnbound(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isNotBlank()) {
+            if (!verifyWithSession(packet, session)) {
+                Log.w(TAG, "忽略未验签/验签失败的解绑命令 rid=${packet.rid}")
+                doPublishAck(packet.rid, "SIGN_FAIL")
+                return
+            }
+            if (!acceptRid(packet.rid, packet.ts)) {
+                Log.w(TAG, "忽略重放解绑命令 rid=${packet.rid}")
+                return
+            }
+        }
+        doUnbind(notifyController = false)
+    }
+
+    /** 已配对时 SYNC 须带会话签名；未配对允许无签名探活 */
+    private fun handleSync(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isNotBlank()) {
+            if (!verifyWithSession(packet, session)) {
+                doPublishAck(packet.rid, "SIGN_FAIL")
+                return
+            }
+            if (!acceptRid(packet.rid, packet.ts)) return
+        }
+        doPublishAck(packet.rid, "ONLINE")
+    }
+
     /** 控制端主动解绑 / 被控端强制解绑：仅清绑定态，保留 MQTT 配置 */
     private fun doUnbind(notifyController: Boolean) {
         val wasBound = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
+        // 先用会话签了解绑状态信封，再清密钥（否则公共 Broker 上 plain unbound 可被伪造）
+        val sessionForSign = MqttSecureConfig.loadSession()
+        val statusText = if (notifyController) "force_unbound" else "unbound"
         SaveKeyValues.saveBoolean(Constant.IS_BOUND_KEY, false)
         _bound = false
         MqttSecureConfig.saveSession("")
         SaveKeyValues.saveString(Constant.MQTT_PAIRING_TOKEN_KEY, "")
         SaveKeyValues.saveLong(Constant.MQTT_PAIRING_EXPIRY_KEY, 0L)
         recentRids.clear()
-        // 关键：publishStatus 是 blocking 的 qos1 发布，绝不能在主线程执行
+        // 警告：publishStatus 是 blocking 的 qos1 发布，绝不能在主线程执行
         // （被控端“强制解绑”按钮在主线程调用本方法，若在主线程 publish 会 ANR/闪退）。
         // 统一丢到 IO 协程域执行，无论本方法从主线程还是 MQTT 回调线程进入都安全。
         // 记录解绑原因，供远程控制页（RemoteControlFragment）区分“从未绑定 / 被控制端移除 / 本机强制解绑”文案。
         // notifyController=true 表示本机强制解绑（需告知控制端），false 表示控制端主动解绑。
         lastUnbindReason = if (notifyController) "force" else "remote"
         if (wasBound || notifyController) {
-            // retained：控制端订阅 status 主题可见，重新连接也能拿到最新状态
-            Log.d("MqttAgentService", "doUnbind notifyController=$notifyController reason=${lastUnbindReason} -> 即将发布 retained status=${if (notifyController) "force_unbound" else "unbound"}")
-            scope.launch { publishStatus(if (notifyController) "force_unbound" else "unbound") }
+            Log.d("MqttAgentService", "doUnbind notifyController=$notifyController reason=${lastUnbindReason} -> 即将发布 retained status=$statusText")
+            scope.launch { publishStatus(statusText, sessionForSign) }
         }
         bindingStateListener?.invoke(false)
         updateNotification()
@@ -775,13 +807,14 @@ class MqttAgentService : Service() {
             try {
                 val json = RemoteSnapshot.buildDelta(this@MqttAgentService, sections)
                 if (json == "{}") return@launch
+                val wire = SecretBox.seal(session, json)
                 val ts = System.currentTimeMillis()
                 val rid = UUID.randomUUID().toString()
-                val sign = MqttSigner.sign(session, deviceId, ts, rid, "delta", "s", json, Protocol.CMD_PUSH)
+                val sign = MqttSigner.sign(session, deviceId, ts, rid, "delta", "s", wire, Protocol.CMD_PUSH)
                 val packet = MqttPacket(
                     c = Protocol.CMD_PUSH,
                     f = "delta",
-                    v = PacketValue.StringValue(json),
+                    v = PacketValue.StringValue(wire),
                     rid = rid,
                     ts = ts,
                     sign = sign
@@ -820,28 +853,62 @@ class MqttAgentService : Service() {
         }
     }
 
-    private fun publishStatus(state: String) {
-        mqttClient?.publish(
-            topicStatus(),
-            MqttMessage(state.toByteArray()).apply { qos = 1; isRetained = true }
-        )
+    /**
+     * 发布 status。
+     * - online/offline：明文 retained（兼容 LWT）
+     * - unbound/force_unbound：有会话时发签名 JSON 信封 retained（防公共 Broker 伪造 plain）；
+     *   无会话时仍发明文（未配对场景）
+     */
+    private fun publishStatus(state: String, sessionForSign: String = "") {
+        val client = mqttClient ?: return
+        val isUnbind = state == "unbound" || state == "force_unbound"
+        if (isUnbind && sessionForSign.isNotBlank()) {
+            val ts = System.currentTimeMillis()
+            val rid = UUID.randomUUID().toString()
+            val sign = MqttSigner.sign(
+                sessionForSign, deviceId, ts, rid, "", "s", state, Protocol.CMD_STATUS
+            )
+            val packet = MqttPacket(
+                c = Protocol.CMD_STATUS,
+                f = "",
+                v = PacketValue.StringValue(state),
+                rid = rid,
+                ts = ts,
+                sign = sign
+            )
+            client.publish(
+                topicStatus(),
+                MqttMessage(gson.toJson(packet).toByteArray()).apply { qos = 1; isRetained = true }
+            )
+        } else {
+            client.publish(
+                topicStatus(),
+                MqttMessage(state.toByteArray()).apply { qos = 1; isRetained = true }
+            )
+        }
         MqttQuota.add(this, 1, 0)
     }
 
-    private fun publishPairAccept() {
+    /** PA 用配对令牌签名，并回填 pair 请求的 rid，供控制端验签防伪造 accept */
+    private fun publishPairAccept(pairRid: String, pairingToken: String) {
         val client = mqttClient ?: return
         if (!client.isConnected) {
             Log.w(TAG, "publishPairAccept 跳过：未连接")
             return
         }
         Log.d(TAG, "回执配对确认 PA -> ${Protocol.TOPIC_PREFIX}/$deviceId/pair/accept")
+        val ts = System.currentTimeMillis()
+        val rid = pairRid.ifBlank { UUID.randomUUID().toString() }
+        val sign = MqttSigner.sign(
+            pairingToken, deviceId, ts, rid, "", "s", "OK", Protocol.CMD_PAIR_ACCEPT
+        )
         val packet = MqttPacket(
             c = Protocol.CMD_PAIR_ACCEPT,
             f = "",
             v = PacketValue.StringValue("OK"),
-            rid = "",
-            ts = System.currentTimeMillis(),
-            sign = ""
+            rid = rid,
+            ts = ts,
+            sign = sign
         )
         client.publish(
             topicPairAccept(),
@@ -921,13 +988,14 @@ class MqttAgentService : Service() {
         if (session.isBlank()) return // 未配对不推送
         scope.launch {
             try {
+                val wire = SecretBox.seal(session, json)
                 val ts = System.currentTimeMillis()
                 val rid = UUID.randomUUID().toString()
-                val sign = MqttSigner.sign(session, deviceId, ts, rid, "alert", "s", json, Protocol.CMD_ALERT)
+                val sign = MqttSigner.sign(session, deviceId, ts, rid, "alert", "s", wire, Protocol.CMD_ALERT)
                 val packet = MqttPacket(
                     c = Protocol.CMD_ALERT,
                     f = "alert",
-                    v = PacketValue.StringValue(json),
+                    v = PacketValue.StringValue(wire),
                     rid = rid,
                     ts = ts,
                     sign = sign
