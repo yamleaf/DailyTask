@@ -23,6 +23,9 @@ jobs:
       # 构建来源标识：CI 产物版本号带 -ci 后缀，本机手工编译带 -local，便于一眼区分包的出处。
       # GITHUB_ACTIONS 环境变量本可自动识别，此处显式声明以防迁移到其他 CI 时失效。
       BUILD_SOURCE: ci
+      # secrets 不能直接出现在 step 的 if 表达式里，故先落到 job 级 env，
+      # 未配置 Secret 时该变量为空字符串，if 判断按 env. 读取。
+      APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
 
     steps:
       - name: Checkout code
@@ -93,7 +96,7 @@ jobs:
       # 密码从 Secret APK_ENCRYPT_PASSWORD 读取（未配置时此段整体跳过，不影响 push 自动构建）。
       # -mhe=on 同时加密文件头，不解密连文件名都看不到。
       - name: Encrypt & compress APKs (7z AES-256)
-        if: github.event_name == 'workflow_dispatch' && secrets.APK_ENCRYPT_PASSWORD != ''
+        if: github.event_name == 'workflow_dispatch' && env.APK_ENCRYPT_PASSWORD != ''
         env:
           APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
         run: |
@@ -107,7 +110,7 @@ jobs:
           ls -la
 
       - name: Publish encrypted APKs to GitHub Release
-        if: github.event_name == 'workflow_dispatch' && secrets.APK_ENCRYPT_PASSWORD != ''
+        if: github.event_name == 'workflow_dispatch' && env.APK_ENCRYPT_PASSWORD != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-${{ env.BUILD_NUMBER }}
