@@ -49,8 +49,16 @@ jobs:
           echo "BUILD_NUMBER=$BUILD_NUMBER"
           echo "BUILD_SOURCE=$BUILD_SOURCE"
 
-      # Gradle wrapper 下载发行版（腾讯镜像）偶发连接超时导致整个构建中断（如 run #77），
-      # 先带重试预热发行版缓存，成功后 build 步骤直接复用，避免偶发网络抖动打断 CI。
+      # CI runner 在 GitHub（境外），腾讯镜像偶发连接超时（run #77）；本地开发仍是国内网络，
+      # 保留腾讯镜像。此处仅 CI 内把 distributionUrl 改写为官方源，wrapper 缓存目录按 URL 哈希
+      # 区分，改写后下载走 services.gradle.org，更稳。官方源极少抖动，下面预热重试 5 次兜底即可。
+      - name: Use official Gradle distribution in CI
+        run: |
+          # 只替换镜像主机+路径前缀，保留 properties 的 \: 转义写法（sed 里 \: 会匹配普通冒号，
+          # 直接匹配含转义的 URL 会失效）；替换后 URL 变为 https\://services.gradle.org/distributions/...
+          sed -i 's#mirrors\.cloud\.tencent\.com/gradle#services.gradle.org/distributions#g' gradle/wrapper/gradle-wrapper.properties
+          cat gradle/wrapper/gradle-wrapper.properties
+
       - name: Warm up Gradle wrapper (retry)
         run: |
           for i in 1 2 3 4 5; do
