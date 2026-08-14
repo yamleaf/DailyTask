@@ -62,6 +62,8 @@ class DesktopPetController(
     private var dockSide = DockSide.NONE
     /** Pseudo-mask occlusion (orthogonal to currentState; can coexist with COUNTDOWN) */
     private var dimmed = false
+    /** 系统屏幕开关状态：灭屏时暂停动画播放（与 dimmed 正交，可同时成立） */
+    private var screenOn = true
     /** Punch countdown session (orthogonal to currentState; can coexist with dimmed) */
     private var countdownActive = false
     private var destroyed = false
@@ -149,6 +151,17 @@ class DesktopPetController(
         if (dimming == dimmed) return
         dimmed = dimming
         if (dimming) {
+            enterDimmed()
+        } else {
+            reconcileAfterOverlayFlags()
+        }
+    }
+
+    /** 系统屏幕亮/灭：灭屏暂停动画播放，亮屏恢复待机姿态 */
+    fun onScreenStateChanged(screenOn: Boolean) {
+        if (screenOn == this.screenOn) return
+        this.screenOn = screenOn
+        if (!screenOn) {
             enterDimmed()
         } else {
             reconcileAfterOverlayFlags()
@@ -333,27 +346,26 @@ class DesktopPetController(
         // Punch session owns window chrome; only pause timers (visibility GONE + DIMMED)
         if (countdownActive) return
         currentState = PetState.DIMMED
+        // 伪息屏/灭屏：保持贴边姿态（为解除后恢复贴边），但停止 Lottie 循环与位移动画，省电
         if (dockSide == DockSide.NONE) {
-            applyDock(nearestSide(), animate = true)
-        } else {
-            playIdleAsset()
+            applyDock(nearestSide(), animate = false)
         }
+        petView.stopAndReset()
     }
 
-    /** After countdown/dimmed flag changes, converge to the correct pose. */
+    /** After countdown/dimmed/screen flags change, converge to the correct pose. */
     private fun reconcileAfterOverlayFlags() {
         if (destroyed) return
         if (countdownActive) {
             currentState = PetState.COUNTDOWN
             return
         }
-        if (dimmed) {
+        if (dimmed || !screenOn) {
             currentState = PetState.DIMMED
             if (dockSide == DockSide.NONE) {
-                applyDock(nearestSide(), animate = true)
-            } else {
-                playIdleAsset()
+                applyDock(nearestSide(), animate = false)
             }
+            petView.stopAndReset()
             return
         }
         // Restore pet viewport px after leaving COUNTDOWN WRAP_CONTENT

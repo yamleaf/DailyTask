@@ -115,7 +115,15 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                 visibilityAllowed = allowed
                 // 蒙层遮挡 → DIMMED：取消随机/离场计时，避免 GONE 期间仍离场贴边
                 petController?.onDimmedChanged(!allowed)
+                ballController?.onDimmedChanged(!allowed)
                 recomputeVisibility()
+            }
+        }
+        launch {
+            // 系统亮/灭屏：暂停/恢复空闲动画播放（伪息屏 / 灭屏省电）
+            FloatingWindowController.screenOn.collect { on ->
+                petController?.onScreenStateChanged(on)
+                ballController?.onScreenStateChanged(on)
             }
         }
         launch {
@@ -178,6 +186,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
             ballController?.destroy()
             ballController = null
             if (petController == null) {
+                FloatingWindowController.syncScreenOnFromSystem(this)
                 petController = DesktopPetController(
                     context = this,
                     windowManager = windowManager,
@@ -187,17 +196,24 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                 )
                 petController?.onCountdownChanged(floatSessionActive)
                 petController?.onDimmedChanged(!visibilityAllowed)
+                petController?.onScreenStateChanged(FloatingWindowController.screenOn.value)
             }
         } else {
             petController?.destroy()
             petController = null
             if (ballController == null) {
+                // 悬浮窗可能早于 FGS 拉起：先对齐系统亮灭屏再创建小球
+                FloatingWindowController.syncScreenOnFromSystem(this)
                 ballController = IdleBallController(
                     context = this,
                     windowManager = windowManager,
                     ballView = binding.idleBallView,
                     windowView = binding.root,
                     params = params
+                )
+                ballController?.syncAnimationGates(
+                    dimming = !visibilityAllowed,
+                    screenOn = FloatingWindowController.screenOn.value
                 )
             }
         }

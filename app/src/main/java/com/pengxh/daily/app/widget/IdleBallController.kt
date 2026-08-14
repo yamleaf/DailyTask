@@ -52,6 +52,10 @@ class IdleBallController(
     private var destroyed = false
     private var dragging = false
     private var expanded = false
+    /** 伪息屏蒙层遮挡：暂停彩虹动画与标签刷新，省电 */
+    private var dimmed = false
+    /** 系统灭屏：暂停彩虹动画与标签刷新，省电 */
+    private var screenOn = true
     private var totalMove = 0f
     private var initialWindowX = 0
     private var initialWindowY = 0
@@ -84,15 +88,21 @@ class IdleBallController(
         val screenH = screenSize().second
         windowY = (screenH * 0.38f).toInt().coerceIn(0, (screenH - sizePx).coerceAtLeast(0))
         ballView.setOnTouchListener { _, event -> onTouch(event) }
-        startRainbow()
+        // 不在此启动彩虹/标签刷新：等 syncAnimationGates 带上 dimmed/screenOn 后再决定，避免灭屏/蒙层下空转一帧
         // 等窗口真正 attach 后再贴边，避免 init 阶段 updateViewLayout 被跳过
         mainHandler.post {
-            if (!destroyed) {
-                applyPeekLayout()
-                refreshLabel()
-            }
+            if (!destroyed) applyPeekLayout()
         }
-        mainHandler.postDelayed(labelRefreshRunnable, LABEL_REFRESH_MS)
+    }
+
+    /**
+     * 创建后一次性同步蒙层/亮灭屏门禁并启动或保持暂停动画。
+     * 不可拆成两次 onXxx（默认值相同时会 early-return，永远不 startRainbow）。
+     */
+    fun syncAnimationGates(dimming: Boolean, screenOn: Boolean) {
+        dimmed = dimming
+        this.screenOn = screenOn
+        reconcileAnimation()
     }
 
     fun destroy() {
@@ -119,6 +129,34 @@ class IdleBallController(
             applyPeekLayout()
         }
         refreshLabel()
+    }
+
+    /** 伪息屏蒙层遮挡变化：遮挡时暂停动画播放，解除后恢复 */
+    fun onDimmedChanged(dimming: Boolean) {
+        if (dimming == dimmed) return
+        dimmed = dimming
+        reconcileAnimation()
+    }
+
+    /** 系统屏幕亮/灭：灭屏暂停动画播放，亮屏恢复 */
+    fun onScreenStateChanged(screenOn: Boolean) {
+        if (screenOn == this.screenOn) return
+        this.screenOn = screenOn
+        reconcileAnimation()
+    }
+
+    private fun reconcileAnimation() {
+        if (destroyed) return
+        if (dimmed || !screenOn) {
+            rainbowAnimator?.cancel()
+            rainbowAnimator = null
+            mainHandler.removeCallbacks(labelRefreshRunnable)
+        } else {
+            startRainbow()
+            mainHandler.removeCallbacks(labelRefreshRunnable)
+            mainHandler.postDelayed(labelRefreshRunnable, LABEL_REFRESH_MS)
+            refreshLabel()
+        }
     }
 
     private fun startRainbow() {

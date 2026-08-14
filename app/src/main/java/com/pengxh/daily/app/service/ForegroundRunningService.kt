@@ -22,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.LogLevel
@@ -166,6 +167,9 @@ class ForegroundRunningService : Service() {
         }
         if (!foregroundOk) return
 
+        // 对齐当前亮灭屏，避免已灭屏拉起时 screenOn 仍为默认 true
+        FloatingWindowController.syncScreenOnFromSystem(this)
+
         // 进程复活后：按调度意图自动续跑（与开机自动调度独立）
         KeepAliveReceiver.tryResumeSchedulerIfWanted(this)
 
@@ -190,6 +194,7 @@ class ForegroundRunningService : Service() {
             addAction(Intent.ACTION_TIME_TICK)
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
             addAction(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -257,6 +262,11 @@ class ForegroundRunningService : Service() {
 
                     Intent.ACTION_SCREEN_OFF -> {
                         IdlePseudoMaskController.onSystemScreenOff(this@ForegroundRunningService)
+                        FloatingWindowController.setScreenOn(false)
+                    }
+
+                    Intent.ACTION_SCREEN_ON -> {
+                        FloatingWindowController.setScreenOn(true)
                     }
 
                     ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED -> {
