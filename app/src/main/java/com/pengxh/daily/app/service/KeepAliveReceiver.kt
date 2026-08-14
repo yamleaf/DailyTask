@@ -316,6 +316,9 @@ class KeepAliveReceiver : BroadcastReceiver() {
             lastEnsureServicesAtMs = now
             LogFileManager.writeLog("保活拉起服务 reason=$reason")
             startMqttAgentIfEnabled(context)
+            // 服务在跑但 MQTT 断开时，startMqttAgentIfEnabled 是空操作（isRunning() 直接 return），
+            // 复活/预热/到点闹钟因此一直无法把断开的连接拉起来。这里补一个进程内重连（幂等、去重）。
+            MqttAgentService.triggerReconnectIfNeeded()
             ensureFloatingWindow(context)
             if (!ForegroundRunningService.isRunning) {
                 tryStartForegroundServiceStatic(context)

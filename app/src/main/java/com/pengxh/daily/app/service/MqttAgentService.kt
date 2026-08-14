@@ -51,6 +51,9 @@ class MqttAgentService : Service() {
 
     companion object {
         private const val TAG = "MqttAgentService"
+        /** @Volatile：onCreate/onDestroy 在主线程写、MQTT 回调线程读，跨线程可见性必须显式保证，
+         * 否则 P3 的 instance === this 校验可能读到旧值而失效 */
+        @Volatile
         private var instance: MqttAgentService? = null
 
         /** 增量推送：状态变化时通知控制端刷新（打卡完成 / 任务启停）。publishPush 已做未配对/未连接守卫。 */
@@ -110,16 +113,20 @@ class MqttAgentService : Service() {
         /** B2：下次复活倒计时目标时刻（ms），供 UI 显示「Xs 后重试」 */
         @Volatile var nextReconnectAtMs: Long = 0L
 
-        /** B2：立即重连 —— 取消复活闹钟并调用实例 reconnect() */
+        /** B2：立即重连 —— 取消复活闹钟并触发进程内重连（带去重） */
         fun reconnectNow() {
             nextReconnectAtMs = 0L
             instance?.let { svc ->
                 svc.cancelResurrect()
-                // 关键修复：reconnect() 内的 mqttClient.connect() 是 Paho 阻塞式网络调用，
-                // 若在 UI 线程执行（按钮点击 / 闹钟 BroadcastReceiver 均为主线程）会卡死主线程 → ANR。
-                // 派发到服务的 IO 协程作用域执行，彻底离开主线程。
-                svc.scope.launch { svc.reconnect() }
+                // 关键：reconnect() 内的 Paho 调用会在 IO 协程上执行，不能放主线程（按钮/闹钟均为主线程）→ ANR。
+                // 由 launchReconnectOnce 去重并派发到 IO 协程。
+                svc.launchReconnectOnce()
             }
+        }
+
+        /** 进程在跑但 MQTT 断开时，由救援/复活闹钟等后台路径触发进程内重连（幂等、去重）。 */
+        fun triggerReconnectIfNeeded() {
+            instance?.launchReconnectOnce()
         }
 
         /**
@@ -319,15 +326,18 @@ class MqttAgentService : Service() {
         // 同时纠正“已连但 UI 显示未连接”的问题（自动重连不会回调 onConnected）。
         mqttClient?.setCallback(object : MqttCallbackExtended {
             override fun connectionLost(cause: Throwable?) {
+                // P3：服务已销毁（onDestroy 已将 instance 置空）后到达的迟到断线回调，
+                // 不再更新状态/排闹钟/触发重连，避免残留通知与无效复活闹钟
+                if (instance !== this@MqttAgentService) return
                 onDisconnected()
                 // Paho 自动重连在息屏/Doze 下可能失效，额外安排复活闹钟兜底（带退避）
                 scheduleResurrectWithBackoff()
-                // 进程仍在时优先进程内重连，少触发 Android 15 FGS 冷启动
+                // 进程仍在时优先进程内重连，少触发 Android 15 FGS 冷启动。
+                // 注意：这里必须走 Paho 的 reconnect()（见 reconnect()），否则与 Paho 自动重连循环
+                // 抢同一连接槽位会把它饿死——详见 reconnect() 注释。
                 scope.launch {
                     kotlinx.coroutines.delay(3_000)
-                    if (!_connected) {
-                        runCatching { reconnect() }
-                    }
+                    launchReconnectOnce()
                 }
             }
 
@@ -341,6 +351,10 @@ class MqttAgentService : Service() {
             override fun deliveryComplete(token: IMqttDeliveryToken?) {}
 
             override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                // P3：重连成功回调与 onDestroy 存在竞争窗口 —— Paho 连接线程独立于 scope，onDestroy
+                // 无法取消它；服务已销毁（instance 置空）后到达的迟到成功回调若继续 onConnected()，
+                // updateNotification 会用残留的 notificationBuilder 重新弹一条普通通知。这里直接拦截。
+                if (instance !== this@MqttAgentService) return
                 Log.d(TAG, "MQTT ${if (reconnect) "自动重连" else "首次连接"}成功，重新订阅命令主题并发布 online")
                 onConnected()
                 // 以下操作失败不应把「已连接」状态重置为 false，否则 TCP 连接仍在但 UI 永久显示未连接
@@ -982,26 +996,69 @@ class MqttAgentService : Service() {
         updateNotification()
     }
 
+    /** 进程内重连任务（带去重）：多个触发源（3s 延迟 / 网络恢复 / 救援闹钟 / 手动按钮）并发时只保留一个在跑 */
+    @Volatile
+    private var reconnectJob: kotlinx.coroutines.Job? = null
+
+    /** P2：保护 reconnectJob「检查+赋值」的锁。触发源分布在多线程（系统网络线程 / IO 协程 / 主线程），
+     * 不加锁并发通过检查会创建两个重连 job → 两次无效 reconnect() */
+    private val reconnectLock = Any()
+
+    /** 统一入口：已连接或已有重连在跑则跳过，否则在 IO 协程上执行一次重连 */
+    private fun launchReconnectOnce() {
+        if (_connected) return
+        // P2：开关守卫 —— 关闭 MQTT 开关到 onDestroy 执行之间的短窗口内，心跳/闹钟可能触发此处；
+        // 不拦截会发起一次真实连接尝试，短暂违背「关闭零耗电」。broker 未配置（mqttClient == null）
+        // 时每次触发都是空转，一并挡掉。
+        if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
+        if (mqttClient == null) return
+        // P2：检查+赋值必须原子（synchronized 内只做快速检查与 launch，不会持有锁等待协程执行）
+        synchronized(reconnectLock) {
+            if (reconnectJob?.isActive == true) return
+            reconnectJob = scope.launch {
+                try {
+                    reconnect()
+                } catch (e: Exception) {
+                    Log.e(TAG, "重连协程异常", e)
+                } finally {
+                    // P1：重连兜底 —— Paho reconnect() 非阻塞、同步路径不抛异常，失败由 Paho 内部
+                    // 循环续排；但若 Paho 循环停摆（注释里担心的「饿死」镜像场景），下次兜底要等
+                    // 15min 心跳。这里在 job 结束后仍未连接则补排 Android 复活闹钟（指数退避，最快 30s，
+                    // 进程被杀也能拉起）。若重连实际已成功（connectComplete 稍后回调），
+                    // onConnected 会 cancelResurrect 取消误排；isConnected 判断也能挡掉已连上的情况。
+                    if (!_connected && mqttClient?.isConnected != true) {
+                        scheduleResurrectWithBackoff()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 重连：必须用 Paho 的 reconnect() 而不是 connect()！
+     *
+     * MqttAsyncClient.reconnect() 内部是 stopReconnectCycle() + attemptReconnect()：
+     *  - 先停掉 Paho 自己的自动重连定时器，避免与我们手动触发的一次性连接抢同一个连接槽位；
+     *  - 失败时 MqttReconnectActionListener.onFailure 会重新排程自动重连循环（退避）。
+     * 若改用 connect()，在 Paho 两次重试的间隙被我们抢走连接槽位后：
+     *  - Paho 的 ReconnectTask 到时发现 isConnecting → 抛 32110，循环不再续排；
+     *  - 我们这次 connect() 失败（ConnectBG 超时）时 userCallback 为空，onFailure 也不会续排循环，
+     *    于是 Paho 自动重连循环被永久饿死——只能靠手动按钮救活。这正是 2e138c2 引入的回归。
+     *
+     * 该调用为非阻塞（立即返回），连接成功后由 connectComplete(reconnect=true) 回调统一订阅/上线/置位，
+     * 失败则由 Paho 循环继续退避重试，这里不需要（也不应该）立刻置位 _connected。
+     */
     private fun reconnect() {
         try {
             if (mqttClient?.isConnected == true) return
-            mqttClient?.connect(connectOptions)
-            onConnected()
-            try {
-                val okCmd = subscribeWithDiag(topicCmd())
-                val okPair = subscribeWithDiag(topicPair())
-                if (!okCmd || !okPair) {
-                    "MQTT 订阅被 broker 拒绝：请检查 EMQX 中 DEV 账户（${SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")}）的 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/#".showToast()
-                }
-                publishStatus("online")
-            } catch (e: Exception) {
-                Log.e(TAG, "caught exception", e)
-                "MQTT 重连后订阅失败：${e.message}".showToast()
-            }
+            mqttClient?.reconnect()
         } catch (e: Exception) {
             Log.e(TAG, "caught exception", e)
-            onDisconnected()
-            scheduleResurrectWithBackoff()
+            // 仅当确实未连接时才标记断开并安排复活（避免与并发成功的重连互相覆盖状态）
+            if (mqttClient?.isConnected != true) {
+                onDisconnected()
+                scheduleResurrectWithBackoff()
+            }
         }
     }
 
@@ -1119,13 +1176,7 @@ class MqttAgentService : Service() {
                 if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
                 if (KeepAliveReceiver.isPaused()) return
                 LogFileManager.writeLog("网络恢复：尝试 MQTT 重连")
-                scope.launch {
-                    try {
-                        reconnect()
-                    } catch (e: Exception) {
-                        Log.e(TAG, "网络恢复重连失败", e)
-                    }
-                }
+                launchReconnectOnce()
             }
         }
         try {
