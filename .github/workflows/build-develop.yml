@@ -49,6 +49,17 @@ jobs:
           echo "BUILD_NUMBER=$BUILD_NUMBER"
           echo "BUILD_SOURCE=$BUILD_SOURCE"
 
+      # Gradle wrapper 下载发行版（腾讯镜像）偶发连接超时导致整个构建中断（如 run #77），
+      # 先带重试预热发行版缓存，成功后 build 步骤直接复用，避免偶发网络抖动打断 CI。
+      - name: Warm up Gradle wrapper (retry)
+        run: |
+          for i in 1 2 3 4 5; do
+            ./gradlew --version && break
+            echo "wrapper download attempt $i failed, retrying in 5s"
+            sleep 5
+          done
+          ./gradlew --version
+
       - name: Build debug APK (alpha)
         run: ./gradlew assembleDebug --no-daemon
 
