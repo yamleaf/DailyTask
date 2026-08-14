@@ -39,6 +39,10 @@
     <string name="settings_screen_mode_pseudo_desc">前台无操作超过延迟后自动盖全黑蒙层（延迟同「伪息屏延迟」）</string>
     <string name="settings_screen_mode_off_desc">前台允许系统按超时自然灭屏</string>
     <string name="settings_screen_mode_keep_on_desc">前台保持亮屏，阻止系统自动灭屏</string>
+    <string name="settings_screen_mode_off_confirm_title">确定使用息屏模式？</string>
+    <string name="settings_screen_mode_off_confirm_msg">为保证打卡任务正常进行，请先完成以下设置：\n1. 关闭锁屏密码；\n2. 打开开发者选项，开启「直接进入系统」选项；\n3. 关闭开发者选项。\n\n⚠ 息屏模式下，不能确保任务一定能正常执行，确定使用前，请充分测试验证。</string>
+    <string name="settings_screen_mode_off_confirm_positive">确认使用</string>
+    <string name="settings_screen_mode_off_confirm_negative">取消</string>
     <string name="settings_pseudo_mask_delay_title">伪息屏延迟</string>
     <string name="settings_pseudo_mask_delay_tip">离开本软件或前台无操作超过该秒数后进入伪息屏（10~3600，默认 60）</string>
     <string name="settings_pseudo_mask_delay_value">%1$d 秒</string>

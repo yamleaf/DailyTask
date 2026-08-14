@@ -2013,9 +2013,25 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             items,
             current
         ) { which ->
-            AppRuntimeConfig.setScreenMode(which)
-            refreshScreenModeRow()
-            ConfigImportSignal.notifyRemoteChanged(ctx)
+            val applyMode = {
+                AppRuntimeConfig.setScreenMode(which)
+                refreshScreenModeRow()
+                ConfigImportSignal.notifyRemoteChanged(ctx)
+            }
+            // 息屏模式：高风险切换。先弹提示确认（三步前置设置 + 风险声明），确认后才应用，取消则保持原模式
+            if (which == Constant.SCREEN_MODE_OFF) {
+                UnifiedDialogKit.showConfirm(
+                    ctx,
+                    getString(R.string.settings_screen_mode_off_confirm_title),
+                    getString(R.string.settings_screen_mode_off_confirm_msg),
+                    confirmText = getString(R.string.settings_screen_mode_off_confirm_positive),
+                    cancelText = getString(R.string.settings_screen_mode_off_confirm_negative),
+                    icon = UnifiedDialogKit.IconType.WARNING,
+                    onConfirm = { applyMode() }
+                )
+            } else {
+                applyMode()
+            }
         }
     }
 
