@@ -56,6 +56,11 @@ class ForegroundRunningService : Service() {
         @Volatile
         var isRunning = false
 
+        /** 前台保活服务本次启动的墙钟时间戳（ms）。onCreate 写入，服务重启后重新计时。
+         * RemoteSnapshot.serviceRunningMinutes 据此计算「服务运行时长」，供控制端展示。 */
+        @Volatile
+        var serviceStartAtMs = 0L
+
         /** 本进程内是否已尝试过开机自动调度（避免每次 onStartCommand 重复拉起） */
         @Volatile
         private var bootAutoScheduleTried = false
@@ -107,6 +112,7 @@ class ForegroundRunningService : Service() {
             return
         }
         isRunning = true
+        serviceStartAtMs = System.currentTimeMillis()
         // 注入协程作用域给 TaskScheduler
         TaskScheduler.attach(serviceScope)
 

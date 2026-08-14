@@ -125,6 +125,7 @@ object RemoteSnapshot {
         o.addProperty("nextReset", nextResetDesc())
         o.addProperty("nextResetSeconds", TaskScheduler.secondsUntilNextReset())
         o.addProperty("serviceRunningMinutes", serviceRunningMinutes())
+        o.addProperty("appRunningMinutes", appRunningMinutes())
         // B5：电池曲线序列（读本地 BatteryHistory CSV），供控制端绘制 sparkline
         try {
             val series = BatteryHistory.recentSeries(context, 12, 24)
@@ -200,20 +201,16 @@ object RemoteSnapshot {
         return String.format("%02d:00", hour)
     }
 
+    /** 前台保活服务已运行分钟数（服务本次启动起计时，重启后重新计时） */
     private fun serviceRunningMinutes(): Long {
-        // ForegroundRunningService 未记录精确启动时间，用进程启动时间近似
-        return try {
-            val runtime = android.os.Process.getElapsedCpuTime()
-            // getElapsedCpuTime 是 CPU 时间，不太准确；用 Application 创建时间更好
-            val appCreate = DailyTaskApplication.get().applicationInfo?.let { 0L } ?: 0L
-            if (appCreate > 0L) {
-                TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - appCreate)
-            } else {
-                TimeUnit.MILLISECONDS.toMinutes(runtime)
-            }
-        } catch (_: Exception) {
-            -1L
-        }
+        val start = ForegroundRunningService.serviceStartAtMs
+        return if (start > 0L) TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - start) else -1L
+    }
+
+    /** App 进程已运行分钟数（进程本次启动起计时，被杀重启后重新计时） */
+    private fun appRunningMinutes(): Long {
+        val start = DailyTaskApplication.processStartAtMs
+        return if (start > 0L) TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - start) else -1L
     }
 
     // ===================== 打卡日历汇总 =====================

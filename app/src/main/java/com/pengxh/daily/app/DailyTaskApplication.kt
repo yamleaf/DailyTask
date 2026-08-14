@@ -57,6 +57,13 @@ class DailyTaskApplication : Application() {
         @Volatile
         var isAppForeground = false
             private set
+
+        /**
+         * 本进程启动的墙钟时间戳（ms）。onCreate 写入；进程被杀重启后重新计算。
+         * RemoteSnapshot.appRunningMinutes 据此计算「进程已运行时长」，供控制端展示。
+         */
+        @Volatile
+        var processStartAtMs = 0L
     }
 
     lateinit var dataBase: DailyTaskDataBase
@@ -68,6 +75,7 @@ class DailyTaskApplication : Application() {
         // C1：Android 12+ 启用 Material You 动态配色；低版本回退到 themes.xml 中的靛蓝主色
         DynamicColors.applyToActivitiesIfAvailable(this)
         initApplication(this)
+        processStartAtMs = System.currentTimeMillis()
         SaveKeyValues.initialize(this)
         AppRuntimeConfig.refreshFromStore()
         // 前台「无操作」自动进入伪息屏：由基类（KotlinBaseActivity）经桥接器回调，
