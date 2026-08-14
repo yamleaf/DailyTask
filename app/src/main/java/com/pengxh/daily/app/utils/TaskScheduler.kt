@@ -117,14 +117,17 @@ object TaskScheduler {
      * 时序：防重复 → 检查协程作用域 → 判断周末/节假日 → 构建排程 → 启动核心循环
      */
     fun startTask() {
-        if (_isRunning.value) {
-            LogFileManager.writeLog("任务已在执行中，忽略重复启动")
-            return
-        }
-
         val currentScope = scope
         if (currentScope == null) {
             LogFileManager.error("TaskScheduler scope 未初始化")
+            return
+        }
+
+        // 原子抢占运行权：startTask 可能被多个线程并发调用（FGS 启动/心跳复活/MQTT 命令/远程指令/用户点击），
+        // 必须用 compareAndSet 一次性读出并置位，否则 check-then-act 竞态会让两条调度循环同时跑同一轮打卡、
+        // 重复发邮件（曾实测 08:37:58 两条执行并行，成功邮件与超时邮件各发一封）。
+        if (!_isRunning.compareAndSet(false, true)) {
+            LogFileManager.writeLog("任务已在执行中，忽略重复启动")
             return
         }
 
@@ -132,7 +135,6 @@ object TaskScheduler {
         KeepAliveReceiver.ensureFloatingWindow(DailyTaskApplication.get())
 
         SaveKeyValues.saveBoolean(Constant.SCHEDULER_WANTED_KEY, true)
-        _isRunning.value = true
         runningDetail = "初始化排程"
         // 运行态变化会影响快照的 schedulerRunning：失效全量快照缓存，
         // 否则控制端在 30s TTL 内查询会拿到「调度未运行」的旧缓存，把正确状态覆盖回去。
