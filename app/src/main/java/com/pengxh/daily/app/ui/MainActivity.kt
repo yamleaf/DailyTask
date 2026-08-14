@@ -138,6 +138,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             if (intent?.action == ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED) {
                 ConfigImportSignal.pendingMainActivityRefresh = false
                 taskFragment.refreshTaskListFromDb()
+                applyForegroundScreenPolicy()
             }
         }
     }
@@ -153,8 +154,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     }
 
     override fun initOnCreate(savedInstanceState: Bundle?) {
-        // 禁止系统自动息屏，保持常亮 + 伪息屏策略
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // 前台亮灭屏策略：伪息屏开 / 屏幕模式 0·2 → 常亮；屏幕模式 1 → 允许系统自然灭屏
+        applyForegroundScreenFlags()
 
         // 悬浮蒙层上滑解除时，同步卸掉 Activity 内蒙层（一次上滑同时出控制界面）
         MaskOverlayHelper.activityMaskHider = {
@@ -233,6 +234,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         lifecycleScope.launch {
             TaskScheduler.returnToApp.collectLatest {
                 switchToTaskTab()
+            }
+        }
+
+        // 伪息屏开关 / 屏幕模式变更：热更新 KEEP_SCREEN_ON 与前台无操作计时
+        lifecycleScope.launch {
+            AppRuntimeConfig.forcePseudoMask.collectLatest {
+                applyForegroundScreenPolicy()
+            }
+        }
+        lifecycleScope.launch {
+            AppRuntimeConfig.screenMode.collectLatest {
+                applyForegroundScreenPolicy()
             }
         }
 
@@ -334,7 +347,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             ConfigImportSignal.pendingMainActivityRefresh = false
             taskFragment.refreshTaskListFromDb()
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        applyForegroundScreenFlags()
         applyMaskCommandFromIntent(intent)
         if (MaskOverlayHelper.isShowing() && !maskViewController.isMaskVisible()) {
             maskViewController.showMaskView()
@@ -351,6 +364,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     override fun onPause() {
         runCatching { unregisterReceiver(remoteConfigReceiver) }
         stopIdleMaskTimer()
+        // 离开前台：交还系统亮灭屏管理
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onPause()
     }
 
@@ -821,5 +836,32 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     private fun stopIdleMaskTimer() {
         IdlePseudoMaskController.stopIdleMask()
+    }
+
+    /**
+     * 按伪息屏总开关 + 屏幕模式设置 Activity KEEP_SCREEN_ON。
+     * 伪息屏开 / 模式 0·2 → 常亮；伪息屏关且模式 1 → 允许系统自然灭屏。
+     */
+    private fun applyForegroundScreenFlags() {
+        val keepOn = when {
+            AppRuntimeConfig.isForcePseudoMask() -> true
+            AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF -> false
+            else -> true
+        }
+        if (keepOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /** 旗标 + 前台无操作计时一并按当前配置收敛 */
+    private fun applyForegroundScreenPolicy() {
+        applyForegroundScreenFlags()
+        if (maskViewController.isMaskVisible() || MaskOverlayHelper.isShowing()) {
+            IdlePseudoMaskController.stopIdleMask()
+        } else {
+            resetIdleMaskTimer()
+        }
     }
 }

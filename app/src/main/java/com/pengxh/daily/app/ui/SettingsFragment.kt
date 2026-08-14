@@ -678,6 +678,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             syncingSwitchState = true
             binding.forcePseudoMaskSwitch.isChecked = enabled
             syncingSwitchState = false
+            refreshScreenModeRow()
             ConfigImportSignal.notifyRemoteChanged(ctx)
         }
         val confirmForceMask = { enabled: Boolean, onConfirm: (Boolean) -> Unit ->
@@ -719,6 +720,14 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             if (syncingSwitchState) return@setOnCheckedChangeListener
             confirmForceMask(checked, applyForceMask)
         }
+        binding.screenModeLayout.setOnClickListener {
+            if (AppRuntimeConfig.isForcePseudoMask()) {
+                getString(R.string.settings_screen_mode_tip_disabled).show(ctx)
+                return@setOnClickListener
+            }
+            showScreenModeDialog()
+        }
+        refreshScreenModeRow()
         // 伪息屏增强分组开关：仅控制子项展开/收起，功能开关保留在子项内（forcePseudoMaskSwitch）
         val applyPseudoMaskGroupExpand = { expanded: Boolean ->
             binding.pseudoMaskGroupContent.visibility = if (expanded) View.VISIBLE else View.GONE
@@ -925,6 +934,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 SaveKeyValues.loadBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, false)
             binding.keepAliveSwitch.isChecked = KeepAliveReceiver.isPaused()
             binding.forcePseudoMaskSwitch.isChecked = AppRuntimeConfig.isForcePseudoMask()
+            refreshScreenModeRow()
             // 分组开关仅控制展开；内容显隐随持久化的展开状态
             val pseudoMaskGroupExpanded = SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_GROUP_EXPANDED_KEY, true)
             binding.pseudoMaskGroupSwitch.isChecked = pseudoMaskGroupExpanded
@@ -1970,6 +1980,43 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
         )
+    }
+
+    private fun screenModeLabel(mode: Int): String = when (mode) {
+        Constant.SCREEN_MODE_OFF -> getString(R.string.settings_screen_mode_off)
+        Constant.SCREEN_MODE_KEEP_ON -> getString(R.string.settings_screen_mode_keep_on)
+        else -> getString(R.string.settings_screen_mode_pseudo)
+    }
+
+    private fun refreshScreenModeRow() {
+        val forceOn = AppRuntimeConfig.isForcePseudoMask()
+        binding.screenModeLayout.isEnabled = !forceOn
+        binding.screenModeLayout.alpha = if (forceOn) 0.45f else 1f
+        binding.screenModeTipText.setText(
+            if (forceOn) R.string.settings_screen_mode_tip_disabled
+            else R.string.settings_screen_mode_tip
+        )
+        binding.screenModeValueText.text = screenModeLabel(AppRuntimeConfig.getScreenMode())
+    }
+
+    private fun showScreenModeDialog() {
+        val current = AppRuntimeConfig.getScreenMode()
+            .coerceIn(Constant.SCREEN_MODE_PSEUDO, Constant.SCREEN_MODE_KEEP_ON)
+        val items = listOf(
+            "${getString(R.string.settings_screen_mode_pseudo)}：${getString(R.string.settings_screen_mode_pseudo_desc)}",
+            "${getString(R.string.settings_screen_mode_off)}：${getString(R.string.settings_screen_mode_off_desc)}",
+            "${getString(R.string.settings_screen_mode_keep_on)}：${getString(R.string.settings_screen_mode_keep_on_desc)}"
+        )
+        UnifiedDialogKit.showSingleChoice(
+            ctx,
+            getString(R.string.settings_screen_mode_dialog_title),
+            items,
+            current
+        ) { which ->
+            AppRuntimeConfig.setScreenMode(which)
+            refreshScreenModeRow()
+            ConfigImportSignal.notifyRemoteChanged(ctx)
+        }
     }
 
     /** 伪息屏延迟设置滑杆（非线性档位：时间越大档位间隔越大，缩短滑块行程） */

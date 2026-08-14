@@ -296,7 +296,7 @@ object RemoteSnapshot {
     // ===================== 可写设置 =====================
     private fun buildSettings(): JsonArray {
         val arr = JsonArray()
-        fun add(key: String, label: String, type: String, value: Any, min: Int? = null, max: Int? = null, step: Int? = null, options: JsonArray? = null) {
+        fun add(key: String, label: String, type: String, value: Any, min: Int? = null, max: Int? = null, step: Int? = null, options: JsonArray? = null, writable: Boolean = true) {
             val o = JsonObject()
             o.addProperty("key", key)
             o.addProperty("label", label)
@@ -306,7 +306,7 @@ object RemoteSnapshot {
                 is Int -> o.addProperty("value", value)
                 else -> o.addProperty("value", value.toString())
             }
-            o.addProperty("writable", true)
+            o.addProperty("writable", writable)
             if (min != null) o.addProperty("min", min)
             if (max != null) o.addProperty("max", max)
             if (step != null) o.addProperty("step", step)
@@ -315,6 +315,14 @@ object RemoteSnapshot {
         }
         add("ps", "节能模式", "bool", AppRuntimeConfig.isPowerSaveMode())
         add("pm", "伪熄屏", "bool", AppRuntimeConfig.isForcePseudoMask())
+        // 屏幕模式：0 伪息屏 / 1 息屏 / 2 常亮。仅伪息屏关闭时可改（writable 随 forcePseudoMask 联动）
+        val smOptions = JsonArray().apply {
+            add(Constant.SCREEN_MODE_PSEUDO); add(Constant.SCREEN_MODE_OFF); add(Constant.SCREEN_MODE_KEEP_ON)
+        }
+        add("sm", "屏幕模式", "int", AppRuntimeConfig.getScreenMode().coerceIn(
+            Constant.SCREEN_MODE_PSEUDO, Constant.SCREEN_MODE_KEEP_ON),
+            min = Constant.SCREEN_MODE_PSEUDO, max = Constant.SCREEN_MODE_KEEP_ON, step = 1, options = smOptions,
+            writable = !AppRuntimeConfig.isForcePseudoMask())
         add("nc", "隐藏息屏时钟", "bool", SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false))
         add("nt", "通知转发", "bool", SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false))
         add("fd", "静默通知", "bool", SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false))

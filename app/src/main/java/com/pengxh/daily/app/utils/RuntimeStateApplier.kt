@@ -42,6 +42,20 @@ object RuntimeStateApplier {
                     }
                     true
                 }
+                Protocol.FIELD_SCREEN_MODE -> {
+                    // 屏幕模式：0 伪息屏 / 1 息屏 / 2 常亮。伪息屏开启时由伪息屏策略接管，不允许再改屏幕模式
+                    if (AppRuntimeConfig.isForcePseudoMask()) {
+                        false
+                    } else {
+                        val v = (packet.v as? PacketValue.IntValue)?.i
+                            ?.coerceIn(Constant.SCREEN_MODE_PSEUDO, Constant.SCREEN_MODE_KEEP_ON)
+                            ?: return@launch
+                        withContext(Dispatchers.Main) {
+                            AppRuntimeConfig.setScreenMode(v)
+                        }
+                        true
+                    }
+                }
                 Protocol.FIELD_PSEUDO_MASK_TIMEOUT -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: 60
                     SaveKeyValues.saveInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, v.coerceIn(10, 3600))

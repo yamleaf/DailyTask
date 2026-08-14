@@ -56,6 +56,15 @@ object Constant {
     const val PUNCH_RESULT_KEYWORDS_KEY = "PUNCH_RESULT_KEYWORDS_KEY"
     /** 强制伪息屏：离开 App 超过设定秒数主动盖黑屏蒙层 */
     const val FORCE_PSEUDO_MASK_KEY = "FORCE_PSEUDO_MASK_KEY" // Boolean
+    /**
+     * 前台屏幕模式（仅伪息屏总开关关闭且 App 前台时生效）：
+     * 0=伪息屏（无操作超时盖黑蒙层）、1=息屏（允许系统自然灭屏）、2=常亮。
+     */
+    const val SCREEN_MODE_KEY = "SCREEN_MODE_KEY" // Int
+    const val SCREEN_MODE_PSEUDO = 0
+    const val SCREEN_MODE_OFF = 1
+    const val SCREEN_MODE_KEEP_ON = 2
+    const val SCREEN_MODE_DEFAULT = SCREEN_MODE_PSEUDO
     /** 强制伪息屏：离开 App 多少秒后进入伪息屏（Int，秒，默认 60，范围 10~3600） */
     const val IDLE_PSEUDO_MASK_TIMEOUT_KEY = "IDLE_PSEUDO_MASK_TIMEOUT_KEY" // Int
     /** 伪息屏：关闭时钟显示（Boolean，默认 false=显示时钟）。开启后伪息屏只显示黑屏，更省电 */

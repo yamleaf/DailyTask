@@ -73,3 +73,7 @@ lint/tmp/
 # lint/reports/
 
 /apk
+
+# 本地构建日志
+/build_log.txt
+/build_out.txt

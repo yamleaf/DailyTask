@@ -1319,6 +1319,67 @@
                             android:layout_marginHorizontal="@dimen/dp_16"
                             android:background="@color/md_outlineVariant" />
 
+                        <!-- 屏幕模式：仅伪息屏关闭时生效（前台 0 伪息屏 / 1 息屏 / 2 常亮） -->
+                        <LinearLayout
+                            android:id="@+id/screenModeLayout"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingHorizontal="@dimen/dp_16"
+                            android:paddingVertical="@dimen/dp_12">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="@dimen/dp_28"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/settings_screen_mode_title"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textColor="@color/md_onSurface" />
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:id="@+id/screenModeTipText"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="@dimen/dp_2"
+                                    android:maxLines="4"
+                                    android:text="@string/settings_screen_mode_tip"
+                                    android:textSize="@dimen/sp_10" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:id="@+id/screenModeValueText"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/dp_4"
+                                    android:text="›"
+                                    android:textSize="@dimen/sp_18" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="@dimen/dividerLine"
+                            android:layout_marginHorizontal="@dimen/dp_16"
+                            android:background="@color/md_outlineVariant" />
+
                         <LinearLayout
                             android:id="@+id/pseudoMaskDelayLayout"
                             android:layout_width="match_parent"

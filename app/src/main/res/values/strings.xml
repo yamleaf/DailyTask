@@ -39,6 +39,16 @@
     <string name="settings_pseudo_mask_group_tip">离开本软件超过设定秒数后主动进入伪息屏</string>
     <string name="settings_force_mask_title">伪息屏</string>
     <string name="settings_force_mask_tip">开启后，后台超时或前台无操作超时均进入伪息屏（可能打断其它 App 使用）</string>
+    <string name="settings_screen_mode_title">屏幕模式</string>
+    <string name="settings_screen_mode_tip">伪息屏关闭时生效：前台无操作后的屏幕行为</string>
+    <string name="settings_screen_mode_tip_disabled">伪息屏开启时由伪息屏策略接管，本项不生效</string>
+    <string name="settings_screen_mode_pseudo">伪息屏</string>
+    <string name="settings_screen_mode_off">息屏</string>
+    <string name="settings_screen_mode_keep_on">常亮</string>
+    <string name="settings_screen_mode_dialog_title">选择屏幕模式</string>
+    <string name="settings_screen_mode_pseudo_desc">前台无操作超过延迟后自动盖全黑蒙层（延迟同「伪息屏延迟」）</string>
+    <string name="settings_screen_mode_off_desc">前台允许系统按超时自然灭屏</string>
+    <string name="settings_screen_mode_keep_on_desc">前台保持亮屏，阻止系统自动灭屏</string>
     <string name="settings_pseudo_mask_delay_title">伪息屏延迟</string>
     <string name="settings_pseudo_mask_delay_tip">离开本软件或前台无操作超过该秒数后进入伪息屏（10~3600，默认 60）</string>
     <string name="settings_pseudo_mask_delay_value">%1$d 秒</string>

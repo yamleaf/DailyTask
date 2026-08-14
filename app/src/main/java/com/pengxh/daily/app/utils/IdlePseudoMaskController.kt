@@ -281,16 +281,23 @@ object IdlePseudoMaskController {
     // ═══════════════════════ 前台「无操作」自动进入伪熄屏 ═══════════════════════
     // 由 lite 模块 KotlinBaseActivity 经 ForegroundIdleBridge 在 DailyTaskApplication.onCreate
     // 接线：统一驱动任务页 / 远程页 / 设置页等所有前台页面的无操作计时，
-    // 复用「伪熄屏增强」延时配置。前台无操作息屏受「伪熄屏」总开关控制：
-    // 开关开启时，App 在前台无操作超过延时即自动进伪熄屏（进入方式与后台路径一致）；
-    // 开关关闭时，前台无操作不再自动进伪熄屏。
+    // 复用「伪熄屏增强」延时配置。
+    // - 伪息屏总开关开启：前台无操作超时进伪熄屏（与后台路径一致）
+    // - 伪息屏总开关关闭 + 屏幕模式=0：仅前台无操作超时盖黑蒙层
+    // - 伪息屏关闭 + 屏幕模式=1/2：不启此前台计时
 
     private var idleMaskContext: Context? = null
+
+    /** 是否应跑前台无操作→盖蒙层计时 */
+    private fun shouldRunForegroundIdleMask(): Boolean {
+        if (AppRuntimeConfig.isForcePseudoMask()) return true
+        return AppRuntimeConfig.shouldForegroundIdleMaskWhenPseudoOff()
+    }
 
     private val foregroundIdleRunnable: Runnable = Runnable {
         val context = idleMaskContext ?: return@Runnable
         if (KeepAliveReceiver.isPaused()) return@Runnable
-        if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
+        if (!shouldRunForegroundIdleMask()) return@Runnable
         if (appInBackground) return@Runnable
         if (TaskScheduler.isInActivePunch()) return@Runnable
         if (MaskOverlayHelper.isShowing()) return@Runnable
@@ -302,7 +309,7 @@ object IdlePseudoMaskController {
 
     fun startIdleMask(context: Context) {
         if (KeepAliveReceiver.isPaused()) return
-        if (!AppRuntimeConfig.isForcePseudoMask()) return
+        if (!shouldRunForegroundIdleMask()) return
         if (MaskOverlayHelper.isShowing()) return
         idleMaskContext = context
         mainHandler.removeCallbacks(foregroundIdleRunnable)
@@ -337,15 +344,16 @@ object IdlePseudoMaskController {
     fun onBlackMaskHidden(context: Context) {
         enteringMask = false
         if (KeepAliveReceiver.isPaused()) return
-        if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (appInBackground) {
+            if (!AppRuntimeConfig.isForcePseudoMask()) return
             // 后台解除：仍在外部，重新保亮并计时，超时再次进入伪息屏
             ensureKeepAwake(context)
             mainHandler.removeCallbacks(upgradeToMaskRunnable)
             mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
             LogFileManager.writeLog("伪息屏已解除但仍在外部，重新开启透明保亮与倒计时")
         } else {
-            // 前台手动取消：重新启动前台无操作计时，超时后再次自动进入伪息屏（修复取消后不再自动进入）
+            // 前台手动取消：伪息屏开 或 屏幕模式=0 时重新计时
+            if (!shouldRunForegroundIdleMask()) return
             startIdleMask(idleMaskContext ?: context)
             LogFileManager.writeLog("伪息屏已解除（前台），重新启动无操作计时")
         }
