@@ -681,6 +681,43 @@
                         android:layout_marginHorizontal="@dimen/dp_16"
                         android:background="@color/md_outlineVariant" />
 
+                    <RelativeLayout
+                        android:id="@+id/testMqttRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:paddingHorizontal="@dimen/dp_16">
+
+                        <ImageView 
+                            android:id="@+id/testMqttIcon"
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:layout_centerVertical="true"
+                            android:src="@drawable/ic_link" android:contentDescription="@null" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_centerVertical="true"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_toEndOf="@id/testMqttIcon"
+                            android:text="测试 MQTT 连接"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <ImageView 
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_alignParentEnd="true"
+                            android:layout_centerVertical="true"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
+                    </RelativeLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
                     <!-- 设备身份（并入 MQTT 配置卡） -->
                     <LinearLayout
                         android:id="@+id/deviceIdRow"

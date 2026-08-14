@@ -46,6 +46,11 @@ import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.util.ArrayDeque
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MqttAgentService : Service() {
 
@@ -64,6 +69,103 @@ class MqttAgentService : Service() {
         /** 测量到 broker 的 RTT（ms），以 QoS1 PUBACK 到达时刻计时；未连接时回调 -1 */
         fun measureRtt(callback: (Long) -> Unit) {
             instance?.doMeasureRtt(callback) ?: callback(-1)
+        }
+
+        /** MQTT 连接测试结果 */
+        data class MqttTestResult(
+            val ok: Boolean,
+            val connectMs: Long,
+            val rtts: List<Long>,
+            val error: String? = null
+        ) {
+            val avgRtt: Long get() = if (rtts.isEmpty()) -1L else rtts.average().toLong()
+            val minRtt: Long get() = if (rtts.isEmpty()) -1L else rtts.minOrNull()!!
+            val maxRtt: Long get() = if (rtts.isEmpty()) -1L else rtts.maxOrNull()!!
+        }
+
+        /**
+         * 独立 MQTT 连接测试：用一次性客户端连接当前配置的 broker，
+         * 测连接握手耗时 + 订阅/发布往返 RTT（3 轮），验证可用性与连接质量。
+         * 用独立 clientId + 独立测试主题，不影响正在运行的长连接。后台线程执行。
+         */
+        suspend fun testConnection(): MqttTestResult = withContext(Dispatchers.IO) {
+            val broker = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "").trim()
+            val user = SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "").trim()
+            val pass = MqttSecureConfig.loadPass()
+            if (broker.isBlank() || user.isBlank() || pass.isBlank()) {
+                return@withContext MqttTestResult(false, -1, emptyList(), "请先填写 MQTT 服务器 / 用户名 / 密码")
+            }
+            val deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "default")
+            val testClientId = "dev-test-${System.currentTimeMillis()}"
+            val testTopic = "${Protocol.TOPIC_PREFIX}/$deviceId/test/$testClientId"
+            val client = MqttClient(BrokerUtils.normalizeBroker(broker), testClientId, MemoryPersistence())
+            try {
+                val opts = MqttConnectOptions().apply {
+                    isCleanSession = true
+                    userName = user
+                    password = pass.toCharArray()
+                    connectionTimeout = 8
+                    keepAliveInterval = 30
+                    isAutomaticReconnect = false
+                }
+                val t0 = System.currentTimeMillis()
+                client.connect(opts)
+                val connectMs = System.currentTimeMillis() - t0
+                if (!client.isConnected) {
+                    return@withContext MqttTestResult(false, connectMs, emptyList(), "连接未建立")
+                }
+                // 校验订阅是否被 ACL 拒绝（SUBACK 0x80），复现「订阅被拒」问题的直接证据
+                try {
+                    val tok = client.subscribeWithResponse(testTopic, 1)
+                    if (tok?.grantedQos?.firstOrNull() == 128) {
+                        return@withContext MqttTestResult(
+                            false, connectMs, emptyList(),
+                            "订阅被 broker 拒绝（SUBACK 0x80）——请检查 EMQX 中该账户 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/# 的 subscribe"
+                        )
+                    }
+                } catch (e: Exception) {
+                    return@withContext MqttTestResult(false, connectMs, emptyList(), "订阅异常：${e.message}")
+                }
+                val rtts = mutableListOf<Long>()
+                val sentRef = AtomicLong(0)
+                var pending = CountDownLatch(1)
+                client.setCallback(object : MqttCallback {
+                    override fun connectionLost(cause: Throwable?) {}
+                    override fun messageArrived(topic: String?, message: MqttMessage?) {
+                        val sent = sentRef.get()
+                        if (sent > 0) {
+                            rtts.add(System.currentTimeMillis() - sent)
+                            sentRef.set(0)
+                            pending.countDown()
+                        }
+                    }
+                    override fun deliveryComplete(token: IMqttDeliveryToken?) {}
+                })
+                repeat(3) { round ->
+                    pending = CountDownLatch(1)
+                    sentRef.set(System.currentTimeMillis())
+                    try {
+                        client.publish(testTopic, MqttMessage("ping-$round".toByteArray()).apply { qos = 1 })
+                    } catch (e: Exception) {
+                        sentRef.set(0)
+                        rtts.add(-1)
+                    }
+                    if (!pending.await(5, TimeUnit.SECONDS)) {
+                        sentRef.set(0)
+                        rtts.add(-1)
+                    }
+                }
+                val good = rtts.filter { it >= 0 }
+                if (good.isEmpty()) {
+                    return@withContext MqttTestResult(false, connectMs, emptyList(), "连接可用但发布/回环不通（RTT 无响应）")
+                }
+                MqttTestResult(true, connectMs, good)
+            } catch (e: Exception) {
+                MqttTestResult(false, -1, emptyList(), "连接异常：${e.message}")
+            } finally {
+                try { client.disconnect(2_000) } catch (_: Exception) { }
+                try { client.close() } catch (_: Exception) { }
+            }
         }
 
         fun isRunning(): Boolean = instance != null

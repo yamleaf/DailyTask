@@ -131,6 +131,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         binding.brokerRow.setOnClickListener { editTextRow("MQTT 服务器", Constant.MQTT_BROKER_KEY, binding.brokerValue, false) }
         binding.userRow.setOnClickListener { editTextRow("被控端用户名", Constant.MQTT_USER_KEY, binding.userValue, false) }
         binding.passRow.setOnClickListener { editTextRow("被控端密码", Constant.MQTT_PASS_KEY, binding.passValue, true) }
+        binding.testMqttRow.setOnClickListener { testMqttConnection() }
         binding.deviceIdRow.setOnClickListener { editDeviceId() }
         binding.ctlRow.setOnClickListener { showCtlEditDialog() }
         binding.apiUrlRow.setOnClickListener { editTextRow("API 地址", Constant.MQTT_SERVERLESS_API_URL_KEY, binding.apiUrlValue, false) }
@@ -898,6 +899,40 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             return null
         }
         return baseUrl.removeSuffix("/") to Credentials.basic(appId, appSecret)
+    }
+
+    /** 独立 MQTT 连接测试：连接可用性 + 往返延迟（连接握手耗时 + 3 轮发布/回环 RTT） */
+    private fun testMqttConnection() {
+        "正在测试 MQTT 连接…".show(ctx)
+        lifecycleScope.launch {
+            val result = MqttAgentService.testConnection()
+            if (!isAdded) return@launch
+            val message = buildString {
+                if (result.ok) {
+                    append("连接握手：${result.connectMs}ms\n")
+                    append("往返延迟：平均 ${result.avgRtt}ms\n")
+                    append("最小 ${result.minRtt}ms / 最大 ${result.maxRtt}ms\n")
+                    append("测试轮次：${result.rtts.size}/3 成功\n")
+                    append("质量评级：${rttQuality(result.avgRtt)}")
+                } else {
+                    append(result.error ?: "测试失败")
+                }
+            }
+            UnifiedDialogKit.showInfo(
+                ctx = ctx,
+                title = if (result.ok) "MQTT 连接测试通过" else "MQTT 连接测试失败",
+                message = message,
+                buttonText = "知道了"
+            )
+        }
+    }
+
+    private fun rttQuality(rtt: Long): String = when {
+        rtt < 0 -> "未知"
+        rtt < 300 -> "优"
+        rtt < 800 -> "良"
+        rtt < 2000 -> "一般"
+        else -> "弱"
     }
 
     private fun testApiConnection() {
