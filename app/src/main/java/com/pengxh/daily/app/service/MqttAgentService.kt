@@ -307,7 +307,12 @@ class MqttAgentService : Service() {
 
         mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), "dev-$deviceId", MemoryPersistence())
         connectOptions = MqttConnectOptions().apply {
-            isCleanSession = false
+            // 使用全新会话：Doze 挂网产生半死僵尸会话后，重连若沿用旧会话（cleanSession=false）
+            // 会触发 EMQX 会话接管/合并，导致重订阅被 broker 以 SUBACK 0x80(ACL) 拒绝。
+            // 改新会话后每次重连都重新订阅（connectComplete 已幂等订阅），不再依赖 broker 侧会话恢复。
+            // 注意：被控端 publish 的告警/状态是「发布」，投递由订阅方会话保证（控制端 ctl-mon 持久会话），
+            // 不受本端会话策略影响；仅离线期间 broker 排队给本端的 cmd/pair 指令不再补发（有 rid 去重+超时兜底）。
+            isCleanSession = true
             userName = SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")
             password = MqttSecureConfig.loadPass().toCharArray()
             connectionTimeout = 10
@@ -1239,12 +1244,16 @@ class MqttAgentService : Service() {
         MqttQuota.onDisconnect(this)
         // 优雅停止：主动发布 retained offline（区别于 broker 的 Last-Will 异常掉线），
         // 让控制端在服务被主动关闭时也能即时感知离线（需求：掉线增强）。
-        try { if (mqttClient?.isConnected == true) publishStatus("offline") } catch (_: Exception) { }
-        try {
-            mqttClient?.disconnect()
-            mqttClient?.close()
-        } catch (_: Exception) {
-        }
+        // 注意：publishStatus / disconnect 是 Paho 同步调用，waitForCompletion 在连接半死
+        // （Doze 挂网 / 僵尸 TCP）时 PUBACK 永远不来会无限阻塞；onDestroy 跑在主线程，
+        // 直接同步调用会把整个 UI 卡死，因此必须移出主线程异步执行。
+        Thread {
+            try { if (mqttClient?.isConnected == true) publishStatus("offline") } catch (_: Exception) { }
+            try {
+                mqttClient?.disconnect()
+                mqttClient?.close()
+            } catch (_: Exception) { }
+        }.start()
         // 如果开关仍开启且未暂停使用，安排复活闹钟兜底重连；
         // 「暂停使用」或正常关 MQTT 开关时一律取消复活闹钟，避免安静期被再次拉起。
         // FGS 配额失败路径已单独排了 10 分钟救援，此处不再短退避连撞。
