@@ -5,6 +5,9 @@ on:
     branches: [alpha]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build APK(alpha自动版本)
@@ -85,3 +88,32 @@ jobs:
         with:
           name: dailyTask_alpha_release
           path: app/build/outputs/apk/release/*.apk
+
+      # ===== 手动触发才执行：把 debug+release 两个 APK 用 7z AES-256 加密压缩并推到 GitHub Release =====
+      # 密码从 Secret APK_ENCRYPT_PASSWORD 读取（未配置时此段整体跳过，不影响 push 自动构建）。
+      # -mhe=on 同时加密文件头，不解密连文件名都看不到。
+      - name: Encrypt & compress APKs (7z AES-256)
+        if: github.event_name == 'workflow_dispatch' && secrets.APK_ENCRYPT_PASSWORD != ''
+        env:
+          APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+          mkdir -p release
+          cp app/build/outputs/apk/debug/*.apk release/
+          cp app/build/outputs/apk/release/*.apk release/
+          cd release
+          7z a -t7z -p"$APK_ENCRYPT_PASSWORD" -mhe=on -mx=9 dailyTask_alpha_${{ github.sha }}.7z *.apk
+          ls -la
+
+      - name: Publish encrypted APKs to GitHub Release
+        if: github.event_name == 'workflow_dispatch' && secrets.APK_ENCRYPT_PASSWORD != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ env.BUILD_NUMBER }}
+          name: DailyTask alpha 加密 APK（build #${{ env.BUILD_NUMBER }}）
+          body: |
+            加密压缩包：7z AES-256（-mhe=on），密码见仓库 Secret `APK_ENCRYPT_PASSWORD`。
+            commit: ${{ github.sha }}
+          files: release/*.7z
+          draft: true
