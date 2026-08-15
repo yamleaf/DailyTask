@@ -215,6 +215,9 @@ class MqttAgentService : Service() {
         /** B2：下次复活倒计时目标时刻（ms），供 UI 显示「Xs 后重试」 */
         @Volatile var nextReconnectAtMs: Long = 0L
 
+        /** 当前实例实际使用的 clientId（dev-{id}-{随机后缀}），供 UI 展示、便于在 broker 客户端列表核对 */
+        @Volatile var currentClientId: String? = null
+
         /** B2：立即重连 —— 取消复活闹钟并触发进程内重连（带去重） */
         fun reconnectNow() {
             nextReconnectAtMs = 0L
@@ -407,7 +410,14 @@ class MqttAgentService : Service() {
 
         deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "default")
 
-        mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), "dev-$deviceId", MemoryPersistence())
+        // clientId 每次服务实例唯一（后缀 UUID 前 8 位）：避免 broker 上残留上一次运行的同 clientId
+        // 僵尸会话，导致「会话接管/互踢」——表现为 connect 成功约 1s 后被 broker 断开、无限重连循环
+        // （与真机日志中 connectComplete 后紧接 connectionLost + 32110 的现象吻合）。
+        // 主题按 deviceId 路由、控制端靠 status retained 发现设备，clientId 唯一不影响配对/寻址，
+        // 可参考控制端 OfflineMonitorService 用独立 clientId 避免互踢的既有做法。
+        val clientId = "dev-$deviceId-${UUID.randomUUID().toString().take(8)}"
+        currentClientId = clientId
+        mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence())
         connectOptions = MqttConnectOptions().apply {
             // 使用全新会话：Doze 挂网产生半死僵尸会话后，重连若沿用旧会话（cleanSession=false）
             // 会触发 EMQX 会话接管/合并，导致重订阅被 broker 以 SUBACK 0x80(ACL) 拒绝。
@@ -436,16 +446,14 @@ class MqttAgentService : Service() {
                 // P3：服务已销毁（onDestroy 已将 instance 置空）后到达的迟到断线回调，
                 // 不再更新状态/排闹钟/触发重连，避免残留通知与无效复活闹钟
                 if (instance !== this@MqttAgentService) return
+                Log.w(TAG, "MQTT 连接丢失：${cause?.message}", cause)
                 onDisconnected()
-                // Paho 自动重连在息屏/Doze 下可能失效，额外安排复活闹钟兜底（带退避）
-                scheduleResurrectWithBackoff()
-                // 进程仍在时优先进程内重连，少触发 Android 15 FGS 冷启动。
-                // 注意：这里必须走 Paho 的 reconnect()（见 reconnect()），否则与 Paho 自动重连循环
-                // 抢同一连接槽位会把它饿死——详见 reconnect() 注释。
-                scope.launch {
-                    kotlinx.coroutines.delay(3_000)
-                    launchReconnectOnce()
-                }
+                // 进程存活时的瞬时掉线，统一交给 Paho isAutomaticReconnect 自行退避重连：
+                // connectComplete(reconnect=true) 会幂等重订阅并发布 online，进程内无需再做任何事。
+                // 此前在此处排复活闹钟 + 3s 后手动 reconnect()，与 Paho 自动重连构成双驱动，
+                // 互相抢同一 clientId 连接槽位 → broker 会话接管互踢 + 32110「已在进行连接」，
+                // 且每次掉线都堆一个 30s 闹钟（真机 90s 内堆了 105 个），持续给循环喂料——
+                // 正是反复上线下线重连的放大器。进程/服务被系统杀死的情况由 onDestroy 单独排复活闹钟兜底。
             }
 
             override fun messageArrived(topic: String?, message: MqttMessage?) {
@@ -1160,12 +1168,11 @@ class MqttAgentService : Service() {
             if (mqttClient?.isConnected == true) return
             mqttClient?.reconnect()
         } catch (e: Exception) {
-            Log.e(TAG, "caught exception", e)
-            // 仅当确实未连接时才标记断开并安排复活（避免与并发成功的重连互相覆盖状态）
-            if (mqttClient?.isConnected != true) {
-                onDisconnected()
-                scheduleResurrectWithBackoff()
-            }
+            // 32110「已在进行连接」= Paho 自动重连正在连接中，本调用撞车属正常竞争，
+            // Paho 自己的循环会完成连接。这里只记日志，绝不置位断开/排复活闹钟——
+            // 否则会与并发成功的连接互相覆盖状态、并叠加闹钟（曾经的震荡放大器）。
+            // 其它异常同样交由 Paho 自动重连循环（onFailure 会续排退避）兜底。
+            Log.w(TAG, "重连撞上正在进行的连接（Paho 自动重连会完成），忽略：${e.message}")
         }
     }
 

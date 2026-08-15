@@ -855,7 +855,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         } else {
             "—"
         }
-        val clientId = if (deviceId.isNotBlank()) "dev-$deviceId" else "—"
+        val clientId = MqttAgentService.currentClientId
+            ?: if (deviceId.isNotBlank()) "dev-$deviceId" else "—"
         listOf(
             "连接质量" to computeConnQuality(),
             "Broker" to broker,
