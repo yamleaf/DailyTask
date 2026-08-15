@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -292,6 +293,21 @@ class MqttAgentService : Service() {
     /** 息屏保活 WiFi 锁：阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock） */
     private var wifiLock: WifiManager.WifiLock? = null
 
+    /** 息屏保活 PARTIAL_WAKE_LOCK：息屏时保 CPU 调度（Paho 心跳线程），亮屏释放省电；与 WifiLock 双保险 */
+    private var screenWakeLock: PowerManager.WakeLock? = null
+
+    private var screenReceiverRegistered = false
+
+    /** 屏幕广播：SCREEN_OFF → 获取 WakeLock 保心跳；SCREEN_ON → 释放省电 */
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> acquireScreenWakeLock()
+                Intent.ACTION_SCREEN_ON -> releaseScreenWakeLock()
+            }
+        }
+    }
+
     @Volatile
     private var lastNetworkReconnectAtMs = 0L
 
@@ -348,6 +364,10 @@ class MqttAgentService : Service() {
         registerNetworkCallback()
         // 息屏保活：持有 WiFi 锁阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock）
         acquireWifiLock()
+        // 息屏保活（方案 B）：息屏时持有 PARTIAL_WAKE_LOCK 保 CPU 调度（Paho Timer 心跳线程），
+        // 亮屏释放省电。根因复核：WifiLock 只保 WiFi 不保 CPU 调度——未插电 deep idle 下 CPU 深度睡眠，
+        // Paho TimerPingSender 线程不被调度 → PINGREQ 停发 → broker 在 keepalive×1.5 后踢线失联。
+        registerScreenStateReceiver()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
         Thread { initMqtt() }.start()
@@ -1320,6 +1340,73 @@ class MqttAgentService : Service() {
         }
     }
 
+    /**
+     * 注册屏幕广播并做初始对齐。息屏保活（方案 B）：
+     * - SCREEN_OFF：持有 PARTIAL_WAKE_LOCK，保证 Paho 的 TimerPingSender 心跳线程在 CPU 深度睡眠时
+     *   仍被调度（未插电 deep idle 下，WifiLock 与 Doze 白名单都不豁免 CPU 调度——这是心跳停发失联的根因）
+     * - SCREEN_ON：释放，亮屏时 CPU 本就活跃，不白耗电
+     */
+    private fun registerScreenStateReceiver() {
+        if (screenReceiverRegistered) return
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            ContextCompat.registerReceiver(
+                this, screenStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            screenReceiverRegistered = true
+        } catch (_: Exception) {
+            try {
+                registerReceiver(screenStateReceiver, IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                })
+                screenReceiverRegistered = true
+            } catch (_: Exception) {
+                Log.w(TAG, "注册屏幕广播失败（息屏保活降级：无法按屏幕状态持锁）")
+            }
+        }
+        // 初始对齐：服务启动时若已处于息屏（如保活闹钟在后台拉起），立即持有，避免空窗掉线
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm?.isInteractive == false) acquireScreenWakeLock()
+    }
+
+    private fun unregisterScreenStateReceiver() {
+        if (screenReceiverRegistered) {
+            screenReceiverRegistered = false
+            try { unregisterReceiver(screenStateReceiver) } catch (_: Exception) { }
+        }
+        releaseScreenWakeLock()
+    }
+
+    /** 持有 PARTIAL_WAKE_LOCK：保 CPU 调度（Paho 心跳线程持续运行）。幂等 */
+    private fun acquireScreenWakeLock() {
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            if (screenWakeLock == null) {
+                screenWakeLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK, "daily_task_mqtt_screen_wakelock"
+                ).apply { setReferenceCounted(false) }
+            }
+            if (screenWakeLock?.isHeld != true) screenWakeLock?.acquire()
+            Log.d(TAG, "已获取 PARTIAL_WAKE_LOCK（息屏保 CPU 心跳）")
+        }.onFailure { e ->
+            Log.w(TAG, "获取 PARTIAL_WAKE_LOCK 失败（心跳可能停发，由重连机制兜底）: ${e.message}")
+        }
+    }
+
+    /** 释放 PARTIAL_WAKE_LOCK（亮屏省电）。幂等 */
+    private fun releaseScreenWakeLock() {
+        runCatching {
+            if (screenWakeLock?.isHeld == true) screenWakeLock?.release()
+            Log.d(TAG, "已释放 PARTIAL_WAKE_LOCK（亮屏）")
+        }.onFailure { e ->
+            Log.w(TAG, "释放 PARTIAL_WAKE_LOCK 异常: ${e.message}")
+        }
+    }
+
     private fun registerNetworkCallback() {
         if (networkCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
@@ -1388,6 +1475,7 @@ class MqttAgentService : Service() {
         super.onDestroy()
         unregisterNetworkCallback()
         releaseWifiLock()
+        unregisterScreenStateReceiver()
         try { unregisterReceiver(remoteChangedReceiver) } catch (_: Exception) { }
         _connected = false
         instance = null
