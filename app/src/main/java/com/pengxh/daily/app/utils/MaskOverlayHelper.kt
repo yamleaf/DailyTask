@@ -88,7 +88,12 @@ object MaskOverlayHelper {
         LogFileManager.writeLog("伪息屏：释放 SCREEN_DIM_WAKE_LOCK")
     }
 
-    fun show(context: Context) {
+    /**
+     * @param keepAwake 是否持有 SCREEN_DIM_WAKE_LOCK 保亮。
+     *  - true：伪息屏语义（屏幕微亮常驻，CPU 不睡，等待系统超时熄灭背光）；
+     *  - false：纯黑蒙层语义（真息屏打卡优化用）。不持任何保亮锁，屏幕照常走系统超时自然灭屏。
+     */
+    fun show(context: Context, keepAwake: Boolean = true) {
         val appCtx = context.applicationContext
         mainHandler.post {
             if (rootView != null) return@post
@@ -154,9 +159,15 @@ object MaskOverlayHelper {
             try {
                 windowManager.addView(frame, params)
                 rootView = frame
-                acquireKeepAwake(appCtx)
+                if (keepAwake) {
+                    acquireKeepAwake(appCtx)
+                }
                 FloatingWindowController.hide()
-                LogFileManager.action("伪息屏蒙层已显示（微亮不锁屏）")
+                if (keepAwake) {
+                    LogFileManager.action("伪息屏蒙层已显示（微亮不锁屏）")
+                } else {
+                    LogFileManager.action("纯黑蒙层已显示（不保亮，等待系统超时灭屏）")
+                }
             } catch (e: Exception) {
                 LogFileManager.error("伪息屏蒙层显示失败: ${e.message}")
             }

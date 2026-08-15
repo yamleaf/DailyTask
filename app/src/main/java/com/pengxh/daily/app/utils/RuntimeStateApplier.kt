@@ -81,6 +81,22 @@ object RuntimeStateApplier {
                     SaveKeyValues.saveBoolean(Constant.SKIP_HOLIDAY_KEY, v)
                     true
                 }
+                Protocol.FIELD_UPDATE_HOLIDAY -> {
+                    val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
+                    if (v) {
+                        ChinaHolidayManager.updateChinaHolidayData()
+                        // 数据拉取完成后稍等片刻再推送 calendar，控制端日历才会刷新为最新节假日/补班数据
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            MqttAgentService.pushCalendar()
+                        }, 3000L)
+                    }
+                    true
+                }
+                Protocol.FIELD_CUSTOM_WORKDAYS -> {
+                    val raw = (packet.v as? PacketValue.StringValue)?.s ?: return@launch
+                    CustomWorkdayManager.saveWorkdays(CustomWorkdayManager.loadWorkdaysFromRaw(raw))
+                    true
+                }
                 Protocol.FIELD_TASK_AUTO_RECYCLE -> {
                     val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
                     SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, v)

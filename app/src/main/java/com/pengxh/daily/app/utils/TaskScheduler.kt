@@ -358,7 +358,10 @@ object TaskScheduler {
                 // 截屏结束：先恢复悬浮窗并回跳，再发超时邮件（邮件可能较慢，勿挡回被控端）
                 // 不可只依赖 _returnToApp：开机自动调度时 MainActivity 可能从未启动，无人收集 SharedFlow。
                 FloatingWindowController.restoreAfterScreenshot()
-                returnAfterPunch(restoreMask = maskWasShowing)
+                returnAfterPunch(
+                    restoreMask = maskWasShowing,
+                    realScreenOff = keptAwakeForPunch && !maskWasShowing
+                )
 
                 if (imagePath.isNotEmpty()) {
                     // force=true：超时兜底通知是关键告警，跳过去重，保证一定送达（防「什么都没收到」）
@@ -399,7 +402,10 @@ object TaskScheduler {
                 // 成功路径：丢弃末段预截图，立刻恢复悬浮窗并回被控端
                 captureDeferred?.cancel()
                 FloatingWindowController.restoreAfterScreenshot()
-                returnAfterPunch(restoreMask = maskWasShowing)
+                returnAfterPunch(
+                    restoreMask = maskWasShowing,
+                    realScreenOff = keptAwakeForPunch && !maskWasShowing
+                )
             }
 
             // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
@@ -509,7 +515,7 @@ object TaskScheduler {
      * 打卡结束后回被控端。必须在调度器内执行：开机自动调度时 MainActivity 可能未创建，
      * 仅 emit SharedFlow 会丢信号，真机（尤其 Android 15/16 BAL）会停在目标 App。
      */
-    private suspend fun returnAfterPunch(restoreMask: Boolean) {
+    private suspend fun returnAfterPunch(restoreMask: Boolean, realScreenOff: Boolean = false) {
         val app = DailyTaskApplication.get()
         KeepAliveReceiver.ensureFloatingWindow(app)
         // 贴边悬浮窗需可见，才有安卓 15+「可见 overlay」后台启动 Activity 豁免
@@ -540,6 +546,15 @@ object TaskScheduler {
                     app.bringDailyTaskToFront(false)
                 }, 800L)
                 LogFileManager.action("打卡结束：回桌面并拉起被控端")
+                // 真息屏打卡优化：伪息屏关 + 屏幕模式=息屏 + 打卡前真息屏 →
+                // 回到前台后立刻盖「不保亮黑蒙层」，等待系统超时自然灭屏（终态与打卡前一致）。
+                // 本分支内伪息屏必为关闭（isForcePseudoMask 分支已先行），故仅需校验模式。
+                if (realScreenOff &&
+                    AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
+                ) {
+                    MaskOverlayHelper.show(app, keepAwake = false)
+                    LogFileManager.action("打卡结束：真息屏场景，盖不保亮黑蒙层等待系统超时")
+                }
             } else {
                 // 与 backToMainActivity(isPunchReturn=true) 一致：关闭「返回桌面」时不拉起
                 LogFileManager.action("打卡结束：未开启返回桌面，保持当前界面")

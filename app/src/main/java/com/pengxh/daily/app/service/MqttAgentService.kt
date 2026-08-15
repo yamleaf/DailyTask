@@ -196,6 +196,11 @@ class MqttAgentService : Service() {
             instance?.doPublishAck(rid, result)
         }
 
+        /** 节假日数据更新等完成后，推送给控制端刷新 calendar 区块 */
+        fun pushCalendar() {
+            instance?.publishPush(setOf("calendar"))
+        }
+
         /**
          * 低电量分段告警 / 开始充电通知 → 经 MQTT 推送给控制端。
          * 守卫在 publishAlertInternal 内（未连接 / 未配对不推送）。

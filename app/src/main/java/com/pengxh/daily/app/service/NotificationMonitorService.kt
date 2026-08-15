@@ -17,6 +17,7 @@ import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.ui.MainActivity
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
@@ -623,6 +624,15 @@ class NotificationMonitorService : NotificationListenerService() {
                             }
                             delay(300L)
                             bringMainActivityForMask(showMask = maskWasShowing)
+                            // 真息屏打卡优化：远程指令同样在回到前台后，若「打卡前真息屏 + 伪息屏关 + 模式=息屏」，
+                            // 盖不保亮黑蒙层等待系统超时灭屏（ForegroundRunningService 在 SCREEN_OFF/SCREEN_ON 时摘除）。
+                            if (keptAwakeForPunch && !maskWasShowing &&
+                                !AppRuntimeConfig.isForcePseudoMask() &&
+                                AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
+                            ) {
+                                MaskOverlayHelper.show(this@NotificationMonitorService, keepAwake = false)
+                                LogFileManager.writeLog("远程打卡结束：真息屏场景，盖不保亮黑蒙层等待系统超时")
+                            }
                         }
 
                         // 统一发送远程打卡结果：无论何种模式都必须有反馈，避免“什么都没有”。

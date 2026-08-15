@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.service.notification.NotificationListenerService
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.BatteryHistory
 import com.pengxh.daily.app.utils.BatteryPredictor
 import androidx.core.app.NotificationCompat
@@ -26,6 +27,7 @@ import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.LogLevel
+import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskScheduler
@@ -268,10 +270,31 @@ class ForegroundRunningService : Service() {
 
                     Intent.ACTION_SCREEN_OFF -> {
                         IdlePseudoMaskController.onSystemScreenOff(this@ForegroundRunningService)
+                        // 真息屏打卡优化：伪息屏关 + 屏幕模式=息屏时，摘掉打卡返回时盖的不保亮黑蒙层。
+                        // 守卫同时保证不会误摘：伪息屏开→伪息屏蒙层（onSystemScreenOff 已处理）、
+                        // 模式0→前台无操作蒙层（shouldForegroundIdleMaskWhenPseudoOff）。
+                        if (!AppRuntimeConfig.isForcePseudoMask() &&
+                            AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
+                        ) {
+                            MaskOverlayHelper.hide(
+                                this@ForegroundRunningService,
+                                MaskOverlayHelper.HideReason.SYNC
+                            )
+                            LogFileManager.writeLog("系统灭屏：摘除真息屏打卡的不保亮黑蒙层")
+                        }
                         FloatingWindowController.setScreenOn(false)
                     }
 
                     Intent.ACTION_SCREEN_ON -> {
+                        // 兜底：若厂商漏发 SCREEN_OFF（蒙层未摘），亮屏时再摘一次，避免下次亮屏仍黑屏
+                        if (!AppRuntimeConfig.isForcePseudoMask() &&
+                            AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
+                        ) {
+                            MaskOverlayHelper.hide(
+                                this@ForegroundRunningService,
+                                MaskOverlayHelper.HideReason.SYNC
+                            )
+                        }
                         FloatingWindowController.setScreenOn(true)
                     }
 

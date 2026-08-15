@@ -200,6 +200,9 @@ object ChinaHolidayManager {
         return date in workdayDates
     }
 
+    /** 是否正在同步节假日数据（供快照上报与控制端 UI 展示） */
+    fun isSyncing(): Boolean = isSyncing.get()
+
     fun cancel() {
         scope.cancel()
     }

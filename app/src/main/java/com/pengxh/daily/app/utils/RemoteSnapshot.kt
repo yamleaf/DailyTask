@@ -324,6 +324,10 @@ object RemoteSnapshot {
         add("nt", "通知转发", "bool", SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false))
         add("fd", "静默通知", "bool", SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false))
         add("sh", "假日跳过", "bool", SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true))
+        // 自定义工作日：控制端多选星期下发（cw），快照回传序列化串（如 "1,2,3,4,5"）
+        add("cw", "自定义工作日", "string", CustomWorkdayManager.serializeWorkdays(CustomWorkdayManager.loadWorkdays()))
+        // 更新节假日：触发型字段，快照仅回传当前是否同步中
+        add("uh", "更新节假日", "bool", ChinaHolidayManager.isSyncing())
         add("ar", "任务每日自动循环", "bool", SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true))
         add("rt", "随机时间", "bool", SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true))
         add("ga", "手势识别", "bool", SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true))
