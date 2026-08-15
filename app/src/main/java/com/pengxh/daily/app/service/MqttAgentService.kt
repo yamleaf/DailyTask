@@ -11,6 +11,7 @@ import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -288,6 +289,9 @@ class MqttAgentService : Service() {
     /** 网络恢复时触发重连（息屏/Doze 下比干等退避更省空窗） */
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    /** 息屏保活 WiFi 锁：阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock） */
+    private var wifiLock: WifiManager.WifiLock? = null
+
     @Volatile
     private var lastNetworkReconnectAtMs = 0L
 
@@ -342,6 +346,8 @@ class MqttAgentService : Service() {
             return
         }
         registerNetworkCallback()
+        // 息屏保活：持有 WiFi 锁阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock）
+        acquireWifiLock()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
         Thread { initMqtt() }.start()
@@ -1277,6 +1283,43 @@ class MqttAgentService : Service() {
         KeepAliveReceiver.cancelRescueAlarm(this)
     }
 
+    /**
+     * 息屏保活：获取 WifiLock(WIFI_MODE_FULL_HIGH_PERF)。
+     *
+     * 真机定位结论：息屏后系统会把 WiFi 驱动置入 suspend 挂起（wpa_supplicant SETSUSPENDMODE 0），
+     * 期间 TCP 心跳/数据完全无法收发 → Paho 心跳 32s 无 PINGRESP 判死（connectionLost「等待来自服务器的
+     * 响应时超时 32000」）→ broker 发 LWT offline → 控制端显示离线、远控失败。
+     * 注意：app 在 Doze 白名单也无效——WiFi suspend 是独立于 Doze 的省电机制，白名单不豁免。
+     * 唯一有效手段是持有锁阻止挂起；选 WifiLock 而非 PARTIAL_WAKE_LOCK：只保 WiFi 全速、CPU 仍可睡眠，
+     * 更省电，契合「被控端常驻」场景。仅 MQTT 开关开启时由 onCreate 获取、onDestroy 释放，
+     * 维持「关闭零耗电」承诺。WAKE_LOCK 权限 manifest 已声明。
+     */
+    private fun acquireWifiLock() {
+        runCatching {
+            val wm = getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+            if (wifiLock == null) {
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "daily_task_mqtt_wifilock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wifiLock?.isHeld != true) wifiLock?.acquire()
+            Log.d(TAG, "已获取 WifiLock（息屏保活）")
+        }.onFailure { e ->
+            // 个别 ROM 对 WifiLock 有限制，拿不到不崩溃，仅告警（掉线由 Paho 自动重连 + 保活闹钟兜底）
+            Log.w(TAG, "获取 WifiLock 失败（息屏后可能掉线，由重连机制兜底）: ${e.message}")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        runCatching {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+            wifiLock = null
+            Log.d(TAG, "已释放 WifiLock")
+        }.onFailure { e ->
+            Log.w(TAG, "释放 WifiLock 异常: ${e.message}")
+        }
+    }
+
     private fun registerNetworkCallback() {
         if (networkCallback != null) return
         val cm = getSystemService(ConnectivityManager::class.java) ?: return
@@ -1344,6 +1387,7 @@ class MqttAgentService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         unregisterNetworkCallback()
+        releaseWifiLock()
         try { unregisterReceiver(remoteChangedReceiver) } catch (_: Exception) { }
         _connected = false
         instance = null
