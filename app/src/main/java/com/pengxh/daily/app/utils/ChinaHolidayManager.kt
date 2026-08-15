@@ -59,7 +59,7 @@ object ChinaHolidayManager {
     private val isSyncing = AtomicBoolean(false)
     private val dataMutex = Mutex()
 
-    fun updateChinaHolidayData() {
+    fun updateChinaHolidayData(onComplete: (() -> Unit)? = null) {
         if (!isSyncing.compareAndSet(false, true)) {
             Log.w(kTag, "Already syncing, skip duplicate request")
             return
@@ -71,6 +71,8 @@ object ChinaHolidayManager {
                 fetchAndParse()
             } finally {
                 isSyncing.set(false)
+                // 同步真正结束（成功或失败、缓存或网络）后再回调，调用方据此推送最新数据
+                onComplete?.invoke()
             }
         }
     }
