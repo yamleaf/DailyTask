@@ -14,13 +14,14 @@ Gitee Go 同步脚本：拉 GitHub 最新 release → 解压 7z → 传 Gitee re
   GITHUB_TOKEN         可选：GitHub API 额度提升
   VERSION_KEY          可选：.dat 加密密钥（默认 DailyTaskUpdateKey2026!，与 App 内置一致）
   KEEP_DAYS            可选：清理超过 N 天的旧 Gitee release（默认 180）
-  GH_PROXY             可选：GitHub 资产下载镜像前缀（默认 https://gh-proxy.com/；置空则直连）
+  GH_PROXIES           可选：GitHub 资产下载镜像候选（逗号分隔，默认 gh.ddlc.top,gh-proxy.com,
+                       ghfast.top,mirror.ghproxy.com；兼容旧 GH_PROXY 单值；置空则直连）
   MY_GITEE_OWNER       可选：覆盖 Gitee 仓库 owner（默认 yamleaf；勿用 GITEE_ 前缀，系统保留）
   MY_GITEE_REPO        可选：覆盖 Gitee 仓库名（默认 DailyTaskUpdate）
 
 国内镜像策略（统一走镜像源）：
   pip 依赖    → 清华 TUNA（流水线命令已指定 -i https://pypi.tuna.tsinghua.edu.cn/simple）
-  GitHub 资产 → GH_PROXY 镜像（gh-proxy.com，实测可用；失败自动退直连）
+  GitHub 资产 → GH_PROXIES 多镜像候选逐个尝试（失败快速切换，直连兜底）
 
 GitHub Release 约定（workflow build-develop.yml 生成）：
   tag = dt-{versionCode}；body 含 "- versionName: `xxx`" 和 "- update note: xxx"
@@ -84,10 +85,20 @@ ENC_PASS = os.environ.get("APK_ENCRYPT_PASSWORD", "")
 VERSION_KEY = os.environ.get("VERSION_KEY", "DailyTaskUpdateKey2026!").encode("utf-8")
 KEEP_DAYS = int(os.environ.get("KEEP_DAYS", "180"))
 KEEP_LATEST = 5  # 无论如何保留最新 5 个 release（兜底）
-# 下载镜像：GitHub 资产 CDN（objects.githubusercontent.com）国内访问慢/超时，
-# 统一走镜像源。实测 https://gh-proxy.com/ 可用（2026-08 国内直连测试）。
-# GH_PROXY 环境变量可覆盖（设为空字符串则直连）。
-GH_PROXY = os.environ.get("GH_PROXY", "https://gh-proxy.com/")
+# 下载镜像：GitHub 资产 CDN（objects.githubusercontent.com）国内访问慢/超时。
+# 第三方免费镜像不稳定（实测 gh-proxy.com 时通时超时），故用多候选逐个尝试：
+#   2026-08-16 国内实测：gh.ddlc.top 首字节 1.3s ✅ / gh-proxy.com 2.7s ✅ /
+#   ghfast.top、mirror.ghproxy.com、github.moeyy.xyz 超时 ❌
+# GH_PROXIES 环境变量可覆盖（逗号分隔）；兼容旧 GH_PROXY 单值；置空则直连。
+_DEFAULT_PROXIES = (
+    "https://gh.ddlc.top/,"      # 实测最快
+    "https://gh-proxy.com/,"     # 实测可用
+    "https://ghfast.top/,"       # 兜底候选
+    "https://mirror.ghproxy.com/,"  # 兜底候选
+)
+GH_PROXIES = [p for p in
+              (os.environ.get("GH_PROXIES") or os.environ.get("GH_PROXY") or _DEFAULT_PROXIES)
+              .split(",") if p.strip()]
 
 
 def gh_headers():
@@ -114,9 +125,9 @@ def fetch_gh_latest_release() -> dict:
 
 
 def _stream_download(src: str, dest: str, total: int = 0) -> None:
-    """单源流式下载：每 2MB 打进度；连接超时 10s、读超时 60s（避免干等）"""
+    """单源流式下载：每 2MB 打进度；连接超时 10s、读超时 45s（快速失败切换下一源）"""
     t0 = time.time()
-    with requests.get(src, headers=gh_headers(), stream=True, timeout=(10, 60)) as r:
+    with requests.get(src, headers=gh_headers(), stream=True, timeout=(10, 45)) as r:
         if r.status_code != 200:
             raise RuntimeError(f"HTTP {r.status_code}")
         got = 0
@@ -133,10 +144,8 @@ def _stream_download(src: str, dest: str, total: int = 0) -> None:
 
 
 def download_asset(url: str, dest: str, total: int = 0) -> None:
-    """下载资产：统一走镜像源（GH_PROXY），失败自动退直连"""
-    candidates = []
-    if GH_PROXY:
-        candidates.append(("镜像 " + GH_PROXY, GH_PROXY.rstrip("/") + "/" + url))
+    """下载资产：依次尝试多镜像候选（GH_PROXIES），全部失败后直连兜底"""
+    candidates = [(f"镜像{i + 1} {p}", p.rstrip("/") + "/" + url) for i, p in enumerate(GH_PROXIES)]
     candidates.append(("直连", url))
     last_err = None
     for label, src in candidates:
