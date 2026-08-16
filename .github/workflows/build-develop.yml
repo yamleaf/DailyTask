@@ -154,8 +154,10 @@ jobs:
           echo "version_name=$VN" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
-      - name: Publish APK + version file to Gitee Release
-        if: github.event_name == 'workflow_dispatch' && env.GITEE_TOKEN != ''
+      # 关闭 Gitee 上传：用户要对比/切换 GitCode，临时停掉 Gitee 发布步骤。
+      # if: false 让该步骤跳过但保留在文件中，后续如需恢复 Gitee 把此行改回即可。
+      - name: Publish APK + version file to Gitee Release [DISABLED]
+        if: false # 原为 github.event_name == 'workflow_dispatch' && env.GITEE_TOKEN != ''
         run: |
           python3 scripts/publish_gitee.py \
             --version-code "${{ steps.gitee_version.outputs.version_code }}" \
