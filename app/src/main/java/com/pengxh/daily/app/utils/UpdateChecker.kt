@@ -59,12 +59,18 @@ object UpdateChecker {
     /** 静默检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
     private const val PREF_HAS_UPDATE = "update_has_new_version"
 
+    /** 预期安装版本（下载校验通过后写入）：安装完成（任意途径）后与真实安装版本比对，不一致则明确报错 */
+    private const val PREF_PENDING_VERCODE = "update_pending_vercode"
+
     /** 主线程 Handler：后台线程解析 APK 下载地址后切回主线程发起下载 */
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** 错误提示防抖：同类错误 15 秒内只弹一次，避免反复报错刷屏 */
     private const val ERROR_TOAST_MIN_INTERVAL_MS = 15_000L
     private var lastErrorToastTime = 0L
+
+    /** 包替换广播是否已注册（幂等，防止重复注册导致安装完成重复回调） */
+    private var installReceiverRegistered = false
 
     /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致（仅用于 .dat 版本文件加密，APK 不加密） */
     private val VERSION_KEY: ByteArray by lazy {
@@ -95,6 +101,9 @@ object UpdateChecker {
         showNoUpdateToast: Boolean = false,
         silent: Boolean = false,
     ): Boolean {
+        // 注册包替换广播 + 兜底清理：覆盖两种安装场景（App 内跳装 / 文件管理器手动装）的版本一致性核对
+        ensureInstallMonitor(context)
+        reconcilePendingVersion(context)
         return withContext(Dispatchers.IO) {
             runCatching {
                 parse(decrypt(fetchVersionFile()))
@@ -322,6 +331,9 @@ object UpdateChecker {
             showErrorOnce(context, "更新包版本不一致（$apkVc ≠ ${info.v}）：请确认 Gitee Release『${info.tag}』上传的 APK 为对应构建产物")
             return
         }
+        // 记录预期安装版本：无论自动跳装还是用户去文件管理器安装，
+        // 安装完成后经包替换广播统一核对版本一致性（见 onPackageInstalled）
+        SaveKeyValues.saveInt(PREF_PENDING_VERCODE, info.v)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
@@ -333,6 +345,66 @@ object UpdateChecker {
         }.onFailure { e ->
             LogFileManager.error("检查更新：跳转安装页失败 ${e.message}")
         }
+    }
+
+    /** 注册「自身包安装/替换」广播：覆盖两种安装场景（App 内跳装 / 文件管理器手动装）的版本一致性核对 */
+    private fun ensureInstallMonitor(context: Context) {
+        if (installReceiverRegistered) return
+        installReceiverRegistered = true
+        runCatching {
+            val filter = IntentFilter(Intent.ACTION_PACKAGE_REPLACED).apply { addDataScheme("package") }
+            ContextCompat.registerReceiver(
+                context.applicationContext,
+                object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context?, intent: Intent?) {
+                        val pkg = intent?.data?.schemeSpecificPart ?: return
+                        if (pkg != context.packageName) return
+                        onPackageInstalled(context.applicationContext)
+                    }
+                },
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
+        }
+    }
+
+    /** 安装完成（任意途径）后核对：实际安装版本 vs 预期发布版本（PREF_PENDING_VERCODE） */
+    private fun onPackageInstalled(context: Context) {
+        val expected = SaveKeyValues.loadInt(PREF_PENDING_VERCODE, 0)
+        if (expected <= 0) return
+        val installed = installedVersionCode(context)
+        SaveKeyValues.saveInt(PREF_PENDING_VERCODE, 0) // 一次性核对
+        if (installed == null) return
+        if (installed >= expected.toLong()) {
+            // 装到了目标版本（或更高）：更新完成，清除红点
+            SaveKeyValues.saveBoolean(PREF_HAS_UPDATE, false)
+            LogFileManager.action("检查更新：新版本 v$installed 安装成功（预期 v$expected），清除更新红点")
+        } else {
+            // 版本不一致：可能装了旧包/错包（如文件管理器里选了遗留的 APK）
+            showErrorOnce(context, "安装的版本（v$installed）与发布版本（v$expected）不一致：请确认安装的是 Gitee Release 对应版本的更新包")
+            LogFileManager.error("检查更新：安装后版本不一致 installed=$installed expected=$expected")
+        }
+    }
+
+    /** 启动补查：包替换广播丢失时（进程被杀等）兜底——已装到目标版本则清理标记与红点 */
+    private fun reconcilePendingVersion(context: Context) {
+        val expected = SaveKeyValues.loadInt(PREF_PENDING_VERCODE, 0)
+        if (expected <= 0) return
+        val installed = installedVersionCode(context) ?: return
+        if (installed >= expected.toLong()) {
+            SaveKeyValues.saveInt(PREF_PENDING_VERCODE, 0)
+            SaveKeyValues.saveBoolean(PREF_HAS_UPDATE, false)
+        }
+    }
+
+    /** 当前已安装的自身版本号（获取失败返回 null） */
+    @Suppress("DEPRECATION")
+    private fun installedVersionCode(context: Context): Long? {
+        return runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+            else info.versionCode.toLong()
+        }.getOrNull()
     }
 
     /** 错误提示（防抖）：15 秒内只弹一次，避免反复报错刷屏 */
