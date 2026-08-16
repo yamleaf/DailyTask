@@ -363,7 +363,14 @@ object UpdateChecker {
         // 记录预期安装版本：无论自动跳装还是用户去文件管理器安装，
         // 安装完成后经包替换广播统一核对版本一致性（见 onPackageInstalled）
         SaveKeyValues.saveInt(PREF_PENDING_VERCODE, info.v)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
+        // 获取安装 URI（FileProvider 映射异常时兜底提示，避免后台线程未捕获异常闪退）
+        val uri = runCatching {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
+        }.getOrElse { e ->
+            LogFileManager.error("检查更新：获取安装 URI 失败 ${e.message}")
+            showErrorOnce(context, "更新包打开失败，请重试")
+            return
+        }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
