@@ -15,6 +15,8 @@ Gitee Go 同步脚本：拉 GitHub 最新 release → 解压 7z → 传 Gitee re
   VERSION_KEY          可选：.dat 加密密钥（默认 DailyTaskUpdateKey2026!，与 App 内置一致）
   KEEP_DAYS            可选：清理超过 N 天的旧 Gitee release（默认 180）
   GH_PROXY             可选：GitHub 资产下载镜像前缀（默认 https://gh-proxy.com/；置空则直连）
+  MY_GITEE_OWNER       可选：覆盖 Gitee 仓库 owner（默认 yamleaf；勿用 GITEE_ 前缀，系统保留）
+  MY_GITEE_REPO        可选：覆盖 Gitee 仓库名（默认 DailyTaskUpdate）
 
 国内镜像策略（统一走镜像源）：
   pip 依赖    → 清华 TUNA（流水线命令已指定 -i https://pypi.tuna.tsinghua.edu.cn/simple）
@@ -67,8 +69,11 @@ GITHUB_API = "https://api.github.com"
 GITEE_API = "https://gitee.com/api/v5/repos"
 
 GH_REPO = os.environ.get("GH_REPO", "yamleaf/DailyTask")
-GITEE_OWNER = os.environ.get("GITEE_OWNER", "yamleaf")
-GITEE_REPO = os.environ.get("GITEE_REPO", "DailyTaskUpdate")
+# 注意：Gitee Go 保留 GITEE_ 前缀给系统变量注入，直接用 GITEE_OWNER/GITEE_REPO
+# 会被系统同名变量覆盖（实测导致 API 404 Not Found Project）。
+# 因此自定义环境变量一律用 MY_ 前缀；仅当需要覆盖默认仓库时配置。
+GITEE_OWNER = os.environ.get("MY_GITEE_OWNER") or "yamleaf"
+GITEE_REPO = os.environ.get("MY_GITEE_REPO") or "DailyTaskUpdate"
 # Gitee Go 限制变量名不能以 GITEE_ 开头；多候选名容错，任配一个即可
 GITEE_TOKEN = (os.environ.get("MY_GITEE_TOKEN")
                or os.environ.get("PUBLISH_TOKEN")
@@ -167,7 +172,7 @@ def gitee_get_or_create_release(tag: str, name: str, body: str) -> int:
     for rel in r.json() if isinstance(r.json(), list) else []:
         if rel.get("tag_name") == tag and rel.get("id"):
             return int(rel["id"])
-    raise RuntimeError(f"创建 Gitee release 失败({r.status_code}): {r.text[:300]}")
+    raise RuntimeError(f"创建 Gitee release 失败({r.status_code}): {r.text[:300]}（URL={GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases）")
 
 
 def gitee_upload_attachment(release_id: int, apk_path: str) -> int:
@@ -240,6 +245,8 @@ def main() -> int:
     for name in ("MY_GITEE_TOKEN", "PUBLISH_TOKEN", "API_TOKEN"):
         v = os.environ.get(name, "")
         log(f"[env] {name}: {('*' * min(len(v), 8)) + ('...' if v else '')} (len={len(v)})")
+    # 诊断：打印实际使用的仓库与目标 URL（Gitee Go 可能注入 GITEE_* 系统变量）
+    log(f"[env] 目标仓库 : {GITEE_OWNER}/{GITEE_REPO} → {GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}")
     if not GITEE_TOKEN:
         log("错误：所有候选 token 变量均为空（MY_GITEE_TOKEN/PUBLISH_TOKEN/API_TOKEN）——Gitee Go 流水线→变量管理配置并保存")
         return 1
