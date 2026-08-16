@@ -42,8 +42,18 @@ object UpdateChecker {
     private const val GITEE_REPO = "DailyTaskUpdate"
     private const val DATA_PATH = "updates/v_task.dat"
 
-    /** Gitee 只读令牌（projects 权限）：私密仓库 raw/附件均需带此令牌访问。逆向可提取，泄露影响仅限读取 */
-    private const val APP_TOKEN = "改成你的Gitee只读令牌"
+    /** Gitee 只读令牌（projects 权限）：私密仓库 raw/附件均需带此令牌访问。
+     *  不存明文：按奇偶位拆成两段打乱存储，运行时交错还原（防 APK 反编译直接读取） */
+    private val APP_TOKEN: String by lazy {
+        val even = "d8956eae9971fd1b" // token 偶数位（索引 0,2,4...）
+        val odd = "ac4fb3c1a84ad46e"  // token 奇数位（索引 1,3,5...）
+        buildString {
+            for (i in even.indices) {
+                append(even[i])
+                append(odd[i])
+            }
+        }
+    }
 
     /** 静默检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
     private const val PREF_HAS_UPDATE = "update_has_new_version"
