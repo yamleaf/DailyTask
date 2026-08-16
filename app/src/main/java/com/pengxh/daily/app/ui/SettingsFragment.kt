@@ -837,10 +837,12 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 刷新设置页全部状态（悬浮/通知/截屏/无障碍开关与提示） */
     private fun refreshUi() {
-        // 检查更新红点：先做一次安装完成核对（包替换广播在安装时可能丢失、进程被杀收不到，
-        // 导致安装成功后红点仍亮——这里主动核对，版本一致即清红点），完成后刷新红点显示
+        // 检查更新红点：有红点时才做一次安装完成核对（包替换广播在安装时可能丢失、
+        // 进程被杀收不到，导致安装成功后红点仍亮）。无红点无需核对，直接刷新显示即可
         lifecycleScope.launch {
-            UpdateChecker.reconcilePendingUpdate(ctx)
+            if (UpdateChecker.hasPendingUpdate()) {
+                UpdateChecker.reconcilePendingUpdate(ctx)
+            }
             if (isAdded) {
                 binding.updateBadge.visibility =
                     if (UpdateChecker.hasPendingUpdate()) View.VISIBLE else View.GONE
