@@ -70,11 +70,9 @@ jobs:
       # secrets 不能直接出现在 step 的 if 表达式里，故先落到 job 级 env，
       # 未配置 Secret 时该变量为空字符串，if 判断按 env. 读取。
       APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
-      # Gitee 私密仓库（App 检查更新数据源，仅发布/内置只读令牌者可见），GITEE_TOKEN 需有写权限
-      GITEE_OWNER: 'yamleaf'
-      GITEE_REPO: 'DailyTaskUpdate'
-      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-      VERSION_KEY: ${{ secrets.VERSION_KEY }}
+      # 发版已改为本地执行（scripts/publish_local.sh）：GitHub CI（美国）跨境上传
+      # Gitee（国内）极慢（实测 >9min），本地跑 ~30s。故 CI 不再持有 Gitee 凭据；
+      # 本地发版需 GITEE_TOKEN（写权限）+ VERSION_KEY（与 App 内置一致）。
 
     steps:
       - name: Checkout code
@@ -132,10 +130,7 @@ jobs:
           name: dailyTask_alpha_release
           path: app/build/outputs/apk/release/*.apk
 
-      # ===== 手动触发才执行：同步到 Gitee 私密仓库 Release（明文 APK + 加密版本文件） =====
-      # App「检查更新」从私密仓库拉取 .dat（XOR 密文）→ 下载明文 APK（拼 access_token）→ 直接安装。
-      # 需配置 Secrets：GITEE_TOKEN（私密仓库写权限令牌）、VERSION_KEY（.dat 加密，与 App 内置一致）。
-      # App 内置 APP_TOKEN（只读令牌）拉取私密仓库文件/附件。
+      # ===== 手动触发：dump APK 版本号，供 GitHub Release Draft 展示（版本信息发版在本地执行） =====
       - name: Extract version from APK (aapt)
         if: github.event_name == 'workflow_dispatch'
         id: gitee_version
@@ -150,25 +145,11 @@ jobs:
           echo "version_name=$VN" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
-      # ===== 发布到 Gitee 私密仓库（git 单提交重建：每次发版直接丢弃历史） =====
-      # gitee_version 步骤已 dump 出 APK 的 versionCode/versionName，.dat 据此写入；
-      # publish_gitee.py 内部 clone(--depth 1) → 替换 updates/dailyTask.apk + .dat →
-      # commit → force push HEAD:master，仓库历史恒为 1 个 commit，容量永不累积。
-      # 需配置 Secrets：GITEE_TOKEN（私密仓库写权限令牌）、VERSION_KEY（.dat 加密，与 App 内置一致）。
-      - name: Publish to Gitee (git single-commit, APK + version file)
-        if: github.event_name == 'workflow_dispatch' && env.GITEE_TOKEN != ''
-        run: |
-          python3 scripts/publish_gitee.py \
-            --version-code "${{ steps.gitee_version.outputs.version_code }}" \
-            --version-name "${{ steps.gitee_version.outputs.version_name }}" \
-            --apk "${{ steps.gitee_version.outputs.apk }}" \
-            --tag "dailyTask-${{ env.BUILD_NUMBER }}" \
-            --note "${{ inputs.note }}" \
-            --force "${{ inputs.force == 'true' && '1' || '0' }}" \
-            --owner "$GITEE_OWNER" \
-            --repo "$GITEE_REPO" \
-            --token "$GITEE_TOKEN" \
-            --key "$VERSION_KEY"
+      # ===== 发版（上传 APK + .dat 到 Gitee）已改为本地执行 =====
+      # 原因：GitHub CI（美国）跨境上传 Gitee（国内）极慢（实测 >9min），
+      # 本地跑 scripts/publish_local.sh 约 30s（clone 4s + push 14s + API 几秒）。
+      # 发版命令示例：
+      #   GITEE_TOKEN=<写权限令牌> bash scripts/publish_local.sh --note "更新说明"
 
       # ===== 手动触发：生成 GitHub Release Draft（标题 DailyTask Alpha yymmdd.HHmm，
       # body 总结自上次 release tag 以来的提交记录） =====
