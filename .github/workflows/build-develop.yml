@@ -20,8 +20,9 @@ permissions:
   actions: write
 
 jobs:
-  # 自动编译限流：所有事件都跑（避免 needs.skipped.outputs 导致 build 无法评估 if）；
-  # manual 直接放行，push 走"每小时一次"检查。repository variable LAST_AUTO_BUILD 存时间戳。
+  # 自动编译限流：时间戳存仓库文件 last_auto_build（GITHUB_TOKEN 写仓库 contents 必然可用，
+  # 而 repository variables API 对 GITHUB_TOKEN 写受限 403）。manual 直接放行；push 走
+  # "每小时一次"检查（build 成功后会更新该文件，commit 带 [ci skip] 防递归触发）。
   rate-check:
     runs-on: ubuntu-latest
     outputs:
@@ -39,15 +40,14 @@ jobs:
             exit 0
           fi
           NOW=$(date +%s)
-          LAST=$(gh variable get LAST_AUTO_BUILD --repo "$GITHUB_REPOSITORY" 2>/dev/null || echo 0)
+          LAST=$(gh api "repos/$GITHUB_REPOSITORY/contents/last_auto_build" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo 0)
+          LAST=${LAST:-0}
           if [ "$LAST" -gt 0 ] && [ "$((NOW - LAST))" -lt 3600 ]; then
             echo "allowed=false" >> "$GITHUB_OUTPUT"
             echo "距上次自动编译不足 1 小时，跳过本次自动编译（上次 $LAST）"
           else
             echo "allowed=true" >> "$GITHUB_OUTPUT"
-            # gh variable set 不接受 VALUE 位置参数，必须用 --body 或 stdin
-            gh variable set LAST_AUTO_BUILD --body "$NOW" --repo "$GITHUB_REPOSITORY"
-            echo "自动编译限流已放行并记录时间戳 $NOW"
+            echo "自动编译限流放行（上次 $LAST，距现在 $((NOW - LAST)) 秒）"
           fi
 
   build:
@@ -204,3 +204,15 @@ jobs:
             --repo "$GITEE_REPO" \
             --token "$GITEE_TOKEN" \
             --key "$VERSION_KEY"
+
+      # 自动构建成功：把当前时间戳写入仓库文件 last_auto_build（rate-check 据此限流）。
+      # commit 带 [ci skip] 不会再次触发本 workflow，避免递归。
+      - name: Record last auto build timestamp
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "$(date +%s)" > last_auto_build
+          git add last_auto_build
+          git commit -m "chore: record last auto build timestamp [ci skip]" || echo "时间戳无变化，跳过提交"
+          git push origin alpha
