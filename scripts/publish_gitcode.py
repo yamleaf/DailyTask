@@ -50,10 +50,16 @@ def md5_of(data: bytes) -> str:
     return hashlib.md5(data).hexdigest()
 
 
-def gc_json(method: str, url: str, body: dict | None = None, timeout: int = 30):
-    """GitCode API（JSON 请求/响应），防御式解析：body 为空/非对象/null 一律归为 {}"""
+def gc_json(method: str, url: str, body: dict | None = None, timeout: int = 30, token: str | None = None):
+    """GitCode API（JSON 请求/响应），防御式解析：body 为空/非对象/null 一律归为 {}
+
+    鉴权：GitCode 官方首选 Authorization: Bearer 头（POST/PATCH/PUT 的 access_token
+    不认 JSON body，必须走头或 URL 查询参数），故统一注入 Bearer 头，避免 403。
+    """
     data = None
-    headers = {"User-Agent": "Mozilla/5.0 (DailyTask-CI)"}
+    headers = {"User-Agent": "Mozilla/5.0 (DailyTask-CI)", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json;charset=UTF-8"
@@ -82,7 +88,7 @@ def gc_json(method: str, url: str, body: dict | None = None, timeout: int = 30):
 def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str, body: str) -> int:
     """复用已存在 tag 的 release，否则创建；返回 release（dict）"""
     tag_enc = urllib.parse.quote(tag, safe="")
-    status, data = gc_json("GET", f"{API_BASE}/{owner}/{repo}/releases/tags/{tag_enc}?access_token={token}")
+    status, data = gc_json("GET", f"{API_BASE}/{owner}/{repo}/releases/tags/{tag_enc}?access_token={token}", token=token)
     if status == 200 and data.get("tag_name"):
         return data
     create_body = {
@@ -92,7 +98,7 @@ def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str
         "body": body,
         "release_status": "pre",  # prerelease
     }
-    status, data = gc_json("POST", f"{API_BASE}/{owner}/{repo}/releases", create_body)
+    status, data = gc_json("POST", f"{API_BASE}/{owner}/{repo}/releases", create_body, token=token)
     if status in (200, 201) and data.get("tag_name"):
         return data
     raise RuntimeError(f"创建 release 失败({status}): {data}")
@@ -104,7 +110,7 @@ def get_upload_url(owner: str, repo: str, tag: str, token: str, file_name: str):
     fn_enc = urllib.parse.quote(file_name, safe="")
     url = (f"{API_BASE}/{owner}/{repo}/releases/{tag_enc}/upload_url"
            f"?access_token={token}&file_name={fn_enc}")
-    status, data = gc_json("GET", url)
+    status, data = gc_json("GET", url, token=token)
     if status != 200 or not data.get("url"):
         raise RuntimeError(f"获取上传地址失败({status}): {data}")
     return data["url"], data.get("headers", {})
@@ -138,7 +144,7 @@ def upload_apk(owner: str, repo: str, tag: str, token: str, file_path: str, atta
 def upload_data_file(owner: str, repo: str, path: str, content: str, token: str, message: str) -> None:
     """上传/更新仓库文件（contents API：存在则 PUT 带 sha，否则 PUT 新建）"""
     sha = None
-    status, data = gc_json("GET", f"{API_BASE}/{owner}/{repo}/contents/{path}?access_token={token}")
+    status, data = gc_json("GET", f"{API_BASE}/{owner}/{repo}/contents/{path}?access_token={token}", token=token)
     if status == 200 and data.get("sha"):
         sha = data["sha"]
     content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
@@ -150,7 +156,7 @@ def upload_data_file(owner: str, repo: str, path: str, content: str, token: str,
     }
     if sha:
         body["sha"] = sha
-    status, data = gc_json("PUT", f"{API_BASE}/{owner}/{repo}/contents/{path}", body)
+    status, data = gc_json("PUT", f"{API_BASE}/{owner}/{repo}/contents/{path}", body, token=token)
     if status not in (200, 201) or not data.get("content"):
         # 兼容：部分实现返回 commit 字段而非 content
         if status in (200, 201) and (data.get("commit") or data.get("content")):
