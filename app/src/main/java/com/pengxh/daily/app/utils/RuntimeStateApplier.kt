@@ -84,11 +84,11 @@ object RuntimeStateApplier {
                 Protocol.FIELD_UPDATE_HOLIDAY -> {
                     val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
                     if (v) {
-                        ChinaHolidayManager.updateChinaHolidayData()
-                        // 数据拉取完成后稍等片刻再推送 calendar，控制端日历才会刷新为最新节假日/补班数据
-                        Handler(Looper.getMainLooper()).postDelayed({
+                        ChinaHolidayManager.updateChinaHolidayData {
+                            // 数据拉取真正完成后再推送 calendar，控制端日历才刷新为最新节假日/补班数据；
+                            // 用回调代替固定延时，避免 3s 内网络未完成就推送旧数据
                             MqttAgentService.pushCalendar()
-                        }, 3000L)
+                        }
                     }
                     true
                 }
