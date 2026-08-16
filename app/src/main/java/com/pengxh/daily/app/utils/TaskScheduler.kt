@@ -19,7 +19,6 @@ import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.utils.StatusReporter
-import com.pengxh.daily.app.utils.UpdateChecker
 import com.pengxh.kt.lite.extensions.timestampToCompleteDate
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.CompletableDeferred
@@ -466,14 +465,7 @@ object TaskScheduler {
             } catch (_: TimeoutCancellationException) {
                 // 自然到达重置点，交给外层循环重排下一轮任务
                 LogFileManager.action("到达重置时间点，重排下一轮任务")
-                // 每日版本检查（静默）：有新版本仅设置页「检查更新」标红点，不弹窗不通知
-                scope?.launch {
-                    runCatching {
-                        UpdateChecker.check(DailyTaskApplication.get(), silent = true)
-                    }.onFailure { e ->
-                        LogFileManager.error("每日版本检查失败: ${e.message}")
-                    }
-                }
+                // 注：已移除每日自动版本检查——更新检测仅在用户点击「设置→关于→检查更新」时触发
                 return
             } finally {
                 pendingResetSignal = null
