@@ -112,9 +112,9 @@ object UpdateChecker {
 
     // ═══════════════════════ 拉取与解密（与 publish_gitee.py 对称）═══════════════════════
 
-    /** 私密仓库 raw（API v5），必须带 access_token */
+    /** 私密仓库 raw（API v5），必须带 access_token；ref 显式指定 master（仓库默认分支） */
     private fun fetchVersionFile(): String {
-        val url = "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/raw/$DATA_PATH?access_token=$APP_TOKEN"
+        val url = "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/raw/$DATA_PATH?access_token=$APP_TOKEN&ref=master"
         val client = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
