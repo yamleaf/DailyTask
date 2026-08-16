@@ -2239,7 +2239,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@runCatching null
-                val arr = JsonParser.parseString(resp.body?.string().orEmpty()).asJsonArray
+                val arr = JsonParser.parseString(resp.body.string().orEmpty()).asJsonArray
                 if (arr.size() == 0) return@runCatching null
                 arr[0].asJsonObject.get("html_url")?.asString
             }

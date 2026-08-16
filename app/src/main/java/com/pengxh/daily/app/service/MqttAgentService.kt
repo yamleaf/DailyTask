@@ -1319,6 +1319,7 @@ class MqttAgentService : Service() {
      * 更省电，契合「被控端常驻」场景。仅 MQTT 开关开启时由 onCreate 获取、onDestroy 释放，
      * 维持「关闭零耗电」承诺。WAKE_LOCK 权限 manifest 已声明。
      */
+    @Suppress("DEPRECATION") // WIFI_MODE_FULL_HIGH_PERF 在 API 30 弃用；保活场景仍适用（WifiLock 整体弃用前无等价替代）
     private fun acquireWifiLock() {
         runCatching {
             val wm = getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
