@@ -424,18 +424,16 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         intent?.removeExtra(Constant.EXTRA_MASK_COMMAND)
         when (action) {
             1 -> {
-                // 伪息屏指令：伪息屏开 → 保亮蒙层（现状）；伪息屏关 + 模式=息屏 →
-                // 盖不保亮黑蒙层等待系统超时灭屏锁屏，避免屏幕微亮常驻不锁屏
-                if (AppRuntimeConfig.isForcePseudoMask() ||
-                    AppRuntimeConfig.getScreenMode() != Constant.SCREEN_MODE_OFF
-                ) {
+                // 伪息屏指令：伪息屏开 → 保亮蒙层（原语义）；伪息屏关 → 不保亮黑蒙层，
+                // 屏幕即刻黑、系统按超时自然灭屏锁屏（不持保亮锁，避免微亮常驻不锁屏）
+                if (AppRuntimeConfig.isForcePseudoMask()) {
                     MaskOverlayHelper.show(this)
                     if (!maskViewController.isMaskVisible()) {
                         maskViewController.showMaskView()
                     }
                 } else {
                     MaskOverlayHelper.show(this, keepAwake = false)
-                    LogFileManager.writeLog("伪息屏指令：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                    LogFileManager.writeLog("伪息屏指令：伪息屏关，盖不保亮黑蒙层")
                 }
             }
 
