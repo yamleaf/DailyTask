@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <external-files-path name="documents" path="Documents/" />
-    <!-- 检查更新：DownloadManager 下载 APK 到外部 files/Downloads -->
-    <external-files-path name="downloads" path="Downloads/" />
+    <!-- 检查更新：DownloadManager 下载 APK 到外部 files/Download（Environment.DIRECTORY_DOWNLOADS="Download"，单数） -->
+    <external-files-path name="downloads" path="Download/" />
 </paths>
