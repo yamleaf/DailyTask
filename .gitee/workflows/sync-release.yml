@@ -35,7 +35,8 @@ stages:
         displayName: 执行同步脚本
         pythonVersion: '3.11'
         commands:
-          - pip install requests py7zr -q
+          # Gitee Go 默认 pip 源为官方 pypi（海外，慢）；显式走国内镜像（清华 TUNA）加速
+          - pip install -i https://pypi.tuna.tsinghua.edu.cn/simple requests py7zr -q
           - python3 scripts/sync_release.py
         caches: [ ]
         notify: [ ]
