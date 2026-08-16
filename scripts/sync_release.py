@@ -39,6 +39,25 @@ except ImportError:
     print("错误：需要 py7zr（pip install py7zr，用于解压加密 7z）")
     sys.exit(1)
 
+# 关键：Gitee Go 管道下 stdout 默认块缓冲，print 不实时刷出会让人以为"卡死"。
+# 强制行缓冲 + 统一日志函数（时间戳 + flush）。
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
+
+def log(msg: str) -> None:
+    """带时间戳的日志，flush 保证实时输出"""
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def log_t(msg: str, t0: float) -> float:
+    """带耗时日志：打印 msg（含距 t0 秒数），返回当前时刻作为新起点"""
+    now = time.time()
+    log(f"{msg}（耗时 {now - t0:.1f}s）")
+    return now
+
 GITHUB_API = "https://api.github.com"
 GITEE_API = "https://gitee.com/api/v5/repos"
 
@@ -80,13 +99,23 @@ def fetch_gh_latest_release() -> dict:
     raise RuntimeError(f"GitHub 无可用 release（latest HTTP {r.status_code}）")
 
 
-def download_asset(url: str, dest: str) -> None:
+def download_asset(url: str, dest: str, total: int = 0) -> None:
+    """流式下载资产，每 2MB 打一次进度（避免长下载无输出被误判卡死）"""
+    t0 = time.time()
     with requests.get(url, headers=gh_headers(), stream=True, timeout=300) as r:
         if r.status_code != 200:
             raise RuntimeError(f"下载资产失败 HTTP {r.status_code}")
+        got = 0
+        last_report = 0
         with open(dest, "wb") as f:
             for chunk in r.iter_content(65536):
                 f.write(chunk)
+                got += len(chunk)
+                if got - last_report >= 2 * 1024 * 1024:
+                    last_report = got
+                    pct = f" / {total // 1024}KB" if total else ""
+                    log(f"  下载中… {got // 1024}KB{pct}（{got / 1024 / 1024 / max(time.time() - t0, 0.01):.1f}MB/s）")
+        log(f"  下载完成：{got // 1024}KB，耗时 {time.time() - t0:.1f}s")
 
 
 def gitee_get_or_create_release(tag: str, name: str, body: str) -> int:
@@ -113,13 +142,17 @@ def gitee_upload_attachment(release_id: int, apk_path: str) -> int:
     """multipart 上传 APK 到 Gitee release 附件，返回 file_id"""
     url = f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases/{release_id}/attach_files"
     name = os.path.basename(apk_path)
+    size_kb = os.path.getsize(apk_path) // 1024
+    log(f"  开始上传附件 {name}（{size_kb}KB → Gitee release #{release_id}）")
+    t0 = time.time()
     with open(apk_path, "rb") as f:
         r = requests.post(url, data={"access_token": GITEE_TOKEN},
                           files={"file": (name, f, "application/vnd.android.package-archive")},
-                          timeout=300)
+                          timeout=600)
     d = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
     if r.status_code not in (200, 201) or not d.get("id"):
         raise RuntimeError(f"上传附件失败({r.status_code}): {r.text[:300]}")
+    log(f"  附件上传完成：{size_kb}KB，耗时 {time.time() - t0:.1f}s")
     return int(d["id"])
 
 
@@ -162,31 +195,35 @@ def cleanup_old_releases() -> None:
             dr = requests.delete(f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases/{rid}",
                                  params={"access_token": GITEE_TOKEN}, timeout=60)
             if dr.status_code in (200, 204):
-                print(f"  已清理旧 release {rel.get('tag_name')}（创建于 {created}）")
+                log(f"  已清理旧 release {rel.get('tag_name')}（创建于 {created}）")
                 removed += 1
             else:
-                print(f"  清理失败 {rel.get('tag_name')}（HTTP {dr.status_code}，Gitee 可能不支持删除，忽略）")
-    print(f"清理完成：检查 {len(rels)} 个 release，删除 {removed} 个（阈值 {KEEP_DAYS} 天）")
+                log(f"  清理失败 {rel.get('tag_name')}（HTTP {dr.status_code}，Gitee 可能不支持删除，忽略）")
+    log(f"清理完成：检查 {len(rels)} 个 release，删除 {removed} 个（阈值 {KEEP_DAYS} 天）")
 
 
 def main() -> int:
+    t_start = time.time()
     # 诊断：打印各候选 token 变量注入情况（值掩码，便于确认 Gitee Go 变量配置）
     for name in ("MY_GITEE_TOKEN", "PUBLISH_TOKEN", "API_TOKEN"):
         v = os.environ.get(name, "")
-        print(f"  [env] {name}: {('*' * min(len(v), 8)) + ('...' if v else '')} (len={len(v)})")
+        log(f"[env] {name}: {('*' * min(len(v), 8)) + ('...' if v else '')} (len={len(v)})")
     if not GITEE_TOKEN:
-        print("错误：所有候选 token 变量均为空（MY_GITEE_TOKEN/PUBLISH_TOKEN/API_TOKEN）——Gitee Go 流水线→变量管理配置并保存")
+        log("错误：所有候选 token 变量均为空（MY_GITEE_TOKEN/PUBLISH_TOKEN/API_TOKEN）——Gitee Go 流水线→变量管理配置并保存")
         return 1
     if not ENC_PASS:
-        print("错误：需要环境变量 APK_ENCRYPT_PASSWORD（7z 解压密码）")
+        log("错误：需要环境变量 APK_ENCRYPT_PASSWORD（7z 解压密码）")
         return 1
 
-    print("=" * 56)
-    print("Gitee Go 同步开始")
-    print("=" * 56)
+    log("=" * 56)
+    log("Gitee Go 同步开始")
+    log("=" * 56)
+    t0 = time.time()
 
     # 1) 拉 GitHub 最新 release
+    log("① 拉取 GitHub 最新 release…")
     rel = fetch_gh_latest_release()
+    t0 = log_t("GitHub release 已获取", t0)
     tag = rel.get("tag_name", "")
     m = re.match(r"dt-(\d+)", tag)
     version_code = int(m.group(1)) if m else 0
@@ -197,42 +234,48 @@ def main() -> int:
     # 避免贪婪吞掉后续 commit 信息，也避免默认 . 不匹配换行导致截断为第一行
     nm = re.search(r"update note:\s*(.+?)(?=\n- |\Z)", body, re.DOTALL)
     note = nm.group(1).strip() if nm else "常规更新"
-    print(f"GitHub release : {tag}（v{version_code} / {version_name}）")
+    log(f"GitHub release : {tag}（v{version_code} / {version_name}）")
+    log(f"update note    : {note}")
 
     # 2) 找并下载资产（.7z 优先，兼容 .apk）
     asset = next((a for a in rel.get("assets", [])
                   if a.get("name", "").endswith((".7z", ".apk"))), None)
     if not asset:
-        print(f"错误：GitHub release {tag} 无 .7z/.apk 资产")
+        log(f"错误：GitHub release {tag} 无 .7z/.apk 资产")
         return 1
     work = "sync_work"
     os.makedirs(work, exist_ok=True)
     asset_path = os.path.join(work, asset["name"])
-    print(f"下载资产      : {asset['name']}（{asset.get('size', 0) // 1024}KB）")
-    download_asset(asset["browser_download_url"], asset_path)
+    log(f"② 下载资产    : {asset['name']}（{asset.get('size', 0) // 1024}KB）")
+    download_asset(asset["browser_download_url"], asset_path, total=asset.get("size", 0))
+    t0 = log_t("资产下载完成", t0)
 
     # 3) 解压（.7z 加密 → 明文 APK；.apk 直接用）
     apk_path = asset_path
     if asset["name"].endswith(".7z"):
+        log(f"③ 解压 7z（AES-256 密码解压）…")
         with py7zr.SevenZipFile(asset_path, "r", password=ENC_PASS) as z:
             z.extractall(path=work)
         apks = glob.glob(os.path.join(work, "**", "*.apk"), recursive=True)
         if not apks:
-            print("错误：解压后未找到 APK")
+            log("错误：解压后未找到 APK")
             return 1
         apk_path = apks[0]
-        print(f"7z 解压成功   : {os.path.basename(apk_path)}")
+        log(f"   7z 解压成功 : {os.path.basename(apk_path)}")
+    t0 = log_t("解压完成", t0)
 
     apk_bytes = open(apk_path, "rb").read()
     apk_md5 = hashlib.md5(apk_bytes).hexdigest()
-    print(f"APK           : {os.path.basename(apk_path)}（{len(apk_bytes)} bytes，md5={apk_md5[:8]}...）")
+    log(f"APK           : {os.path.basename(apk_path)}（{len(apk_bytes)} bytes，md5={apk_md5[:8]}...）")
 
     # 4) 传 Gitee release
+    log(f"④ 同步到 Gitee：创建/复用 release {tag}…")
     release_id = gitee_get_or_create_release(tag, f"DailyTask v{version_name}", note)
-    print(f"Gitee release  : {tag}（id={release_id}）")
+    t0 = log_t(f"   Gitee release 就绪（id={release_id}）", t0)
     file_id = gitee_upload_attachment(release_id, apk_path)
+    t0 = log_t("附件上传完成", t0)
     dl_url = f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases/{release_id}/attach_files/{file_id}/download"
-    print(f"APK 上传完成   : {dl_url}")
+    log(f"   下载端点    : {dl_url}")
 
     # 5) 生成 .dat（App 用 API raw + token 拉取，apk 字段=附件下载端点拼 token）
     meta = {
@@ -246,20 +289,22 @@ def main() -> int:
     }
     plain = json.dumps(meta, ensure_ascii=False).encode("utf-8")
     cipher = base64.b64encode(xor_encrypt(plain, VERSION_KEY)).decode("ascii")
+    log("⑤ 推送版本文件 updates/v_task.dat…")
     gitee_push_file("updates/v_task.dat", cipher, f"chore: gitee go sync v{version_code}")
-    print(f".dat 已推送     : updates/v_task.dat（v{version_code}）")
+    t0 = log_t(f".dat 已推送     : updates/v_task.dat（v{version_code}）", t0)
 
     # 6) 清理旧 release
+    log(f"⑥ 清理超过 {KEEP_DAYS} 天的旧 release…")
     cleanup_old_releases()
 
-    print("=" * 56)
-    print("同步完成（Gitee Go）")
-    print(f"  versionCode : {version_code}")
-    print(f"  versionName : {version_name}")
-    print(f"  Release tag : {tag}")
-    print(f"  APK MD5     : {apk_md5}")
-    print(f"  note        : {note}")
-    print("=" * 56)
+    log("=" * 56)
+    log(f"同步完成（Gitee Go）总耗时 {time.time() - t_start:.1f}s")
+    log(f"  versionCode : {version_code}")
+    log(f"  versionName : {version_name}")
+    log(f"  Release tag : {tag}")
+    log(f"  APK MD5     : {apk_md5}")
+    log(f"  note        : {note}")
+    log("=" * 56)
     return 0
 
 
