@@ -112,6 +112,14 @@ def xor_encrypt(data: bytes, key: bytes) -> bytes:
     return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
 
 
+def _json(r) -> dict | list | None:
+    """防御式 JSON 解析：空 body/非 JSON/null → None（Gitee 对不存在 release tag 返回 200+null）"""
+    try:
+        return r.json()
+    except Exception:
+        return None
+
+
 def fetch_gh_latest_release() -> dict:
     """GitHub 最新正式 release（releases/latest 只认非 draft 非 prerelease；若全是 prerelease 则列列表取最新非 draft）"""
     r = requests.get(f"{GITHUB_API}/repos/{GH_REPO}/releases/latest", headers=gh_headers(), timeout=60)
@@ -167,18 +175,21 @@ def download_asset(url: str, dest: str, total: int = 0) -> None:
 def gitee_get_or_create_release(tag: str, name: str, body: str) -> int:
     url = f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases/tags/{urllib.parse.quote(tag, safe='')}"
     r = requests.get(url, params={"access_token": GITEE_TOKEN}, timeout=60)
-    if r.status_code == 200 and r.json().get("id"):
-        return int(r.json()["id"])
+    d = _json(r) or {}  # Gitee 对不存在 tag 返回 200 + null，防御
+    if r.status_code == 200 and isinstance(d, dict) and d.get("id"):
+        return int(d["id"])
     r = requests.post(f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases", json={
         "access_token": GITEE_TOKEN, "tag_name": tag, "name": name, "body": body,
         "target_commitish": "master", "prerelease": True,
     }, timeout=60)
-    if r.status_code in (200, 201) and r.json().get("id"):
-        return int(r.json()["id"])
+    d = _json(r) or {}
+    if r.status_code in (200, 201) and isinstance(d, dict) and d.get("id"):
+        return int(d["id"])
     # 兜底：从列表按 tag 捞
     r = requests.get(f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases",
                      params={"access_token": GITEE_TOKEN, "per_page": 100}, timeout=60)
-    for rel in r.json() if isinstance(r.json(), list) else []:
+    rels = _json(r)
+    for rel in rels if isinstance(rels, list) else []:
         if rel.get("tag_name") == tag and rel.get("id"):
             return int(rel["id"])
     raise RuntimeError(f"创建 Gitee release 失败({r.status_code}): {r.text[:300]}（URL={GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases）")
@@ -195,7 +206,7 @@ def gitee_upload_attachment(release_id: int, apk_path: str) -> int:
         r = requests.post(url, data={"access_token": GITEE_TOKEN},
                           files={"file": (name, f, "application/vnd.android.package-archive")},
                           timeout=600)
-    d = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+    d = _json(r) or {}
     if r.status_code not in (200, 201) or not d.get("id"):
         raise RuntimeError(f"上传附件失败({r.status_code}): {r.text[:300]}")
     log(f"  附件上传完成：{size_kb}KB，耗时 {time.time() - t0:.1f}s")
@@ -206,7 +217,8 @@ def gitee_push_file(path: str, content: str, message: str) -> None:
     """contents API 推/更文件（存在 PUT 带 sha，不存在 POST）"""
     url = f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/contents/{path}"
     r = requests.get(url, params={"access_token": GITEE_TOKEN}, timeout=60)
-    sha = r.json().get("sha") if r.status_code == 200 else None
+    d = _json(r) or {}
+    sha = d.get("sha") if r.status_code == 200 and isinstance(d, dict) else None
     body = {"access_token": GITEE_TOKEN,
             "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
             "message": message, "branch": "master"}
@@ -222,7 +234,8 @@ def cleanup_old_releases() -> None:
     """删除超过 KEEP_DAYS 天的旧 release（保留最新 KEEP_LATEST 个兜底），释放附件额度"""
     r = requests.get(f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases",
                      params={"access_token": GITEE_TOKEN, "per_page": 100}, timeout=60)
-    rels = r.json() if isinstance(r.json(), list) else []
+    rels = _json(r)
+    rels = rels if isinstance(rels, list) else []
     if len(rels) <= KEEP_LATEST:
         return
     cutoff = time.time() - KEEP_DAYS * 86400
