@@ -74,6 +74,10 @@ jobs:
       GITEE_OWNER: 'yamleaf'
       GITEE_REPO: 'DailyTaskUpdate'
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      # GitCode（上传速度对比：预签名 URL 直传 OBS），配 GITCODE_TOKEN 后手动触发才会执行
+      GITCODE_OWNER: 'yamleaf'
+      GITCODE_REPO: 'DailyTaskUpdate'
+      GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
       VERSION_KEY: ${{ secrets.VERSION_KEY }}
 
     steps:
@@ -164,6 +168,24 @@ jobs:
             --owner "$GITEE_OWNER" \
             --repo "$GITEE_REPO" \
             --token "$GITEE_TOKEN" \
+            --key "$VERSION_KEY"
+
+      # ===== 上传速度对比：GitCode（预签名 URL 直传华为云 OBS，不经过平台网关） =====
+      # 与 Gitee 发布并存互不影响；配置 GITCODE_TOKEN Secret 后手动触发才会执行。
+      # 脚本内逐步计时（创建 release / 取预签名 URL / PUT 直传），与 Gitee 步骤耗时对比。
+      - name: Publish APK to GitCode Release (speed compare)
+        if: github.event_name == 'workflow_dispatch' && env.GITCODE_TOKEN != ''
+        run: |
+          python3 scripts/publish_gitcode.py \
+            --version-code "${{ steps.gitee_version.outputs.version_code }}" \
+            --version-name "${{ steps.gitee_version.outputs.version_name }}" \
+            --apk "${{ steps.gitee_version.outputs.apk }}" \
+            --tag "dailyTask-gc-${{ env.BUILD_NUMBER }}" \
+            --note "${{ inputs.note }}" \
+            --force "${{ inputs.force == 'true' && '1' || '0' }}" \
+            --owner "$GITCODE_OWNER" \
+            --repo "$GITCODE_REPO" \
+            --token "$GITCODE_TOKEN" \
             --key "$VERSION_KEY"
 
       # ===== 手动触发：生成 GitHub Release Draft（标题 DailyTask Alpha yymmdd.HHmm，
