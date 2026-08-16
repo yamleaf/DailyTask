@@ -62,6 +62,9 @@ object UpdateChecker {
     /** 预期安装版本（下载校验通过后写入）：安装完成（任意途径）后与真实安装版本比对，不一致则明确报错 */
     private const val PREF_PENDING_VERCODE = "update_pending_vercode"
 
+    /** 已处理过的仓库 APK blob sha：网页覆盖上传 APK（.dat 版本号不变）时 sha 变化即触发更新 */
+    private const val PREF_LAST_REPO_SHA = "update_last_repo_sha"
+
     /** 主线程 Handler：后台线程解析 APK 下载地址后切回主线程发起下载 */
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -108,7 +111,19 @@ object UpdateChecker {
             runCatching {
                 parse(decrypt(fetchVersionFile()))
             }.getOrNull()?.let { info ->
-                val hasUpdate = info.v > BuildConfig.VERSION_CODE
+                // v 路径：.dat 版本号高于本地（脚本/CI 发版，.dat 同步更新）
+                var hasUpdate = info.v > BuildConfig.VERSION_CODE
+                // sha 路径：网页覆盖上传 APK（.dat 版本号不变，但仓库 APK blob sha 变了）
+                if (!hasUpdate) {
+                    val lastSha = SaveKeyValues.loadString(PREF_LAST_REPO_SHA, "")
+                    if (lastSha.isNotEmpty()) {
+                        val currentSha = fetchRepoApkSha()
+                        if (currentSha != null && currentSha != lastSha) {
+                            hasUpdate = true
+                            LogFileManager.action("检查更新：检测到仓库 APK 变更（$lastSha → $currentSha），触发更新提示")
+                        }
+                    }
+                }
                 // 成功拉到版本文件才更新红点状态（失败不误清）
                 SaveKeyValues.saveBoolean(PREF_HAS_UPDATE, hasUpdate)
                 if (hasUpdate) {
@@ -237,6 +252,22 @@ object UpdateChecker {
         }.getOrNull()
     }
 
+    /** 获取仓库 updates/dailyTask.apk 的 blob sha（网页覆盖上传后变化，用作指纹检测；失败返回 null） */
+    private fun fetchRepoApkSha(): String? {
+        return runCatching {
+            val url = "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/contents/updates/dailyTask.apk?access_token=$APP_TOKEN"
+            val client = OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching null
+                JsonParser.parseString(resp.body.string().orEmpty()).asJsonObject.get("sha")?.asString
+            }
+        }.getOrNull()
+    }
+
     /** DownloadManager 下载明文 APK（私密仓库，URL 拼 access_token）。APK 地址先经 resolveApkUrl 解析 */
     private fun startDownload(context: Context, info: VersionInfo) {
         // 下载地址需网络请求获取，放后台线程；结果回主线程发起下载与注册监听
@@ -307,28 +338,26 @@ object UpdateChecker {
             LogFileManager.error("检查更新：下载文件不存在 ${apkFile.absolutePath}")
             return
         }
-        // 可选 MD5 校验（.dat 提供时校验，防下载损坏/替换）
+        // MD5 校验（可选）：网页覆盖上传 APK 发版时 .dat 的 md5 是旧值会不匹配，
+        // 故不匹配仅记日志不拦截（下载损坏由 APK 签名校验兜底，篡改包装不上）
         runCatching {
             info.md5?.let { expect ->
                 val actual = md5Hex(apkFile.readBytes())
                 if (!actual.equals(expect, ignoreCase = true)) {
-                    throw IOException("MD5 校验失败 expected=$expect actual=$actual")
+                    LogFileManager.error("检查更新：MD5 不匹配 expected=$expect actual=$actual（网页覆盖发版时正常，不拦截）")
                 }
             }
         }.onFailure { e ->
-            LogFileManager.error("检查更新：校验失败 ${e.message}")
-            runCatching { apkFile.delete() }
-            showErrorOnce(context, "更新包校验失败（MD5 不匹配）：下载可能损坏，请重新下载")
-            return
+            LogFileManager.error("检查更新：MD5 计算失败 ${e.message}（不拦截）")
         }
-        // 版本一致性校验（手动上传场景）：安装包 versionCode 必须与 .dat 发布版本一致。
-        // 不一致说明 Gitee Release 上传了错误版本的 APK——拦截并明确报错，
-        // 避免装上旧版导致「每次检查都提示更新」的反复报错循环。
+        // 版本校验：安装包 versionCode 必须高于当前已安装版本。
+        // 网页覆盖上传发版时 .dat 的 v 是旧值，不能按 ==info.v 校验；
+        // 传旧包/错包（versionCode 不高于当前）则拦截并明确报错。
         val apkVc = apkVersionCode(context, apkFile.absolutePath)
-        if (apkVc != null && apkVc != info.v.toLong()) {
-            LogFileManager.error("检查更新：安装包版本不一致 apk=$apkVc 发布=${info.v}（release=${info.tag}）")
+        if (apkVc != null && apkVc <= BuildConfig.VERSION_CODE.toLong()) {
+            LogFileManager.error("检查更新：安装包版本不高于当前 apk=$apkVc 当前=${BuildConfig.VERSION_CODE}")
             runCatching { apkFile.delete() }
-            showErrorOnce(context, "更新包版本不一致（$apkVc ≠ ${info.v}）：请确认 Gitee Release『${info.tag}』上传的 APK 为对应构建产物")
+            showErrorOnce(context, "更新包版本（v$apkVc）未高于当前版本（v${BuildConfig.VERSION_CODE}）：请上传更高版本的 APK")
             return
         }
         // 记录预期安装版本：无论自动跳装还是用户去文件管理器安装，
@@ -379,6 +408,10 @@ object UpdateChecker {
             // 装到了目标版本（或更高）：更新完成，清除红点
             SaveKeyValues.saveBoolean(PREF_HAS_UPDATE, false)
             LogFileManager.action("检查更新：新版本 v$installed 安装成功（预期 v$expected），清除更新红点")
+            // 记录当前仓库 APK sha：网页覆盖发版场景下次检查不再重复提示（后台查询）
+            Thread {
+                fetchRepoApkSha()?.let { SaveKeyValues.saveString(PREF_LAST_REPO_SHA, it) }
+            }.start()
         } else {
             // 版本不一致：可能装了旧包/错包（如文件管理器里选了遗留的 APK）
             showErrorOnce(context, "安装的版本（v$installed）与发布版本（v$expected）不一致：请确认安装的是 Gitee Release 对应版本的更新包")
@@ -394,6 +427,8 @@ object UpdateChecker {
         if (installed >= expected.toLong()) {
             SaveKeyValues.saveInt(PREF_PENDING_VERCODE, 0)
             SaveKeyValues.saveBoolean(PREF_HAS_UPDATE, false)
+            // 广播丢失兜底路径同样记录仓库 APK sha（此处已在 IO 线程，直接查询）
+            fetchRepoApkSha()?.let { SaveKeyValues.saveString(PREF_LAST_REPO_SHA, it) }
         }
     }
 
