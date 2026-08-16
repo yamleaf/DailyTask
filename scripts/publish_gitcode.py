@@ -50,17 +50,23 @@ def md5_of(data: bytes) -> str:
     return hashlib.md5(data).hexdigest()
 
 
-def gc_json(method: str, url: str, body: dict | None = None, timeout: int = 30, token: str | None = None):
-    """GitCode API（JSON 请求/响应），防御式解析：body 为空/非对象/null 一律归为 {}
+def gc_json(method: str, url: str, body: dict | None = None, form: dict | None = None,
+            timeout: int = 30, token: str | None = None):
+    """GitCode API（JSON 响应），防御式解析：响应非对象/null 一律归为 {}
 
-    鉴权：GitCode 官方首选 Authorization: Bearer 头（POST/PATCH/PUT 的 access_token
-    不认 JSON body，必须走头或 URL 查询参数），故统一注入 Bearer 头，避免 403。
+    鉴权：统一注入 Authorization: Bearer 头（GitCode 官方首选；POST/PATCH/PUT
+    不认 JSON body 里的 access_token，实测仅 Bearer 头能过 403）。
+    编码：form 非空 → application/x-www-form-urlencoded（GitCode 创建 release /
+    推送文件只认表单，不认 JSON body，否则 400 'body不能为空'）；否则 JSON。
     """
     data = None
     headers = {"User-Agent": "Mozilla/5.0 (DailyTask-CI)", "Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    if body is not None:
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode("utf-8")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json;charset=UTF-8"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -91,14 +97,14 @@ def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str
     status, data = gc_json("GET", f"{API_BASE}/{owner}/{repo}/releases/tags/{tag_enc}?access_token={token}", token=token)
     if status == 200 and data.get("tag_name"):
         return data
-    create_body = {
-        "access_token": token,
+    # GitCode 创建 release 只认表单（form），不认 JSON body（否则 400 'body不能为空'）
+    create_form = {
         "tag_name": tag,
         "name": name,
         "body": body,
         "release_status": "pre",  # prerelease
     }
-    status, data = gc_json("POST", f"{API_BASE}/{owner}/{repo}/releases", create_body, token=token)
+    status, data = gc_json("POST", f"{API_BASE}/{owner}/{repo}/releases", form=create_form, token=token)
     if status in (200, 201) and data.get("tag_name"):
         return data
     raise RuntimeError(f"创建 release 失败({status}): {data}")
@@ -142,21 +148,25 @@ def upload_apk(owner: str, repo: str, tag: str, token: str, file_path: str, atta
 
 
 def upload_data_file(owner: str, repo: str, path: str, content: str, token: str, message: str) -> None:
-    """上传/更新仓库文件（contents API：存在则 PUT 带 sha，否则 PUT 新建）"""
+    """上传/更新仓库文件（contents API：GitCode 需表单编码 + Bearer 头）。
+
+    注意：GitCode 的 contents PUT 要求 sha（不支无 sha 新建），故首次需仓库内
+    已存在该文件；本函数对推送失败仅抛异常，由调用方 try/except 容错（不影响
+    APK 上传速度对比）。
+    """
     sha = None
     status, data = gc_json("GET", f"{API_BASE}/{owner}/{repo}/contents/{path}?access_token={token}", token=token)
     if status == 200 and data.get("sha"):
         sha = data["sha"]
     content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    body = {
-        "access_token": token,
+    form = {
         "content": content_b64,
         "message": message,
         "branch": "master",
     }
     if sha:
-        body["sha"] = sha
-    status, data = gc_json("PUT", f"{API_BASE}/{owner}/{repo}/contents/{path}", body, token=token)
+        form["sha"] = sha
+    status, data = gc_json("PUT", f"{API_BASE}/{owner}/{repo}/contents/{path}", form=form, token=token)
     if status not in (200, 201) or not data.get("content"):
         # 兼容：部分实现返回 commit 字段而非 content
         if status in (200, 201) and (data.get("commit") or data.get("content")):
