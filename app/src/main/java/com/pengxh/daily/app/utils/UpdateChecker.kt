@@ -161,12 +161,10 @@ object UpdateChecker {
 
     private fun showUpdateDialog(context: Context, info: VersionInfo) {
         val activity = context as? Activity ?: return
-        // 新版本与当前版本紧邻一行（用全角空格分隔，视觉更舒服）；
+        // 版本行：当前版本 --> 新版本（箭头连接，紧凑直观）；
         // note 支持多行显示：JSON 序列化的 \n 经 Gson 解析后还原为真换行，TextView 默认渲染
         val message = buildString {
-            append("新版本：v${info.vn}")
-            append("　　")
-            append("当前版本：v${BuildConfig.VERSION_NAME}\n")
+            append("版本：v${BuildConfig.VERSION_NAME} --> v${info.vn}\n")
             if (info.note.isNotBlank()) append("\n${info.note}")
             if (info.force) append("\n\n⚠ 此版本为强制更新")
         }
