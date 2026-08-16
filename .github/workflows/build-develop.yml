@@ -166,6 +166,52 @@ jobs:
             --token "$GITEE_TOKEN" \
             --key "$VERSION_KEY"
 
+      # ===== 手动触发：生成 GitHub Release Draft（标题 DailyTask Alpha yymmdd.HHmm，
+      # body 总结自上次 release tag 以来的提交记录） =====
+      - name: Prepare GitHub Release info (title date + body commits)
+        if: github.event_name == 'workflow_dispatch'
+        id: gh_release_info
+        run: |
+          # 标题日期时间（北京时间 yymmdd.HHmm，例 260816.1435 = 2026-08-16 14:35）
+          TITLE_DATE=$(TZ='Asia/Shanghai' date +%y%m%d.%H%M)
+          echo "title_date=$TITLE_DATE" >> "$GITHUB_OUTPUT"
+
+          # 自上次 release tag（apk-*）起的提交记录；无 tag 时取最近 10 条
+          LAST_TAG=$(git tag --list "apk-*" --sort=-version:refname 2>/dev/null | head -1)
+          if [ -n "$LAST_TAG" ]; then
+            RANGE="${LAST_TAG}..HEAD"
+            RANGE_DESC="自 ${LAST_TAG}"
+          else
+            RANGE="HEAD~10..HEAD"
+            RANGE_DESC="最近 10 条"
+          fi
+
+          # 多行 body 用 GitHub Actions 多行输出语法（delimiter 包裹）
+          {
+            echo "body<<GITEOF"
+            echo "### 更新内容（${RANGE_DESC}）"
+            echo ""
+            git log --pretty=format:"- %s (%h)" "$RANGE" | head -20
+            echo ""
+            echo "---"
+            echo "- commit: \`${{ github.sha }}\`"
+            echo "- versionCode: ${{ steps.gitee_version.outputs.version_code }}"
+            echo "- versionName: \`${{ steps.gitee_version.outputs.version_name }}\`"
+            echo "- update note: ${{ inputs.note }}"
+            echo "GITEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release draft
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ env.BUILD_NUMBER }}
+          name: DailyTask Alpha ${{ steps.gh_release_info.outputs.title_date }}
+          body: ${{ steps.gh_release_info.outputs.body }}
+          draft: true
+          files: |
+            app/build/outputs/apk/release/*.apk
+
       # 自动构建成功：把当前时间戳写入仓库文件 last_auto_build（rate-check 据此限流）。
       # commit 带 [ci skip] 不会再次触发本 workflow，避免递归。
       - name: Record last auto build timestamp
