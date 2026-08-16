@@ -72,7 +72,7 @@ jobs:
       APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
       # Gitee 私密仓库（App 检查更新数据源，仅发布/内置只读令牌者可见），GITEE_TOKEN 需有写权限
       GITEE_OWNER: 'yamleaf'
-      GITEE_REPO: '改成你的私密仓库名'
+      GITEE_REPO: 'DailyTaskUpdate'
       GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
       VERSION_KEY: ${{ secrets.VERSION_KEY }}
 

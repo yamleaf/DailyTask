@@ -39,7 +39,7 @@ object UpdateChecker {
 
     // ===== Gitee 私密仓库配置（必须与 CI workflow 的 GITEE_OWNER/GITEE_REPO 一致）=====
     private const val GITEE_OWNER = "yamleaf"
-    private const val GITEE_REPO = "改成你的私密仓库名"
+    private const val GITEE_REPO = "DailyTaskUpdate"
     private const val DATA_PATH = "updates/v_task.dat"
 
     /** Gitee 只读令牌（projects 权限）：私密仓库 raw/附件均需带此令牌访问。逆向可提取，泄露影响仅限读取 */
