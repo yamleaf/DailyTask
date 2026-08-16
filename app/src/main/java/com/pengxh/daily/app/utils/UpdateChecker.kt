@@ -12,10 +12,10 @@ import android.util.Base64
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -171,15 +171,17 @@ object UpdateChecker {
             append("\n当前版本：v${BuildConfig.VERSION_NAME}")
             if (info.force) append("\n\n⚠ 此版本为强制更新")
         }
-        val builder = MaterialAlertDialogBuilder(activity)
-            .setTitle("发现新版本")
-            .setMessage(message)
-            .setPositiveButton("立即更新") { _, _ -> startDownload(activity, info) }
-            .setCancelable(!info.force)
-        if (!info.force) {
-            builder.setNegativeButton("稍后") { _, _ -> }
-        }
-        builder.show()
+        // 双端统一弹窗：双按钮等宽均分（立即更新/稍后）；force 时单按钮居中不可取消
+        UnifiedDialogKit.showConfirm(
+            activity,
+            title = "发现新版本",
+            message = message,
+            confirmText = "立即更新",
+            cancelText = if (info.force) null else "稍后",
+            cancelable = !info.force,
+            icon = UnifiedDialogKit.IconType.INFO,
+            onConfirm = { startDownload(activity, info) },
+        )
         LogFileManager.action("检查更新：发现新版本 v${info.vn}（code ${info.v} > 本地 ${BuildConfig.VERSION_CODE}，force=${info.force}）")
     }
 
