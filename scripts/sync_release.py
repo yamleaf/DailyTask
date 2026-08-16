@@ -170,8 +170,12 @@ def cleanup_old_releases() -> None:
 
 
 def main() -> int:
+    # 诊断：打印各候选 token 变量注入情况（值掩码，便于确认 Gitee Go 变量配置）
+    for name in ("MY_GITEE_TOKEN", "PUBLISH_TOKEN", "API_TOKEN"):
+        v = os.environ.get(name, "")
+        print(f"  [env] {name}: {('*' * min(len(v), 8)) + ('...' if v else '')} (len={len(v)})")
     if not GITEE_TOKEN:
-        print("错误：需要环境变量 MY_GITEE_TOKEN（Gitee Go 限制不能用 GITEE_ 前缀；Gitee 写权限令牌）")
+        print("错误：所有候选 token 变量均为空（MY_GITEE_TOKEN/PUBLISH_TOKEN/API_TOKEN）——Gitee Go 流水线→变量管理配置并保存")
         return 1
     if not ENC_PASS:
         print("错误：需要环境变量 APK_ENCRYPT_PASSWORD（7z 解压密码）")
