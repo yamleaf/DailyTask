@@ -71,6 +71,7 @@ import com.pengxh.daily.app.utils.ProjectionEvent
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.utils.RomDetector
 import com.pengxh.daily.app.utils.StatusReporter
+import com.pengxh.daily.app.utils.UpdateChecker
 import com.pengxh.daily.app.utils.WatermarkDrawable
 import com.pengxh.kt.lite.base.KotlinBaseFragment
 import com.pengxh.kt.lite.extensions.convertColor
@@ -431,6 +432,14 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 )
             } else {
                 ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            }
+        }
+        // 检查更新：拉取 Gitee 加密版本文件 → 版本对比 → 弹窗/下载/安装
+        binding.updateRow.setOnClickListener {
+            binding.updateStatus.text = "检查中…"
+            lifecycleScope.launch {
+                UpdateChecker.check(ctx, showNoUpdateToast = true)
+                binding.updateStatus.text = ""
             }
         }
         binding.themeValueView.text = ThemeManager.labelOf(ThemeManager.getMode(ctx))

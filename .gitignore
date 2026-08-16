@@ -77,3 +77,6 @@ lint/tmp/
 # 本地构建日志
 /build_log.txt
 /build_out.txt
+# Python 缓存（scripts 发布脚本）
+__pycache__/
+*.pyc

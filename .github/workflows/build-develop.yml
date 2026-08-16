@@ -4,6 +4,15 @@ on:
   push:
     branches: [alpha]
   workflow_dispatch:
+    inputs:
+      note:
+        description: '更新说明（同步到 Gitee Release）'
+        required: false
+        default: '常规更新'
+      force:
+        description: '强制更新（true 时 App 必须更新）'
+        required: false
+        default: 'false'
 
 permissions:
   contents: write
@@ -26,6 +35,11 @@ jobs:
       # secrets 不能直接出现在 step 的 if 表达式里，故先落到 job 级 env，
       # 未配置 Secret 时该变量为空字符串，if 判断按 env. 读取。
       APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
+      # Gitee 公开镜像仓库（App 检查更新数据源），GITEE_TOKEN 需有该仓库写权限
+      GITEE_OWNER: 'yamleaf'
+      GITEE_REPO: 'DailyTask'
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      VERSION_KEY: ${{ secrets.VERSION_KEY }}
 
     steps:
       - name: Checkout code
@@ -92,7 +106,7 @@ jobs:
           name: dailyTask_alpha_release
           path: app/build/outputs/apk/release/*.apk
 
-      # ===== 手动触发才执行：把 debug+release 两个 APK 用 7z AES-256 加密压缩并推到 GitHub Release =====
+      # ===== 手动触发才执行：debug/release 两个 APK 分别用 7z AES-256 加密压缩并推到 GitHub Release =====
       # 密码从 Secret APK_ENCRYPT_PASSWORD 读取（未配置时此段整体跳过，不影响 push 自动构建）。
       # -mhe=on 同时加密文件头，不解密连文件名都看不到。
       - name: Encrypt & compress APKs (7z AES-256)
@@ -102,12 +116,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y p7zip-full
-          mkdir -p release
-          cp app/build/outputs/apk/debug/*.apk release/
-          cp app/build/outputs/apk/release/*.apk release/
-          cd release
-          7z a -t7z -p"$APK_ENCRYPT_PASSWORD" -mhe=on -mx=9 dailyTask_alpha_${{ github.sha }}.7z *.apk
-          ls -la
+          mkdir -p release tmp_debug tmp_release
+          cp app/build/outputs/apk/debug/*.apk tmp_debug/
+          cp app/build/outputs/apk/release/*.apk tmp_release/
+          # debug / release 分开压缩加密，便于只下载需要的包
+          cd tmp_debug && 7z a -t7z -p"$APK_ENCRYPT_PASSWORD" -mhe=on -mx=9 ../release/dailyTask_debug_${{ github.sha }}.7z *.apk && cd ..
+          cd tmp_release && 7z a -t7z -p"$APK_ENCRYPT_PASSWORD" -mhe=on -mx=9 ../release/dailyTask_release_${{ github.sha }}.7z *.apk && cd ..
+          rm -rf tmp_debug tmp_release
+          ls -la release
 
       - name: Publish encrypted APKs to GitHub Release
         if: github.event_name == 'workflow_dispatch' && env.APK_ENCRYPT_PASSWORD != ''
@@ -117,6 +133,39 @@ jobs:
           name: DailyTask alpha 加密 APK（build #${{ env.BUILD_NUMBER }}）
           body: |
             加密压缩包：7z AES-256（-mhe=on），密码见仓库 Secret `APK_ENCRYPT_PASSWORD`。
+            debug 与 release 已分开压缩：`dailyTask_debug_<sha>.7z` / `dailyTask_release_<sha>.7z`。
             commit: ${{ github.sha }}
           files: release/*.7z
           draft: true
+
+      # ===== 手动触发才执行：同步到 Gitee 公开镜像 Release（AES 加密 APK + 加密版本文件） =====
+      # App「检查更新」从 Gitee 拉取 .dat（XOR 密文）→ 下载 AES 密文 APK → 内置密钥解密安装。
+      # 需配置 Secrets：GITEE_TOKEN（Gitee 写权限令牌）、VERSION_KEY（与 App 内置一致）。
+      - name: Extract version from APK (aapt)
+        if: github.event_name == 'workflow_dispatch'
+        id: gitee_version
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          echo "APK=$APK"
+          AAPT=$ANDROID_HOME/build-tools/36.0.0/aapt
+          BADGING=$($AAPT dump badging "$APK")
+          VC=$(echo "$BADGING" | grep -oP "versionCode='\K[0-9]+" | head -1)
+          VN=$(echo "$BADGING" | grep -oP "versionName='\K[^']+" | head -1)
+          echo "version_code=$VC" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VN" >> "$GITHUB_OUTPUT"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Publish AES-encrypted APK + version file to Gitee Release
+        if: github.event_name == 'workflow_dispatch' && env.GITEE_TOKEN != ''
+        run: |
+          python3 scripts/publish_gitee.py \
+            --version-code "${{ steps.gitee_version.outputs.version_code }}" \
+            --version-name "${{ steps.gitee_version.outputs.version_name }}" \
+            --apk "${{ steps.gitee_version.outputs.apk }}" \
+            --tag "dailyTask-${{ env.BUILD_NUMBER }}" \
+            --note "${{ inputs.note }}" \
+            --force "${{ inputs.force == 'true' && '1' || '0' }}" \
+            --owner "$GITEE_OWNER" \
+            --repo "$GITEE_REPO" \
+            --token "$GITEE_TOKEN" \
+            --key "$VERSION_KEY"
