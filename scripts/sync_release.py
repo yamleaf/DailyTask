@@ -193,7 +193,9 @@ def main() -> int:
     body = rel.get("body") or ""
     vm = re.search(r"versionName:\s*`?([^`\s]+)`?", body)
     version_name = vm.group(1) if vm else tag
-    nm = re.search(r"update note:\s*(.+)", body)
+    # note 可能跨多行：DOTALL 让 . 匹配换行；非贪婪到下一字段（\n- ）或 body 结尾（\Z），
+    # 避免贪婪吞掉后续 commit 信息，也避免默认 . 不匹配换行导致截断为第一行
+    nm = re.search(r"update note:\s*(.+?)(?=\n- |\Z)", body, re.DOTALL)
     note = nm.group(1).strip() if nm else "常规更新"
     print(f"GitHub release : {tag}（v{version_code} / {version_name}）")
 
