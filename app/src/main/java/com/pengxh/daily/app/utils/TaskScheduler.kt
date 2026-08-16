@@ -529,14 +529,30 @@ object TaskScheduler {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             if (restoreMask) {
-                // 完整伪息屏：先盖 overlay 保证 SCREEN_DIM 锁不间断，再拉起 MainActivity 接管
-                LogFileManager.action("定时任务结束，恢复伪息屏蒙层")
-                MaskOverlayHelper.show(app)
-                app.startActivity(home)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    app.bringDailyTaskToFront(true)
-                }, 800L)
-                LogFileManager.action("打卡结束：恢复伪息屏并拉起被控端")
+                if (AppRuntimeConfig.isForcePseudoMask()) {
+                    // 伪息屏开：完整伪息屏——先盖 overlay 保证 SCREEN_DIM 锁不间断，再拉起 MainActivity 接管
+                    LogFileManager.action("定时任务结束，恢复伪息屏蒙层")
+                    MaskOverlayHelper.show(app)
+                    app.startActivity(home)
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        app.bringDailyTaskToFront(true)
+                    }, 800L)
+                    LogFileManager.action("打卡结束：恢复伪息屏并拉起被控端")
+                } else {
+                    // 伪息屏关：打卡前蒙层（可能是真息屏不保亮黑蒙层残留）不恢复为保亮伪息屏——
+                    // 否则屏幕微亮常驻不锁屏。回桌面后按屏幕模式处理：
+                    // 模式=息屏 → 盖不保亮黑蒙层，等系统超时自然灭屏锁屏（SCREEN_OFF 时由前台服务摘除）
+                    app.startActivity(home)
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        app.bringDailyTaskToFront(false)
+                    }, 800L)
+                    if (AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF) {
+                        MaskOverlayHelper.show(app, keepAwake = false)
+                        LogFileManager.action("打卡结束：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                    } else {
+                        LogFileManager.action("打卡结束：伪息屏关闭，不恢复蒙层（按屏幕模式由系统处理）")
+                    }
+                }
             } else if (AppRuntimeConfig.isForcePseudoMask()) {
                 // 伪息屏开启但打卡前未盖蒙层：回桌面，由后台伪息屏倒计时接管
                 app.startActivity(home)

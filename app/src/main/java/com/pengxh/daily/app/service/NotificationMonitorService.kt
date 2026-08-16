@@ -367,7 +367,15 @@ class NotificationMonitorService : NotificationListenerService() {
                 LogFileManager.writeLog("收到息屏指令")
                 bringMainActivityForMask(showMask = true)
                 Handler(Looper.getMainLooper()).postDelayed({
-                    MaskOverlayHelper.show(this@NotificationMonitorService)
+                    // 伪息屏关 + 模式=息屏：盖不保亮黑蒙层，系统超时自然灭屏锁屏（不恢复保亮伪息屏）
+                    if (AppRuntimeConfig.isForcePseudoMask() ||
+                        AppRuntimeConfig.getScreenMode() != Constant.SCREEN_MODE_OFF
+                    ) {
+                        MaskOverlayHelper.show(this@NotificationMonitorService)
+                    } else {
+                        MaskOverlayHelper.show(this@NotificationMonitorService, keepAwake = false)
+                        LogFileManager.writeLog("息屏指令：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                    }
                 }, 400L)
                 emitMonitorEvent(MonitorEvent.ShowMaskCommand)
             }
@@ -670,7 +678,16 @@ class NotificationMonitorService : NotificationListenerService() {
                         if (maskWasShowing) {
                             LogFileManager.writeLog("远程打卡结束，恢复伪息屏蒙层")
                             withContext(Dispatchers.Main) {
-                                MaskOverlayHelper.show(this@NotificationMonitorService)
+                                // 伪息屏关闭时不恢复保亮蒙层（打卡前蒙层可能是真息屏不保亮黑蒙层残留，
+                                // 恢复保亮会导致屏幕微亮常驻不锁屏）；改为按模式盖不保亮蒙层等系统超时
+                                if (AppRuntimeConfig.isForcePseudoMask()) {
+                                    MaskOverlayHelper.show(this@NotificationMonitorService)
+                                } else if (AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF) {
+                                    MaskOverlayHelper.show(this@NotificationMonitorService, keepAwake = false)
+                                    LogFileManager.writeLog("远程打卡结束：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                                } else {
+                                    LogFileManager.writeLog("远程打卡结束：伪息屏关闭，不恢复蒙层")
+                                }
                             }
                         }
                         // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
@@ -690,7 +707,15 @@ class NotificationMonitorService : NotificationListenerService() {
                 )
                 if (maskWasShowing || keptAwakeForPunch) {
                     Handler(Looper.getMainLooper()).post {
-                        if (maskWasShowing) MaskOverlayHelper.show(this@NotificationMonitorService)
+                        if (maskWasShowing) {
+                            // 伪息屏关时不恢复保亮蒙层（防屏幕微亮常驻不锁屏）；模式=息屏则盖不保亮黑蒙层等系统超时
+                            if (AppRuntimeConfig.isForcePseudoMask()) {
+                                MaskOverlayHelper.show(this@NotificationMonitorService)
+                            } else if (AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF) {
+                                MaskOverlayHelper.show(this@NotificationMonitorService, keepAwake = false)
+                                LogFileManager.writeLog("伪息屏关+模式息屏：盖不保亮黑蒙层等待系统超时灭屏")
+                            }
+                        }
                         IdlePseudoMaskController.releaseKeepAwakeForPunch(this@NotificationMonitorService)
                     }
                 }
