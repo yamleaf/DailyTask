@@ -196,6 +196,11 @@ class MqttAgentService : Service() {
             instance?.doPublishAck(rid, result)
         }
 
+        /** 配置变更等场景推送指定快照区块，让控制端本地缓存即时更新（闭环：ACK → 增量推送 → 控制端刷新） */
+        fun pushSections(sections: Set<String>) {
+            instance?.publishPush(sections)
+        }
+
         /** 节假日数据更新等完成后，推送给控制端刷新 calendar 区块 */
         fun pushCalendar() {
             instance?.publishPush(setOf("calendar"))
