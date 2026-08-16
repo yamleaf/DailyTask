@@ -8,24 +8,24 @@
 #       （git 单提交重建：clone → 替换 APK/.dat → force push，历史零累积）
 #
 # 用法：
-#   GITEE_TOKEN=<写权限令牌> bash scripts/publish_local.sh --note "更新说明"
-#   可选：--force 1（强制更新）、--tag 自定义、--key 加密密钥（默认与 App 内置一致）
+#   bash scripts/publish_local.sh --note "更新说明"
+#   可选：--force 1（强制更新）、--tag 自定义、--token/--key 覆盖、--owner/--repo 覆盖
 #
-# 令牌说明：GITEE_TOKEN 可用 App 内置令牌（UpdateChecker.kt 中 even/odd 交错
-# 复原，实测有写权限）或专用写权限令牌；.dat 密钥默认 DailyTaskUpdateKey2026!
-# （与 App 内置一致），如需改必须同步改 App。
+# token/key 获取优先级：--token/--key 参数 > 环境变量 GITEE_TOKEN/VERSION_KEY
+#                       > App 内置自动复原（UpdateChecker.kt 的 even/odd 交错与 VERSION_KEY）
+# 即默认零配置：直接 bash scripts/publish_local.sh --note "说明" 即可。
 set -euo pipefail
 
 NOTE="常规更新"
 FORCE="0"
 TAG=""
-TOKEN="${GITEE_TOKEN:-}"
-KEY="${VERSION_KEY:-DailyTaskUpdateKey2026!}"
+TOKEN=""
+KEY=""
 OWNER="yamleaf"
 REPO="DailyTaskUpdate"
 
 usage() {
-  echo "用法: GITEE_TOKEN=<写权限令牌> bash scripts/publish_local.sh [--note 说明] [--force 1] [--tag 自定义] [--token 令牌] [--key 密钥]"
+  echo "用法: bash scripts/publish_local.sh [--note 说明] [--force 1] [--tag 自定义] [--token 令牌] [--key 密钥]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -35,12 +35,35 @@ while [[ $# -gt 0 ]]; do
     --tag)    TAG="$2";    shift 2 ;;
     --token)  TOKEN="$2";  shift 2 ;;
     --key)    KEY="$2";    shift 2 ;;
+    --owner)  OWNER="$2";  shift 2 ;;
+    --repo)   REPO="$2";   shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "未知参数: $1"; usage; exit 1 ;;
   esac
 done
 
-[[ -n "$TOKEN" ]] || { echo "错误：需要 GITEE_TOKEN（环境变量或 --token）——可用 App 内置令牌（UpdateChecker.kt 复原）或专用写权限令牌"; exit 1; }
+# ── token/key 自动获取 ─────────────────────────────────────────────
+TOKEN="${TOKEN:-${GITEE_TOKEN:-}}"
+KEY="${KEY:-${VERSION_KEY:-}}"
+UP_FILE="app/src/main/java/com/pengxh/daily/app/utils/UpdateChecker.kt"
+if [[ -z "$TOKEN" && -f "$UP_FILE" ]]; then
+  # App 内置令牌：even/odd 两段逐字符交错复原（与 UpdateChecker.kt 的 buildString 一致）
+  EVEN=$(sed -n 's/.*val even = "\([0-9a-fA-F]*\)".*/\1/p' "$UP_FILE" | head -1)
+  ODD=$(sed -n 's/.*val odd = "\([0-9a-fA-F]*\)".*/\1/p' "$UP_FILE" | head -1)
+  if [[ -n "$EVEN" && -n "$ODD" && ${#EVEN} -eq ${#ODD} ]]; then
+    TOKEN=""
+    for ((i = 0; i < ${#EVEN}; i++)); do
+      TOKEN+="${EVEN:i:1}${ODD:i:1}"
+    done
+    echo "（token 自动取自 App 内置 UpdateChecker.kt）"
+  fi
+fi
+if [[ -z "$KEY" && -f "$UP_FILE" ]]; then
+  KEY=$(sed -n 's/.*"\([^"]*\)"\.toByteArray(Charsets\.UTF_8).*/\1/p' "$UP_FILE" | head -1)
+fi
+[[ -z "$KEY" ]] && KEY="DailyTaskUpdateKey2026!"
+
+[[ -n "$TOKEN" ]] || { echo "错误：无法获取 token（--token / 环境变量 GITEE_TOKEN / UpdateChecker.kt 复原均不可用）"; exit 1; }
 
 # 1) 最新 release APK
 APK=$(ls -t app/build/outputs/apk/release/*.apk 2>/dev/null | head -1)
