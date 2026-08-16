@@ -245,6 +245,9 @@ object RuntimeStateApplier {
             // 远程设置变更成功：置位刷新标志并发送应用内广播，让前台被控端界面即时刷新（无需二次进入）
             if (success) {
                 ConfigImportSignal.notifyRemoteChanged(DailyTaskApplication.get())
+                // 配置已变更：失效全量快照缓存，否则控制端 ACK 后触发的 forceRefreshSnapshot
+                // （buildJson 命中 30s TTL 缓存）会返回变更前的旧快照，把 UI 刷新回旧值
+                RemoteSnapshot.invalidateCache()
             }
             MqttAgentService.publishAck(packet.rid, ackMsg)
             
