@@ -8,7 +8,8 @@ Gitee Go 同步脚本：拉 GitHub 最新 release → 解压 7z → 传 Gitee re
   .dat（版本信息，XOR 加密）推 Gitee 仓库 updates/v_task.dat，App 拉取比对
 
 依赖环境变量（Gitee Go 流水线变量中配置）：
-  GITEE_TOKEN          必填：Gitee 写权限私人令牌（创建 release / 上传附件 / 推 .dat）
+  MY_GITEE_TOKEN       必填：Gitee 写权限私人令牌（创建 release / 上传附件 / 推 .dat）；
+                       Gitee Go 保留 GITEE_ 前缀给系统用，变量名需加 MY_ 前缀
   APK_ENCRYPT_PASSWORD 必填：7z 解压密码（与 GitHub Secret 一致）
   GITHUB_TOKEN         可选：GitHub API 额度提升
   VERSION_KEY          可选：.dat 加密密钥（默认 DailyTaskUpdateKey2026!，与 App 内置一致）
@@ -44,7 +45,8 @@ GITEE_API = "https://gitee.com/api/v5/repos"
 GH_REPO = os.environ.get("GH_REPO", "yamleaf/DailyTask")
 GITEE_OWNER = os.environ.get("GITEE_OWNER", "yamleaf")
 GITEE_REPO = os.environ.get("GITEE_REPO", "DailyTaskUpdate")
-GITEE_TOKEN = os.environ.get("GITEE_TOKEN", "")
+# Gitee Go 限制变量名不能以 GITEE_ 开头，用 MY_GITEE_TOKEN
+GITEE_TOKEN = os.environ.get("MY_GITEE_TOKEN", "")
 GH_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 ENC_PASS = os.environ.get("APK_ENCRYPT_PASSWORD", "")
 VERSION_KEY = os.environ.get("VERSION_KEY", "DailyTaskUpdateKey2026!").encode("utf-8")
@@ -166,7 +168,7 @@ def cleanup_old_releases() -> None:
 
 def main() -> int:
     if not GITEE_TOKEN:
-        print("错误：需要环境变量 GITEE_TOKEN（Gitee 写权限令牌）")
+        print("错误：需要环境变量 MY_GITEE_TOKEN（Gitee Go 限制不能用 GITEE_ 前缀；Gitee 写权限令牌）")
         return 1
     if not ENC_PASS:
         print("错误：需要环境变量 APK_ENCRYPT_PASSWORD（7z 解压密码）")
