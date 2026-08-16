@@ -145,7 +145,7 @@ object UpdateChecker {
                 LogFileManager.error("检查更新：拉取版本文件失败 HTTP ${resp.code}")
                 throw IOException("HTTP ${resp.code}")
             }
-            return resp.body?.string().orEmpty()
+            return resp.body.string().orEmpty()
         }
     }
 
@@ -222,7 +222,7 @@ object UpdateChecker {
                     LogFileManager.error("检查更新：拉取 release 附件失败 HTTP ${resp.code}")
                     return@runCatching null
                 }
-                val arr = JsonParser.parseString(resp.body?.string().orEmpty())
+                val arr = JsonParser.parseString(resp.body.string().orEmpty())
                     .asJsonObject.getAsJsonArray("assets")
                 for (el in arr) {
                     val o = el.asJsonObject
