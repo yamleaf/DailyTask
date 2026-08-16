@@ -447,32 +447,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             }
         }
 
-    /**
-     * 查 GitHub DailyController 最新 release（含 prerelease）的页面 URL。
-     * GitHub /releases/latest 只认正式版（非 draft 非 prerelease），控制端当前
-     * 均为 alpha 预发布，故改用 releases?per_page=1 取最新一条（draft 不对外，
-     * prerelease 照常返回）。公开仓库免认证，失败返回 null（调用方回退静态地址）。
-     */
-    private suspend fun fetchLatestControllerReleaseUrl(): String? = withContext(Dispatchers.IO) {
-        runCatching {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(8, TimeUnit.SECONDS)
-                .readTimeout(8, TimeUnit.SECONDS)
-                .build()
-            val req = Request.Builder()
-                .url("https://api.github.com/repos/yamleaf/DailyController/releases?per_page=1")
-                .header("Accept", "application/vnd.github+json")
-                .get()
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@runCatching null
-                val arr = JsonParser.parseString(resp.body?.string().orEmpty()).asJsonArray
-                if (arr.size() == 0) return@runCatching null
-                arr[0].asJsonObject.get("html_url")?.asString
-            }
-        }.getOrNull()
-    }
-
         // 检查更新：拉取 Gitee 加密版本文件 → 版本对比 → 弹窗/下载/安装
         binding.updateRow.setOnClickListener {
             binding.updateStatus.text = "检查中…"
@@ -2244,5 +2218,31 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 Log.e(kTag, "开启通知监听服务失败", e)
             }
         }
+    }
+
+    /**
+     * 查 GitHub DailyController 最新 release（含 prerelease）的页面 URL。
+     * GitHub /releases/latest 只认正式版（非 draft 非 prerelease），控制端当前
+     * 均为 alpha 预发布，故改用 releases?per_page=1 取最新一条（draft 不对外，
+     * prerelease 照常返回）。公开仓库免认证，失败返回 null（调用方回退静态地址）。
+     */
+    private suspend fun fetchLatestControllerReleaseUrl(): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+            val req = Request.Builder()
+                .url("https://api.github.com/repos/yamleaf/DailyController/releases?per_page=1")
+                .header("Accept", "application/vnd.github+json")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching null
+                val arr = JsonParser.parseString(resp.body?.string().orEmpty()).asJsonArray
+                if (arr.size() == 0) return@runCatching null
+                arr[0].asJsonObject.get("html_url")?.asString
+            }
+        }.getOrNull()
     }
 }
