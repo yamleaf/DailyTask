@@ -3,15 +3,19 @@
 """
 Gitee 发布脚本（GitHub 手动触发编译时同步到 Gitee 私密仓库）。
 
-职责（全自动）：
-  1. 创建/复用 Gitee 私密仓库 Release（tag + note）
-  2. 把 release APK 覆盖上传到仓库文件 updates/dailyTask.apk（contents API，
-     实测 6.6MB 仅 8 秒级——远快于 release 附件 14 分钟 / GitCode OBS 437s）
-  3. 生成版本元数据 JSON，用「XOR + Base64」简单加密成 .dat（App 内置同密钥解密）
-     并推到仓库 updates/v_task.dat；.dat 里 apk 字段 = 固定 raw URL，
-     App 下载时拼 access_token；下载后为明文 APK，直接安装（MD5 校验可选）
-  —— 方案演进：Gitee/GitCode 大文件附件上传均极慢（实测 6.6MB 卡数分钟~437s），
-     曾改手动上传；实测仓库文件（contents API）上传仅 ~8s，故改回全自动
+发布方式：git 单提交重建（每次发版直接丢弃历史）——
+  clone 仓库（--depth 1）→ 替换 updates/dailyTask.apk + updates/v_task.dat →
+  commit → force push（HEAD:master）。仓库历史恒为 1 个 commit，
+  大小 = 当前快照，永不累积（Gitee 免费单仓 500MB 无忧，无需任何瘦身任务）。
+
+职责：
+  1. 创建/复用 Gitee 私密仓库 Release（tag + note，供网页查看历史版本）
+  2. 生成版本元数据 JSON，用「XOR + Base64」简单加密成 .dat（App 内置同密钥解密）
+  3. git 单提交推送明文 APK（updates/dailyTask.apk）+ .dat（updates/v_task.dat）；
+     .dat 里 apk 字段 = 固定 raw URL，App 下载拼 access_token；明文 APK 直接安装
+
+方案演进：release 附件上传极慢（14min 卡死）→ GitCode OBS 也慢（437s）→
+仓库文件 contents API 快（8s）但 git 历史累积 → 最终 git 单提交重建（历史零累积）。
 
 加解密约定（App 侧 UpdateChecker.kt 必须与此对称）：
   - .dat：Base64(XOR(json, key))，存储文本为 cipher
@@ -32,7 +36,10 @@ import base64
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -82,7 +89,7 @@ def gitee_json(method: str, url: str, body: dict | None = None, timeout: int = 3
 
 def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str, body: str, ref: str = "master") -> int:
     """复用已存在 tag 的 release，否则创建；返回 release_id（带 tag 已存在兜底）。
-    ref 为 release 关联的 commit SHA（保证 release 指向本次构建的真实代码，而非镜像仓库默认分支的最新提交）"""
+    ref 为 release 关联的分支/commit：git 单提交方案下统一关联 master（仓库最新快照）"""
     tag_enc = urllib.parse.quote(tag, safe="")
     url = f"{API_BASE}/{owner}/{repo}/releases/tags/{tag_enc}?access_token={token}"
     status, data = gitee_json("GET", url)
@@ -99,7 +106,6 @@ def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str
     status, data = gitee_json("POST", f"{API_BASE}/{owner}/{repo}/releases", create_body)
     if status in (200, 201) and data.get("id"):
         return int(data["id"])
-    # 创建失败（可能 tag 已被占用/GET 未识别）：从 releases 列表按 tag_name 捞
     if status == -1:
         raise RuntimeError(f"网络错误，创建 release 失败: {data}")
     list_status, list_data = gitee_json(
@@ -112,36 +118,49 @@ def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str
     raise RuntimeError(f"创建 release 失败({status}): {data}")
 
 
-def upload_data_file(owner: str, repo: str, path: str, content: str, token: str, message: str) -> None:
-    """上传/更新仓库文件（contents API：存在则 PUT 带 sha，否则 POST）"""
-    sha = None
-    status, data = gitee_json("GET", f"{API_BASE}/{owner}/{repo}/contents/{path}?access_token={token}")
-    if status == 200 and data.get("sha"):
-        sha = data["sha"]
-    content_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    body = {
-        "access_token": token,
-        "content": content_b64,
-        "message": message,
-        "branch": "master",
-    }
-    method = "PUT" if sha else "POST"
-    if sha:
-        body["sha"] = sha
-    status, data = gitee_json(method, f"{API_BASE}/{owner}/{repo}/contents/{path}", body)
-    if status not in (200, 201):
-        raise RuntimeError(f"上传 {path} 失败({status}): {data}")
+def run_git(args: list[str], cwd: str | None = None) -> None:
+    """执行 git 命令，失败抛异常（含 stderr）"""
+    r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args[:3])} 失败: {(r.stderr or r.stdout).strip()[:300]}")
+
+
+def git_single_commit_push(owner: str, repo: str, token: str, apk_bytes: bytes,
+                           dat_text: str, apk_path: str, dat_path: str, commit_msg: str) -> float:
+    """git 单提交重建推送：clone → 替换 APK/.dat → commit → force push。
+    仓库历史恒为 1 个 commit（大小=当前快照），每次发版直接丢弃历史。返回推送耗时（秒）。"""
+    clone_url = f"https://{owner}:{token}@gitee.com/{owner}/{repo}.git"
+    work_dir = tempfile.mkdtemp(prefix="dt_upd_")
+    t0 = time.time()
+    try:
+        # 1) clone（--depth 1：只需最新快照；仓库本身单提交，实测 ~4s）
+        run_git(["clone", "--depth", "1", clone_url, work_dir])
+        # 2) 替换文件（目录可能不存在则创建）
+        os.makedirs(os.path.join(work_dir, os.path.dirname(apk_path) or "."), exist_ok=True)
+        os.makedirs(os.path.join(work_dir, os.path.dirname(dat_path) or "."), exist_ok=True)
+        with open(os.path.join(work_dir, apk_path), "wb") as f:
+            f.write(apk_bytes)
+        with open(os.path.join(work_dir, dat_path), "w", encoding="utf-8") as f:
+            f.write(dat_text)
+        # 3) add + commit（身份内联，不依赖全局配置）
+        run_git(["add", "-A"], cwd=work_dir)
+        run_git(["-c", "user.name=yamleaf", "-c", "user.email=li00ya@163.com",
+                 "commit", "-m", commit_msg], cwd=work_dir)
+        # 4) force push：HEAD 直接覆盖远程 master（历史归零）
+        run_git(["push", "-f", "origin", "HEAD:master"], cwd=work_dir)
+        return time.time() - t0
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 # ═══════════════════════ 主流程 ═══════════════════════
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Publish APK + version file to Gitee Release")
+    ap = argparse.ArgumentParser(description="Publish APK + version file to Gitee (git single-commit)")
     ap.add_argument("--version-code", required=True, help="versionCode（int）")
     ap.add_argument("--version-name", required=True, help="versionName")
     ap.add_argument("--apk", required=True, help="本地 release APK 路径")
     ap.add_argument("--tag", required=True, help="Gitee Release tag（如 dailyTask-123）")
-    ap.add_argument("--ref", default="master", help="release 关联的 commit SHA（保证指向本次构建代码）")
     ap.add_argument("--note", default="常规更新", help="更新说明")
     ap.add_argument("--force", default="0", help="1/true=强制更新")
     ap.add_argument("--owner", default=os.environ.get("GITEE_OWNER", ""))
@@ -157,55 +176,17 @@ def main() -> int:
     apk_bytes = open(args.apk, "rb").read()
     apk_md5 = md5_of(apk_bytes)
 
-    # 0) 校验 release 关联的 commit 是否已同步到 Gitee（GitHub→Gitee 镜像可能滞后）。
-    #    已同步 → 精确关联本次构建 SHA；未同步 → 退化为 Gitee 默认分支名，
-    #    避免「创建标签失败」400（Gitee 无法在仓库不存在的 commit 上建 tag）
-    ref = args.ref
-    check_status, _ = gitee_json(
-        "GET", f"{API_BASE}/{args.owner}/{args.repo}/commits/{ref}?access_token={args.token}"
-    )
-    if check_status != 200:
-        repo_status, repo_info = gitee_json(
-            "GET", f"{API_BASE}/{args.owner}/{args.repo}?access_token={args.token}"
-        )
-        fallback = repo_info.get("default_branch", "master") if repo_status == 200 else "master"
-        print(f"警告：commit {ref[:8]} 尚未同步到 Gitee（镜像滞后），release 关联退化为分支 {fallback}")
-        ref = fallback
-
-    # 1) 创建/复用 Gitee Release（记录版本信息与更新说明）
+    # 1) 创建/复用 Gitee Release（记录版本信息与更新说明；git 单提交方案统一关联 master）
     release_id = get_or_create_release(
         args.owner, args.repo, args.token, args.tag,
         name=f"DailyTask v{args.version_name}",
         body=args.note,
-        ref=ref,
+        ref="master",
     )
     print(f"Release 已创建/复用（id={release_id}, tag={args.tag}）")
 
-    # 2) 上传 APK 到仓库文件 updates/dailyTask.apk（contents API，实测 6.6MB ~8s，
-    #    远快于 release 附件 14 分钟；App 从固定 raw URL 下载，拼 access_token）
+    # 2) 生成版本元数据并加密成 .dat（apk=固定 raw URL，App 拼 access_token 下载）
     apk_path = "updates/dailyTask.apk"
-    apk_b64 = base64.b64encode(apk_bytes).decode("ascii")
-    t0 = time.time()
-    status, data = gitee_json(
-        "GET", f"{API_BASE}/{args.owner}/{args.repo}/contents/{apk_path}?access_token={args.token}", timeout=120
-    )
-    sha = data.get("sha") if status == 200 else None
-    body = {
-        "access_token": args.token,
-        "content": apk_b64,
-        "message": f"chore: update APK v{args.version_code}",
-        "branch": "master",
-    }
-    method = "PUT" if sha else "POST"
-    if sha:
-        body["sha"] = sha
-    status, data = gitee_json(method, f"{API_BASE}/{args.owner}/{args.repo}/contents/{apk_path}", body, timeout=120)
-    if status not in (200, 201):
-        raise RuntimeError(f"上传 APK 到仓库文件失败({status}): {data}")
-    apk_upload_time = time.time() - t0
-    print(f"APK 已上传仓库文件 {apk_path}（{len(apk_bytes)} bytes，{apk_upload_time:.2f}s）")
-
-    # 3) 生成版本元数据并加密成 .dat（apk=固定 raw URL，App 拼 access_token 下载）
     meta = {
         "v": int(args.version_code),
         "vn": args.version_name,
@@ -218,18 +199,20 @@ def main() -> int:
     plain = json.dumps(meta, ensure_ascii=False).encode("utf-8")
     cipher = base64.b64encode(xor_encrypt(plain, args.key.encode("utf-8"))).decode("ascii")
 
-    # 4) 推 .dat 到仓库（App 用 API raw + token 拉取）
-    upload_data_file(
-        args.owner, args.repo, "updates/v_task.dat", cipher, args.token,
-        f"chore: update version file v{meta['v']}",
+    # 3) git 单提交推送（APK + .dat 一起 force push，历史直接归零）
+    push_time = git_single_commit_push(
+        args.owner, args.repo, args.token, apk_bytes, cipher,
+        apk_path, "updates/v_task.dat",
+        f"chore: update v{meta['v']}",
     )
+    print(f"git 单提交推送 : {push_time:.2f}s（{len(apk_bytes)} bytes APK + .dat，历史已归零）")
 
     print("=" * 56)
-    print("发布成功（Gitee 私密仓库，全自动）")
+    print("发布成功（Gitee 私密仓库，git 单提交，历史零累积）")
     print(f"  versionCode : {meta['v']}")
     print(f"  versionName : {meta['vn']}")
     print(f"  Release tag : {args.tag}")
-    print(f"  APK 上传    : {apk_upload_time:.2f}s（{apk_path}）")
+    print(f"  APK 推送    : {push_time:.2f}s（{apk_path}）")
     print(f"  APK MD5     : {apk_md5}")
     print(f"  force       : {meta['force']}")
     print(f"  .dat 拉取   : {API_BASE}/{args.owner}/{args.repo}/raw/updates/v_task.dat（App 拼 token）")
