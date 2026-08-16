@@ -162,10 +162,13 @@ object UpdateChecker {
     private fun showUpdateDialog(context: Context, info: VersionInfo) {
         val activity = context as? Activity ?: return
         // 版本行：当前版本 --> 新版本（箭头连接，紧凑直观）；
-        // note 支持多行显示：JSON 序列化的 \n 经 Gson 解析后还原为真换行，TextView 默认渲染
+        // note 多行显示：兼容 CI 输入框直接回车（真换行）和手写字面 "\n" 两种情况，
+        // 后者常见于 "复制粘贴" 或跨平台脚本生成的更新说明（如 "1、测试1\n2、测试2"）。
         val message = buildString {
             append("版本：v${BuildConfig.VERSION_NAME} --> v${info.vn}\n")
-            if (info.note.isNotBlank()) append("\n${info.note}")
+            if (info.note.isNotBlank()) {
+                append("\n${info.note.replace("\\n", "\n")}")
+            }
             if (info.force) append("\n\n⚠ 此版本为强制更新")
         }
         // 双端统一弹窗：双按钮等宽均分（立即更新/稍后）；force 时单按钮居中不可取消
