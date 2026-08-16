@@ -1815,62 +1815,6 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             )
         }
 
-    /** 获取控制端下载地址弹窗 */
-    private fun showControllerDownload() {
-        val url = BuildConfig.CTRL_DOWNLOAD_URL.trim()
-        if (url.isEmpty()) {
-            UnifiedDialogKit.showInfo(
-                ctx,
-                "获取控制端 DailyController",
-                "当前未配置控制端下载地址。\n\n控制端安装包由分发方通过构建参数注入。如需安装控制端，请向提供者获取安装方式，或等待后续版本开放下载入口。"
-            )
-        } else {
-            val summary = StringBuilder()
-            val container = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(40, 16, 40, 8)
-            }
-            val item = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(24, 12, 24, 12)
-                isClickable = true
-                setOnClickListener { openUrl(url) }
-            }
-            item.addView(TextView(ctx).apply {
-                text = "控制端下载"
-                textSize = 17f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(resources.getColor(R.color.text_default_color, theme))
-            })
-            item.addView(TextView(ctx).apply {
-                text = "点击打开下载页，或复制地址"
-                textSize = 13f
-                setTextColor(resources.getColor(R.color.text_hint_color, theme))
-                setPadding(0, 4, 0, 0)
-            })
-            item.addView(TextView(ctx).apply {
-                text = url
-                textSize = 13f
-                setTextColor(resources.getColor(R.color.md_primary, theme))
-                setPadding(0, 4, 0, 0)
-            })
-            container.addView(item)
-            summary.append("控制端下载：$url\n")
-            UnifiedDialogKit.showForm(
-                ctx,
-                container,
-                title = "获取控制端 DailyController",
-                positiveText = "复制全部",
-                negativeText = "关闭",
-                onConfirm = {
-                    copyToClipboard(summary.toString().trimEnd(), "控制端下载地址")
-                    "已复制全部下载地址到剪贴板".show(ctx)
-                    true
-                }
-            )
-        }
-    }
-
     /** 二维码生成后更新重扫提示横幅 */
     private fun updateRescanBanner() {
         val connected = MqttAgentService.isConnected()
