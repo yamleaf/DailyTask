@@ -181,6 +181,7 @@ def main() -> int:
     ap.add_argument("--version-code", required=True, help="versionCode（int）")
     ap.add_argument("--version-name", required=True, help="versionName")
     ap.add_argument("--apk", required=True, help="本地 release APK 路径")
+    ap.add_argument("--enc-apk", default=None, help="已 AES 加密的 APK 路径（CI 提前加密好时传入，跳过脚本内加密）")
     ap.add_argument("--tag", required=True, help="Gitee Release tag（如 dailyTask-123）")
     ap.add_argument("--ref", default="master", help="release 关联的 commit SHA（保证指向本次构建代码）")
     ap.add_argument("--note", default="常规更新", help="更新说明")
@@ -201,10 +202,14 @@ def main() -> int:
     apk_bytes = open(args.apk, "rb").read()
     apk_md5 = md5_of(apk_bytes)
 
-    # 1) AES-256-CBC 加密 APK
-    enc_path = os.path.join(tempfile.gettempdir(), f"dailyTask_{args.tag}.apk.enc")
-    aes_encrypt_apk(apk_bytes, args.key, enc_path)
-    print(f"APK 已 AES-256-CBC 加密：{len(apk_bytes)} -> {os.path.getsize(enc_path)} bytes")
+    # 1) AES-256-CBC 加密 APK：CI 已提前加密（--enc-apk）则直接复用，否则脚本内加密兜底
+    if args.enc_apk and os.path.isfile(args.enc_apk):
+        enc_path = args.enc_apk
+        print(f"复用 CI 加密好的 APK：{enc_path}（{os.path.getsize(enc_path)} bytes）")
+    else:
+        enc_path = os.path.join(tempfile.gettempdir(), f"dailyTask_{args.tag}.apk.enc")
+        aes_encrypt_apk(apk_bytes, args.key, enc_path)
+        print(f"APK 已 AES-256-CBC 加密：{len(apk_bytes)} -> {os.path.getsize(enc_path)} bytes")
 
     # 2) 创建/复用 Gitee Release 并上传加密包
     release_id = get_or_create_release(

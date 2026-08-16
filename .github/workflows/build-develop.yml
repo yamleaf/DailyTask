@@ -126,11 +126,23 @@ jobs:
       - name: Build release APK (alpha)
         run: ./gradlew assembleRelease --no-daemon
 
+      # 手动触发：提前 AES-256-CBC 加密 APK（密钥=SHA-256(VERSION_KEY)，IV=16 字节 0），
+      # 与 release APK 一起上传 Artifacts；publish 时直接复用（--enc-apk），
+      # 加密失败不影响拿 artifact，也不在发布步骤内重复加密。
+      - name: Encrypt release APK (AES-256-CBC)
+        if: github.event_name == 'workflow_dispatch' && env.VERSION_KEY != ''
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          KEY_HEX=$(printf '%s' "$VERSION_KEY" | sha256sum | cut -d' ' -f1)
+          openssl enc -aes-256-cbc -K "$KEY_HEX" -iv 00000000000000000000000000000000 \
+            -in "$APK" -out "${APK}.enc"
+          echo "加密完成：$(ls -la "${APK}.enc" | awk '{print $5}') bytes"
+
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: dailyTask_alpha_release
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*
 
       # ===== 手动触发才执行：同步到 Gitee 公开镜像 Release（AES 加密 APK + 加密版本文件） =====
       # App「检查更新」从 Gitee 拉取 .dat（XOR 密文）→ 下载 AES 密文 APK → 内置密钥解密安装。
@@ -156,6 +168,7 @@ jobs:
             --version-code "${{ steps.gitee_version.outputs.version_code }}" \
             --version-name "${{ steps.gitee_version.outputs.version_name }}" \
             --apk "${{ steps.gitee_version.outputs.apk }}" \
+            --enc-apk "${{ steps.gitee_version.outputs.apk }}.enc" \
             --tag "dailyTask-${{ env.BUILD_NUMBER }}" \
             --ref "${{ github.sha }}" \
             --note "${{ inputs.note }}" \
