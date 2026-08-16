@@ -104,10 +104,11 @@ object UpdateChecker {
         showNoUpdateToast: Boolean = false,
         silent: Boolean = false,
     ): Boolean {
-        // 注册包替换广播 + 兜底清理：覆盖两种安装场景（App 内跳装 / 文件管理器手动装）的版本一致性核对
+        // 注册包替换广播：覆盖 App 内跳装 / 文件管理器手动装两种场景的版本一致性核对
         ensureInstallMonitor(context)
-        reconcilePendingVersion(context)
         return withContext(Dispatchers.IO) {
+            // 兜底核对（安装完成广播可能丢失时，这里清红点）；必须在 IO 线程（内含网络请求）
+            reconcilePendingVersion(context)
             runCatching {
                 parse(decrypt(fetchVersionFile()))
             }.getOrNull()?.let { info ->
@@ -427,6 +428,11 @@ object UpdateChecker {
     }
 
     /** 启动补查：包替换广播丢失时（进程被杀等）兜底——已装到目标版本则清理标记与红点 */
+    /** 安装完成核对（设置页进入/前台时调用）：比对预期版本与当前安装版本，一致则清红点 */
+    suspend fun reconcilePendingUpdate(context: Context) = withContext(Dispatchers.IO) {
+        reconcilePendingVersion(context)
+    }
+
     private fun reconcilePendingVersion(context: Context) {
         val expected = SaveKeyValues.loadInt(PREF_PENDING_VERCODE, 0)
         if (expected <= 0) return
