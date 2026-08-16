@@ -437,9 +437,12 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         // 检查更新：拉取 Gitee 加密版本文件 → 版本对比 → 弹窗/下载/安装
         binding.updateRow.setOnClickListener {
             binding.updateStatus.text = "检查中…"
+            binding.updateBadge.visibility = View.GONE
             lifecycleScope.launch {
                 UpdateChecker.check(ctx, showNoUpdateToast = true)
                 binding.updateStatus.text = ""
+                binding.updateBadge.visibility =
+                    if (UpdateChecker.hasPendingUpdate()) View.VISIBLE else View.GONE
             }
         }
         binding.themeValueView.text = ThemeManager.labelOf(ThemeManager.getMode(ctx))
@@ -821,6 +824,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 刷新设置页全部状态（悬浮/通知/截屏/无障碍开关与提示） */
     private fun refreshUi() {
+        // 每日静默检查发现新版本 → 检查更新行显示红点（后台检查后回到本页时刷新）
+        binding.updateBadge.visibility =
+            if (UpdateChecker.hasPendingUpdate()) View.VISIBLE else View.GONE
         ContextCompat.registerReceiver(
             ctx, remoteConfigReceiver,
             IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),

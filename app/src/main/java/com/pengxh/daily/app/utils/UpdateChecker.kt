@@ -15,6 +15,7 @@ import androidx.core.content.FileProvider
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.BuildConfig
+import com.pengxh.kt.lite.utils.SaveKeyValues
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -44,10 +45,16 @@ object UpdateChecker {
     private const val GITEE_REPO = "DailyTask"
     private const val DATA_PATH = "updates/v_task.dat"
 
+    /** 静默检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
+    private const val PREF_HAS_UPDATE = "update_has_new_version"
+
     /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致；AES 的 APK 密钥由其 SHA-256 派生 */
     private val VERSION_KEY: ByteArray by lazy {
         "DailyTaskUpdateKey2026!".toByteArray(Charsets.UTF_8)
     }
+
+    /** 设置页「检查更新」红点状态（由每日静默检查/手动检查更新） */
+    fun hasPendingUpdate(): Boolean = SaveKeyValues.loadBoolean(PREF_HAS_UPDATE, false)
 
     data class VersionInfo(
         val v: Int,
@@ -62,22 +69,33 @@ object UpdateChecker {
     /**
      * 检查更新。
      * @param showNoUpdateToast 无更新/失败时是否 Toast 提示（手动点击入口传 true，静默检查传 false）
-     * @return true=发现新版本并已弹窗
+     * @param silent true=纯静默：只更新红点状态，不弹窗、不 Toast（每日重置点检查用）
+     * @return true=发现新版本（silent 模式下不弹窗，仅设置页红点）
      */
-    suspend fun check(context: Context, showNoUpdateToast: Boolean = false): Boolean {
+    suspend fun check(
+        context: Context,
+        showNoUpdateToast: Boolean = false,
+        silent: Boolean = false,
+    ): Boolean {
         return withContext(Dispatchers.IO) {
             runCatching {
                 parse(decrypt(fetchVersionFile()))
             }.getOrNull()?.let { info ->
-                if (info.v > BuildConfig.VERSION_CODE) {
-                    withContext(Dispatchers.Main) { showUpdateDialog(context, info) }
+                val hasUpdate = info.v > BuildConfig.VERSION_CODE
+                // 成功拉到版本文件才更新红点状态（失败不误清）
+                SaveKeyValues.saveBoolean(PREF_HAS_UPDATE, hasUpdate)
+                if (hasUpdate) {
+                    if (!silent) {
+                        withContext(Dispatchers.Main) { showUpdateDialog(context, info) }
+                    }
                     true
                 } else {
-                    if (showNoUpdateToast) toast(context, "当前已是最新版本")
+                    if (!silent && showNoUpdateToast) toast(context, "当前已是最新版本")
                     false
                 }
             } ?: run {
-                if (showNoUpdateToast) toast(context, "检查更新失败，请稍后重试")
+                // 拉取/解析失败：保持原红点状态，不误清
+                if (!silent && showNoUpdateToast) toast(context, "检查更新失败，请稍后重试")
                 false
             }
         }
