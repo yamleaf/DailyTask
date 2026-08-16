@@ -16,9 +16,38 @@ on:
 
 permissions:
   contents: write
+  # 自动编译限流需要读写 repository variable（LAST_AUTO_BUILD 时间戳）
+  actions: write
 
 jobs:
+  # 自动编译限流（仅 push 触发）：repository variable LAST_AUTO_BUILD 记录上次自动构建时间，
+  # 距上次 < 3600s 则跳过本次构建（显示灰色跳过）；手动触发不走此 job，不受限。
+  rate-check:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Rate limit auto builds (once per hour)
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NOW=$(date +%s)
+          LAST=$(gh variable get LAST_AUTO_BUILD --repo "$GITHUB_REPOSITORY" 2>/dev/null || echo 0)
+          if [ "$LAST" -gt 0 ] && [ "$((NOW - LAST))" -lt 3600 ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "距上次自动编译不足 1 小时，跳过本次自动编译（上次 $LAST）"
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            gh variable set LAST_AUTO_BUILD "$NOW" --repo "$GITHUB_REPOSITORY"
+            echo "自动编译限流已放行并记录时间戳 $NOW"
+          fi
+
   build:
+    needs: rate-check
+    # 手动触发直接构建；push 触发需 rate-check 放行（allowed=true）
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.rate-check.outputs.allowed == 'true' }}
     name: Build APK(alpha自动版本)
     runs-on: ubuntu-latest
 
