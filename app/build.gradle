@@ -117,9 +117,10 @@ android {
         // 仅保留中文资源（values/ 与 values-zh），剔除依赖库自带的多语言字符串，缩减体积
         resConfigs "zh"
 
-        // 控制端下载地址：默认 GitHub Releases 发布页（人类可读的发布列表，下载方免登录）。
+        // 控制端下载地址：默认 GitHub Releases 最新发布页（/releases/latest 自动跳转
+        // 最新版本页面，直接看到最新 APK 附件，下载方免登录）。
         // 仍支持通过同名环境变量 CTRL_DOWNLOAD_URL 在 CI 覆盖（例如换私有/匿名托管）。
-        def ctrlDownloadUrl = System.getenv('CTRL_DOWNLOAD_URL') ?: 'https://github.com/yamleaf/DailyController/releases'
+        def ctrlDownloadUrl = System.getenv('CTRL_DOWNLOAD_URL') ?: 'https://github.com/yamleaf/DailyController/releases/latest'
         buildConfigField 'String', 'CTRL_DOWNLOAD_URL', "\"$ctrlDownloadUrl\""
 
         externalNativeBuild {
