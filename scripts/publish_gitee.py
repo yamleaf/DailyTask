@@ -74,7 +74,7 @@ def aes_encrypt_apk(apk_bytes: bytes, key: str, out_path: str) -> None:
 
 
 def gitee_json(method: str, url: str, body: dict | None = None):
-    """Gitee API（JSON 请求/响应）"""
+    """Gitee API（JSON 请求/响应），防御式解析：body 为空/非对象/null 一律归为 {}"""
     data = None
     headers = {"User-Agent": "Mozilla/5.0 (DailyTask-CI)"}
     if body is not None:
@@ -83,13 +83,22 @@ def gitee_json(method: str, url: str, body: dict | None = None):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
+            raw = resp.read().decode("utf-8", "replace")
+            try:
+                parsed = json.loads(raw)
+                return resp.status, parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                # 非 JSON（如 null / 空串）：Gitee 对不存在的 tag 查 releases/tags 会返回 200 + null
+                return resp.status, {}
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")
         try:
-            return e.code, json.loads(detail)
+            parsed = json.loads(detail)
+            return e.code, parsed if isinstance(parsed, dict) else {}
         except Exception:
             return e.code, {"message": detail[:300]}
+    except urllib.error.URLError as e:
+        return -1, {"message": f"网络错误: {e.reason}"}
 
 
 def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_path: str):
@@ -100,7 +109,10 @@ def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_p
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"curl 上传附件失败: {r.stderr}")
-    resp = json.loads(r.stdout)
+    try:
+        resp = json.loads(r.stdout)
+    except Exception:
+        resp = {}
     dl = resp.get("browser_download_url")
     if not dl:
         raise RuntimeError(f"上传附件响应缺少 browser_download_url: {r.stdout[:300]}")
@@ -108,7 +120,7 @@ def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_p
 
 
 def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str, body: str) -> int:
-    """复用已存在 tag 的 release，否则创建；返回 release_id"""
+    """复用已存在 tag 的 release，否则创建；返回 release_id（带 tag 已存在兜底）"""
     tag_enc = urllib.parse.quote(tag, safe="")
     url = f"{API_BASE}/{owner}/{repo}/releases/tags/{tag_enc}?access_token={token}"
     status, data = gitee_json("GET", url)
@@ -123,9 +135,19 @@ def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str
         "prerelease": True,
     }
     status, data = gitee_json("POST", f"{API_BASE}/{owner}/{repo}/releases", create_body)
-    if status not in (200, 201) or not data.get("id"):
-        raise RuntimeError(f"创建 release 失败({status}): {data}")
-    return int(data["id"])
+    if status in (200, 201) and data.get("id"):
+        return int(data["id"])
+    # 创建失败（可能 tag 已被占用/GET 未识别）：从 releases 列表按 tag_name 捞
+    if status == -1:
+        raise RuntimeError(f"网络错误，创建 release 失败: {data}")
+    list_status, list_data = gitee_json(
+        "GET", f"{API_BASE}/{owner}/{repo}/releases?access_token={token}&per_page=100"
+    )
+    if isinstance(list_data, list):
+        for r in list_data:
+            if isinstance(r, dict) and r.get("tag_name") == tag and r.get("id"):
+                return int(r["id"])
+    raise RuntimeError(f"创建 release 失败({status}): {data}")
 
 
 def upload_data_file(owner: str, repo: str, path: str, content: str, token: str, message: str) -> None:
