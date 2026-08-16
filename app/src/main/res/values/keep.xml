@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 瘦身：lite 模块的 bg_update（778KB 大图）仅供其未使用的 UpdateDialog 组件，
+     DailyTask 无任何引用，强制在 shrinkResources 阶段丢弃 -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:discard="@mipmap/bg_update" />

@@ -158,6 +158,8 @@ android {
         exclude 'META-INF/NOTICE.md'
         exclude 'META-INF/LICENSE.md'
         exclude 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
+        // netty 各平台原生库（macOS/Windows jnilib/dll）Android 用不到，剔除减小体积
+        exclude 'META-INF/native/**'
     }
 
     compileOptions {
