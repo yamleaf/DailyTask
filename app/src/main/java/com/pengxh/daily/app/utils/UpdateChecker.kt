@@ -58,6 +58,9 @@ object UpdateChecker {
     /** 静默检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
     private const val PREF_HAS_UPDATE = "update_has_new_version"
 
+    /** 主线程 Handler：后台线程解析 APK 下载地址后切回主线程发起下载 */
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致（仅用于 .dat 版本文件加密，APK 不加密） */
     private val VERSION_KEY: ByteArray by lazy {
         "DailyTaskUpdateKey2026!".toByteArray(Charsets.UTF_8)
@@ -73,6 +76,7 @@ object UpdateChecker {
         val md5: String?,
         val force: Boolean,
         val note: String,
+        val tag: String = "",
     )
 
     /**
@@ -145,10 +149,11 @@ object UpdateChecker {
         return VersionInfo(
             v = obj.get("v").asInt,
             vn = obj.get("vn").asString,
-            apk = obj.get("apk").asString,
+            apk = obj.get("apk")?.asString ?: "",
             md5 = obj.get("md5")?.asString,
             force = obj.get("force")?.asBoolean ?: false,
             note = obj.get("note")?.asString ?: "",
+            tag = obj.get("tag")?.asString ?: "",
         )
     }
 
@@ -185,13 +190,59 @@ object UpdateChecker {
         LogFileManager.action("检查更新：发现新版本 v${info.vn}（code ${info.v} > 本地 ${BuildConfig.VERSION_CODE}，force=${info.force}）")
     }
 
-    /** DownloadManager 下载明文 APK 附件（私密仓库，URL 拼 access_token） */
+    /** 解析 APK 下载地址：优先旧版 apk 直链，否则从 release 附件动态获取（手动上传场景） */
+    private fun resolveApkUrl(info: VersionInfo): String? {
+        if (info.apk.isNotBlank()) return info.apk
+        if (info.tag.isBlank()) return null
+        return runCatching {
+            val url = "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/releases/tags/${info.tag}?access_token=$APP_TOKEN"
+            val client = OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    LogFileManager.error("检查更新：拉取 release 附件失败 HTTP ${resp.code}")
+                    return@runCatching null
+                }
+                val arr = JsonParser.parseString(resp.body?.string().orEmpty())
+                    .asJsonObject.getAsJsonArray("assets")
+                for (el in arr) {
+                    val o = el.asJsonObject
+                    val name = o.get("name")?.asString ?: ""
+                    // 跳过源码归档（.zip/.tar.gz），只取 .apk
+                    if (name.endsWith(".apk", ignoreCase = true)) {
+                        return@runCatching o.get("browser_download_url")?.asString
+                    }
+                }
+                null
+            }
+        }.getOrNull()
+    }
+
+    /** DownloadManager 下载明文 APK（私密仓库，URL 拼 access_token）。APK 地址先经 resolveApkUrl 解析 */
     private fun startDownload(context: Context, info: VersionInfo) {
+        // 下载地址需网络请求获取，放后台线程；结果回主线程发起下载与注册监听
+        Thread {
+            val baseUrl = resolveApkUrl(info)
+            if (baseUrl.isNullOrBlank()) {
+                mainHandler.post {
+                    Toast.makeText(context.applicationContext, "更新包尚未上传，请稍后重试", Toast.LENGTH_SHORT).show()
+                }
+                LogFileManager.error("检查更新：未找到 APK 附件（release=${info.tag}），可能尚未手动上传")
+                return@Thread
+            }
+            mainHandler.post { enqueueDownload(context, baseUrl, info) }
+        }.start()
+    }
+
+    private fun enqueueDownload(context: Context, baseUrl: String, info: VersionInfo) {
         val dm = context.getSystemService(DownloadManager::class.java) ?: return
         val fileName = "dailyTask-update.apk"
         // 私密仓库附件下载需带令牌；URL 若已含 ? 则用 & 拼接
-        val sep = if (info.apk.contains("?")) "&" else "?"
-        val dlUrl = info.apk + sep + "access_token=" + APP_TOKEN
+        val sep = if (baseUrl.contains("?")) "&" else "?"
+        val dlUrl = baseUrl + sep + "access_token=" + APP_TOKEN
         val request = DownloadManager.Request(Uri.parse(dlUrl))
             .setTitle("DailyTask 更新")
             .setDescription("v${info.vn} 下载中")
