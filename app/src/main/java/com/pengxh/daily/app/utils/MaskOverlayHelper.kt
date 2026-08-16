@@ -70,6 +70,17 @@ object MaskOverlayHelper {
     @Volatile
     private var keepAwakeWakeLock: PowerManager.WakeLock? = null
 
+    /**
+     * 当前蒙层是否为「真息屏不保亮黑蒙层」（keepAwake=false）。
+     * 供 MainActivity 区分：亮屏指令（EXTRA_MASK_COMMAND=0）不得摘除该蒙层——
+     * 它由 ForegroundRunningService 在 SCREEN_OFF/SCREEN_ON 时统一摘除，
+     * 避免打卡返回时刚盖的黑蒙层被 onNewIntent 附带指令竞态摘掉（真机复现 33ms 内被摘）。
+     */
+    @Volatile
+    private var noKeepAwakeMask = false
+
+    fun isNoKeepAwakeMask(): Boolean = noKeepAwakeMask
+
     private fun acquireKeepAwake(context: Context) {
         if (keepAwakeWakeLock?.isHeld == true) return
         keepAwakeWakeLock = context.acquireWakeLock(
@@ -159,6 +170,7 @@ object MaskOverlayHelper {
             try {
                 windowManager.addView(frame, params)
                 rootView = frame
+                noKeepAwakeMask = !keepAwake
                 if (keepAwake) {
                     acquireKeepAwake(appCtx)
                 }
@@ -196,6 +208,7 @@ object MaskOverlayHelper {
                 appCtx.getSystemService(WindowManager::class.java)?.removeView(view)
             }
             rootView = null
+            noKeepAwakeMask = false
             // 打卡路径调用方已持有 SCREEN_BRIGHT；用户/同步路径释放 SCREEN_DIM
             releaseKeepAwake(appCtx)
         }

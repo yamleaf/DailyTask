@@ -297,6 +297,15 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             R.id.nav_settings -> settingsFragment
             else -> return
         }
+        // 打卡结束回桌面等场景：returnAfterPunch 先 startActivity(Home) 让本 Activity 走 onStop/
+        // onSaveInstanceState，随后 _returnToApp 触发的切 Tab 若仍 commitNow，会抛
+        // "Can not perform this action after onSaveInstanceState" 崩溃（曾致进程 died、
+        // 真息屏不保亮黑蒙层未盖上）。状态已保存时 Activity 不可见，切换无意义，
+        // 回前台由 onNewIntent/onResume 恢复，此处直接跳过。
+        if (supportFragmentManager.isStateSaved) {
+            LogFileManager.writeLog("Activity 状态已保存，跳过 Tab 切换（itemId=$itemId）")
+            return
+        }
         currentTab = itemId
         ignoreNavSelection = true
         binding.bottomNavBar.bottomNav.selectedItemId = itemId
@@ -349,7 +358,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
         applyForegroundScreenFlags()
         applyMaskCommandFromIntent(intent)
-        if (MaskOverlayHelper.isShowing() && !maskViewController.isMaskVisible()) {
+        // 伪息屏蒙层（保亮）需补盖 Activity 蒙层实现「彻底黑」；真息屏不保亮蒙层
+        // 是纯 overlay 过渡层（等系统超时灭屏），补盖会导致 SCREEN_OFF 摘 overlay 后
+        // Activity 蒙层残留、下次亮屏仍是黑屏，故跳过。
+        if (MaskOverlayHelper.isShowing() &&
+            !MaskOverlayHelper.isNoKeepAwakeMask() &&
+            !maskViewController.isMaskVisible()
+        ) {
             maskViewController.showMaskView()
         }
         if (!maskViewController.isMaskVisible() && !MaskOverlayHelper.isShowing()) {
@@ -419,8 +434,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 // Activity 蒙层优先走 hideMaskView（内部 SYNC 卸 overlay）；仅 overlay 时用户解锁语义拉起界面
                 if (maskViewController.isMaskVisible()) {
                     maskViewController.hideMaskView()
-                } else {
+                } else if (!MaskOverlayHelper.isNoKeepAwakeMask()) {
                     MaskOverlayHelper.hide(this, MaskOverlayHelper.HideReason.USER_UNLOCK)
+                } else {
+                    // 真息屏不保亮黑蒙层（打卡返回场景）：不可被本指令摘除。
+                    // 该蒙层由 ForegroundRunningService 在 SCREEN_OFF/SCREEN_ON 时统一摘除；
+                    // 若在此摘除，打卡结束刚盖的黑蒙层会被 onNewIntent 附带指令竞态摘掉（真机 33ms 内复现）。
+                    LogFileManager.writeLog("亮屏指令：当前为真息屏不保亮黑蒙层，跳过摘除（由系统灭屏/亮屏统一处理）")
                 }
             }
         }
