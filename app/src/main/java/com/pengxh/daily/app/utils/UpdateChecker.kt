@@ -24,31 +24,31 @@ import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
- * 检查更新（Gitee 公开镜像仓库托管，版本文件加密公开）：
- * 1. 拉取仓库 updates/v_task.dat（公开 raw，无需令牌）——内容是 Base64(XOR(json)) 密文
+ * 检查更新（Gitee 私密仓库托管，版本文件加密 + 明文 APK 直装）：
+ * 1. 拉取私密仓库 updates/v_task.dat（API v5 raw + access_token）——内容是 Base64(XOR(json)) 密文
  * 2. XOR 解密 → Gson 解析；versionCode 对比（CI alpha 构建的时间戳版本号单调递增）
- * 3. 有新版 → 弹窗 → 下载 Release 附件（AES-256-CBC 加密的 APK 密文）
- * 4. AES 解密还原明文 APK（密钥 = SHA-256(VERSION_KEY)，IV = 16 字节 0）→ MD5 校验 → 安装
+ * 3. 有新版 → 弹窗 → 下载 Release 附件（明文 APK，URL 拼 access_token）
+ * 4. MD5 校验（可选）→ FileProvider 直接安装（不加密、无需解密）
  *
- * 与 CI 脚本 scripts/publish_gitee.py 完全对称。零新依赖（复用 OkHttp/Gson/material；
- * AES 用 Android 内置 javax.crypto）。
+ * 私密仓库 + 内置只读令牌：仓库文件与附件仅持有令牌者可访问；APK 为明文可直接安装。
+ * 与 CI 脚本 scripts/publish_gitee.py 对称（.dat 仍 XOR 加密，密钥=VERSION_KEY）。
  */
 object UpdateChecker {
 
-    // ===== Gitee 公开镜像配置（必须与 CI workflow 的 GITEE_OWNER/GITEE_REPO 一致）=====
+    // ===== Gitee 私密仓库配置（必须与 CI workflow 的 GITEE_OWNER/GITEE_REPO 一致）=====
     private const val GITEE_OWNER = "yamleaf"
-    private const val GITEE_REPO = "DailyTask"
+    private const val GITEE_REPO = "改成你的私密仓库名"
     private const val DATA_PATH = "updates/v_task.dat"
+
+    /** Gitee 只读令牌（projects 权限）：私密仓库 raw/附件均需带此令牌访问。逆向可提取，泄露影响仅限读取 */
+    private const val APP_TOKEN = "改成你的Gitee只读令牌"
 
     /** 静默检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
     private const val PREF_HAS_UPDATE = "update_has_new_version"
 
-    /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致；AES 的 APK 密钥由其 SHA-256 派生 */
+    /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致（仅用于 .dat 版本文件加密，APK 不加密） */
     private val VERSION_KEY: ByteArray by lazy {
         "DailyTaskUpdateKey2026!".toByteArray(Charsets.UTF_8)
     }
@@ -63,7 +63,6 @@ object UpdateChecker {
         val md5: String?,
         val force: Boolean,
         val note: String,
-        val enc: String?, // "aes256" = APK 附件为 AES-256-CBC 密文，需解密后安装
     )
 
     /**
@@ -103,9 +102,9 @@ object UpdateChecker {
 
     // ═══════════════════════ 拉取与解密（与 publish_gitee.py 对称）═══════════════════════
 
-    /** 公开仓库 raw，无需令牌 */
+    /** 私密仓库 raw（API v5），必须带 access_token */
     private fun fetchVersionFile(): String {
-        val url = "https://gitee.com/$GITEE_OWNER/$GITEE_REPO/raw/master/$DATA_PATH"
+        val url = "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/raw/$DATA_PATH?access_token=$APP_TOKEN"
         val client = OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
@@ -140,20 +139,7 @@ object UpdateChecker {
             md5 = obj.get("md5")?.asString,
             force = obj.get("force")?.asBoolean ?: false,
             note = obj.get("note")?.asString ?: "",
-            enc = obj.get("enc")?.asString,
         )
-    }
-
-    /** AES-256-CBC 解密（与 CI openssl enc -aes-256-cbc 兼容；PKCS5=PKCS7） */
-    private fun aesDecrypt(encBytes: ByteArray, key: ByteArray): ByteArray {
-        val keyBytes = MessageDigest.getInstance("SHA-256").digest(key)
-        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            SecretKeySpec(keyBytes, "AES"),
-            IvParameterSpec(ByteArray(16))
-        )
-        return cipher.doFinal(encBytes)
     }
 
     private fun md5Hex(data: ByteArray): String {
@@ -185,12 +171,14 @@ object UpdateChecker {
         LogFileManager.action("检查更新：发现新版本 v${info.vn}（code ${info.v} > 本地 ${BuildConfig.VERSION_CODE}，force=${info.force}）")
     }
 
-    /** DownloadManager 下载 APK 附件（aes256=密文包，否则按明文包处理） */
+    /** DownloadManager 下载明文 APK 附件（私密仓库，URL 拼 access_token） */
     private fun startDownload(context: Context, info: VersionInfo) {
         val dm = context.getSystemService(DownloadManager::class.java) ?: return
-        val isEnc = info.enc == "aes256"
-        val fileName = if (isEnc) "dailyTask-update.apk.enc" else "dailyTask-update.apk"
-        val request = DownloadManager.Request(Uri.parse(info.apk))
+        val fileName = "dailyTask-update.apk"
+        // 私密仓库附件下载需带令牌；URL 若已含 ? 则用 & 拼接
+        val sep = if (info.apk.contains("?")) "&" else "?"
+        val dlUrl = info.apk + sep + "access_token=" + APP_TOKEN
+        val request = DownloadManager.Request(Uri.parse(dlUrl))
             .setTitle("DailyTask 更新")
             .setDescription("v${info.vn} 下载中")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
@@ -199,7 +187,7 @@ object UpdateChecker {
             LogFileManager.error("检查更新：下载任务入队失败 ${e.message}")
             return
         }
-        LogFileManager.action("检查更新：开始下载新版本 v${info.vn}（downloadId=$downloadId，enc=${info.enc}）")
+        LogFileManager.action("检查更新：开始下载新版本 v${info.vn}（downloadId=$downloadId）")
         registerCompleteReceiver(context, downloadId, fileName, info)
     }
 
@@ -228,39 +216,34 @@ object UpdateChecker {
         )
     }
 
-    /** 下载完成 → （AES 解密）→ MD5 校验 → FileProvider 安装 */
+    /** 下载完成 → MD5 校验（可选）→ FileProvider 直接安装（APK 明文，无需解密） */
     private fun decryptAndInstall(context: Context, downloadId: Long, fileName: String, info: VersionInfo) {
         val dm = context.getSystemService(DownloadManager::class.java)
         if (queryStatus(dm, downloadId) != DownloadManager.STATUS_SUCCESSFUL) {
-            LogFileManager.error("检查更新：下载未成功，跳过解密安装")
+            LogFileManager.error("检查更新：下载未成功，跳过安装")
             return
         }
-        val dlFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
-        if (!dlFile.exists()) {
-            LogFileManager.error("检查更新：下载文件不存在 ${dlFile.absolutePath}")
+        val apkFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+        if (!apkFile.exists()) {
+            LogFileManager.error("检查更新：下载文件不存在 ${apkFile.absolutePath}")
             return
         }
-        val isEnc = info.enc == "aes256"
-        val apkFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "dailyTask-update.apk")
+        // 可选 MD5 校验（.dat 提供时校验，防下载损坏/替换）
         runCatching {
-            val bytes = if (isEnc) aesDecrypt(dlFile.readBytes(), VERSION_KEY) else dlFile.readBytes()
             info.md5?.let { expect ->
-                val actual = md5Hex(bytes)
+                val actual = md5Hex(apkFile.readBytes())
                 if (!actual.equals(expect, ignoreCase = true)) {
                     throw IOException("MD5 校验失败 expected=$expect actual=$actual")
                 }
             }
-            apkFile.writeBytes(bytes)
         }.onFailure { e ->
-            LogFileManager.error("检查更新：解密/校验失败 ${e.message}")
-            runCatching { dlFile.delete() }
+            LogFileManager.error("检查更新：校验失败 ${e.message}")
             runCatching { apkFile.delete() }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Toast.makeText(context.applicationContext, "更新包校验失败，请重试", Toast.LENGTH_SHORT).show()
             }
             return
         }
-        if (isEnc) runCatching { dlFile.delete() }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
