@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.util.Base64
 import android.widget.Toast
@@ -61,6 +62,10 @@ object UpdateChecker {
     /** 主线程 Handler：后台线程解析 APK 下载地址后切回主线程发起下载 */
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
+    /** 错误提示防抖：同类错误 15 秒内只弹一次，避免反复报错刷屏 */
+    private const val ERROR_TOAST_MIN_INTERVAL_MS = 15_000L
+    private var lastErrorToastTime = 0L
+
     /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致（仅用于 .dat 版本文件加密，APK 不加密） */
     private val VERSION_KEY: ByteArray by lazy {
         "DailyTaskUpdateKey2026!".toByteArray(Charsets.UTF_8)
@@ -108,7 +113,9 @@ object UpdateChecker {
                 }
             } ?: run {
                 // 拉取/解析失败：保持原红点状态，不误清
-                if (!silent && showNoUpdateToast) toast(context, "检查更新失败，请稍后重试")
+                if (!silent && showNoUpdateToast) {
+                    showErrorOnce(context, "检查更新失败：无法获取版本信息，请稍后重试")
+                }
                 false
             }
         }
@@ -227,9 +234,7 @@ object UpdateChecker {
         Thread {
             val baseUrl = resolveApkUrl(info)
             if (baseUrl.isNullOrBlank()) {
-                mainHandler.post {
-                    Toast.makeText(context.applicationContext, "更新包尚未上传，请稍后重试", Toast.LENGTH_SHORT).show()
-                }
+                showErrorOnce(context, "更新包尚未上传：Gitee Release『${info.tag}』无 APK 附件，请发布者上传对应版本后重试")
                 LogFileManager.error("检查更新：未找到 APK 附件（release=${info.tag}），可能尚未手动上传")
                 return@Thread
             }
@@ -304,9 +309,17 @@ object UpdateChecker {
         }.onFailure { e ->
             LogFileManager.error("检查更新：校验失败 ${e.message}")
             runCatching { apkFile.delete() }
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                Toast.makeText(context.applicationContext, "更新包校验失败，请重试", Toast.LENGTH_SHORT).show()
-            }
+            showErrorOnce(context, "更新包校验失败（MD5 不匹配）：下载可能损坏，请重新下载")
+            return
+        }
+        // 版本一致性校验（手动上传场景）：安装包 versionCode 必须与 .dat 发布版本一致。
+        // 不一致说明 Gitee Release 上传了错误版本的 APK——拦截并明确报错，
+        // 避免装上旧版导致「每次检查都提示更新」的反复报错循环。
+        val apkVc = apkVersionCode(context, apkFile.absolutePath)
+        if (apkVc != null && apkVc != info.v.toLong()) {
+            LogFileManager.error("检查更新：安装包版本不一致 apk=$apkVc 发布=${info.v}（release=${info.tag}）")
+            runCatching { apkFile.delete() }
+            showErrorOnce(context, "更新包版本不一致（$apkVc ≠ ${info.v}）：请确认 Gitee Release『${info.tag}』上传的 APK 为对应构建产物")
             return
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)
@@ -320,6 +333,26 @@ object UpdateChecker {
         }.onFailure { e ->
             LogFileManager.error("检查更新：跳转安装页失败 ${e.message}")
         }
+    }
+
+    /** 错误提示（防抖）：15 秒内只弹一次，避免反复报错刷屏 */
+    private fun showErrorOnce(context: Context, msg: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastErrorToastTime < ERROR_TOAST_MIN_INTERVAL_MS) return
+        lastErrorToastTime = now
+        mainHandler.post {
+            Toast.makeText(context.applicationContext, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 解析本地 APK 文件的 versionCode（下载后安装前校验用；解析失败返回 null 则不拦截） */
+    @Suppress("DEPRECATION")
+    private fun apkVersionCode(context: Context, apkPath: String): Long? {
+        return runCatching {
+            val info = context.packageManager.getPackageArchiveInfo(apkPath, 0) ?: return null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+            else info.versionCode.toLong()
+        }.getOrNull()
     }
 
     private fun queryStatus(dm: DownloadManager?, downloadId: Long): Int {
