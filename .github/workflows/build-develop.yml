@@ -150,11 +150,12 @@ jobs:
           echo "version_name=$VN" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
-      # ===== 发布到 Gitee 私密仓库：创建 Release + 推送 .dat 版本信息（APK 手动上传） =====
+      # ===== 发布到 Gitee 私密仓库（git 单提交重建：每次发版直接丢弃历史） =====
       # gitee_version 步骤已 dump 出 APK 的 versionCode/versionName，.dat 据此写入；
-      # APK 因大文件上传极慢改为手动上传，CI 仅发布轻量版本信息并提示去 Release 页上传。
+      # publish_gitee.py 内部 clone(--depth 1) → 替换 updates/dailyTask.apk + .dat →
+      # commit → force push HEAD:master，仓库历史恒为 1 个 commit，容量永不累积。
       # 需配置 Secrets：GITEE_TOKEN（私密仓库写权限令牌）、VERSION_KEY（.dat 加密，与 App 内置一致）。
-      - name: Publish version info to Gitee Release (APK uploaded manually)
+      - name: Publish to Gitee (git single-commit, APK + version file)
         if: github.event_name == 'workflow_dispatch' && env.GITEE_TOKEN != ''
         run: |
           python3 scripts/publish_gitee.py \
@@ -162,7 +163,6 @@ jobs:
             --version-name "${{ steps.gitee_version.outputs.version_name }}" \
             --apk "${{ steps.gitee_version.outputs.apk }}" \
             --tag "dailyTask-${{ env.BUILD_NUMBER }}" \
-            --ref "${{ github.sha }}" \
             --note "${{ inputs.note }}" \
             --force "${{ inputs.force == 'true' && '1' || '0' }}" \
             --owner "$GITEE_OWNER" \
