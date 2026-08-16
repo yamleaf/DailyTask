@@ -172,6 +172,19 @@ def download_asset(url: str, dest: str, total: int = 0) -> None:
     raise RuntimeError(f"所有下载源均失败：{last_err}")
 
 
+def gitee_max_release_code() -> int:
+    """Gitee 已有 release 中最大的 dt-{code} 版本号（无则 0），用于判断是否有新版本需同步"""
+    r = requests.get(f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases",
+                     params={"access_token": GITEE_TOKEN, "per_page": 100}, timeout=60)
+    rels = _json(r)
+    best = 0
+    for rel in rels if isinstance(rels, list) else []:
+        m = re.match(r"dt-(\d+)", rel.get("tag_name", "") or "")
+        if m:
+            best = max(best, int(m.group(1)))
+    return best
+
+
 def gitee_get_or_create_release(tag: str, name: str, body: str) -> int:
     url = f"{GITEE_API}/{GITEE_OWNER}/{GITEE_REPO}/releases/tags/{urllib.parse.quote(tag, safe='')}"
     r = requests.get(url, params={"access_token": GITEE_TOKEN}, timeout=60)
@@ -297,6 +310,13 @@ def main() -> int:
     note = nm.group(1).strip() if nm else "常规更新"
     log(f"GitHub release : {tag}（v{version_code} / {version_name}）")
     log(f"update note    : {note}")
+
+    # 1.5) 版本去重：GitHub 最新版本号 ≤ Gitee 已同步的最新版本号 → 无更新，跳过
+    gitee_code = gitee_max_release_code()
+    if version_code <= gitee_code:
+        log(f"无新版本：GitHub dt-{version_code} 不高于 Gitee 已同步的 dt-{gitee_code}，跳过发布")
+        return 0
+    log(f"检测到新版本：Gitee 最新 dt-{gitee_code} → GitHub dt-{version_code}，开始同步")
 
     # 2) 找并下载资产（.7z 优先，兼容 .apk）
     asset = next((a for a in rel.get("assets", [])
