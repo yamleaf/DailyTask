@@ -182,12 +182,27 @@ def main() -> int:
     apk_bytes = open(args.apk, "rb").read()
     apk_md5 = md5_of(apk_bytes)
 
+    # 0) 校验 release 关联的 commit 是否已同步到 Gitee（GitHub→Gitee 镜像可能滞后）。
+    #    已同步 → 精确关联本次构建 SHA；未同步 → 退化为 Gitee 默认分支名，
+    #    避免「创建标签失败」400（Gitee 无法在仓库不存在的 commit 上建 tag）
+    ref = args.ref
+    check_status, _ = gitee_json(
+        "GET", f"{API_BASE}/{args.owner}/{args.repo}/commits/{ref}?access_token={args.token}"
+    )
+    if check_status != 200:
+        repo_status, repo_info = gitee_json(
+            "GET", f"{API_BASE}/{args.owner}/{args.repo}?access_token={args.token}"
+        )
+        fallback = repo_info.get("default_branch", "master") if repo_status == 200 else "master"
+        print(f"警告：commit {ref[:8]} 尚未同步到 Gitee（镜像滞后），release 关联退化为分支 {fallback}")
+        ref = fallback
+
     # 1) 创建/复用 Gitee Release 并上传明文 APK（私密仓库：附件仅持令牌者可下载）
     release_id = get_or_create_release(
         args.owner, args.repo, args.token, args.tag,
         name=f"DailyTask v{args.version_name}",
         body=args.note,
-        ref=args.ref,
+        ref=ref,
     )
     attach_name = f"dailyTask_{args.tag}.apk"
     file_id, _browser_url = upload_attachment(
