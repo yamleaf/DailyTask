@@ -3,14 +3,15 @@
 """
 Gitee 发布脚本（GitHub 手动触发编译时同步到 Gitee 私密仓库 Release）。
 
-职责：
-  1. 把 release APK（明文，不加密）上传到 Gitee 私密仓库的 Release 附件——
-     私密仓库 + 只读令牌：仅持令牌者可下载，App 内置只读令牌拼 access_token 拉取
+职责（APK 手动上传，其余自动）：
+  1. 创建/复用 Gitee 私密仓库 Release（tag + note），API 调用很快
   2. 生成版本元数据 JSON，用「XOR + Base64」简单加密成 .dat（App 内置同密钥解密）
      并推到仓库 updates/v_task.dat（App 用 API v5 raw + access_token 拉取）
-  3. .dat 里 apk 字段 = API 附件下载端点
-     （/api/v5/repos/{owner}/{repo}/releases/{id}/attach_files/{file_id}/download），
-     App 下载时拼 access_token；下载后为明文 APK，直接安装（MD5 校验可选）
+  3. .dat 里不再含 apk 直链，改为记录 release tag；APK 由用户手动在
+     Gitee Release 页面上传（建议用 CI 构建产物 artifact，保证 versionCode/MD5 一致），
+     App 检查更新时从 release 附件动态获取 .apk 下载地址
+  —— 原因：Gitee/GitCode 大文件附件上传均极慢（实测 6.6MB 卡数分钟~437s），
+     故体积大的 APK 改为手动上传，轻量的版本信息仍自动发布
 
 加解密约定（App 侧 UpdateChecker.kt 必须与此对称）：
   - .dat：Base64(XOR(json, key))，存储文本为 cipher
@@ -78,28 +79,6 @@ def gitee_json(method: str, url: str, body: dict | None = None):
             return e.code, {"message": detail[:300]}
     except urllib.error.URLError as e:
         return -1, {"message": f"网络错误: {e.reason}"}
-
-
-def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_path: str, attach_name: str | None = None):
-    """multipart 上传附件（curl），返回 (file_id, browser_download_url)。单次最长 10 分钟，失败直接报错不重试"""
-    url = f"{API_BASE}/{owner}/{repo}/releases/{release_id}/attach_files"
-    cmd = ["curl", "-sS", "-X", "POST", url,
-           # 单次最大 10 分钟；失败即报错、不重试（Gitee 持续慢时重试无意义且拖时长）
-           "--max-time", "600",
-           "-F", f"access_token={token}",
-           "-F", f"file=@{file_path};filename={attach_name}" if attach_name else f"file=@{file_path}"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"curl 上传附件失败（超时/网络，未重试）: {r.stderr or 'curl exit ' + str(r.returncode)}")
-    try:
-        resp = json.loads(r.stdout)
-    except Exception:
-        resp = {}
-    file_id = resp.get("id")
-    dl = resp.get("browser_download_url")
-    if not dl:
-        raise RuntimeError(f"上传附件响应缺少 browser_download_url: {r.stdout[:300]}")
-    return file_id, dl
 
 
 def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str, body: str, ref: str = "master") -> int:
@@ -197,29 +176,25 @@ def main() -> int:
         print(f"警告：commit {ref[:8]} 尚未同步到 Gitee（镜像滞后），release 关联退化为分支 {fallback}")
         ref = fallback
 
-    # 1) 创建/复用 Gitee Release 并上传明文 APK（私密仓库：附件仅持令牌者可下载）
+    # 1) 创建/复用 Gitee Release（不自动上传 APK：大文件附件上传极慢，改为手动）
     release_id = get_or_create_release(
         args.owner, args.repo, args.token, args.tag,
         name=f"DailyTask v{args.version_name}",
         body=args.note,
         ref=ref,
     )
-    attach_name = f"dailyTask_{args.tag}.apk"
-    file_id, _browser_url = upload_attachment(
-        args.owner, args.repo, release_id, args.token, args.apk, attach_name=attach_name
-    )
-    # App 侧下载 URL：API 附件下载端点（私密仓库需拼 access_token，App 内置令牌）
-    dl_url = f"{API_BASE}/{args.owner}/{args.repo}/releases/{release_id}/attach_files/{file_id}/download"
-    print(f"明文 APK 已上传 Release（id={release_id}）\n  附件: {attach_name}（{os.path.getsize(args.apk)} bytes）\n  API 下载: {dl_url}")
+    print(f"Release 已创建/复用（id={release_id}, tag={args.tag}）")
 
-    # 2) 生成版本元数据并加密成 .dat（enc 字段省略=明文 APK，App 下载后直接安装）
+    # 2) 生成版本元数据并加密成 .dat
+    #    apk 改为手动上传：.dat 不再含 apk 直链，改记 release tag，
+    #    App 从 release 附件动态获取 .apk 下载地址（兼容旧 apk 直链：有则优先用）
     meta = {
         "v": int(args.version_code),
         "vn": args.version_name,
-        "apk": dl_url,
         "md5": apk_md5,
         "force": args.force.lower() in ("1", "true", "yes"),
         "note": args.note,
+        "tag": args.tag,
     }
     plain = json.dumps(meta, ensure_ascii=False).encode("utf-8")
     cipher = base64.b64encode(xor_encrypt(plain, args.key.encode("utf-8"))).decode("ascii")
@@ -231,14 +206,19 @@ def main() -> int:
     )
 
     print("=" * 56)
-    print("发布成功（Gitee 私密仓库）")
+    print("版本信息发布成功（APK 需手动上传）")
     print(f"  versionCode : {meta['v']}")
     print(f"  versionName : {meta['vn']}")
     print(f"  Release tag : {args.tag}")
-    print(f"  APK MD5     : {apk_md5}")
+    print(f"  APK MD5     : {apk_md5}（CI 构建产物，手动上传请使用同名 artifact 以保证一致）")
     print(f"  force       : {meta['force']}")
     print(f"  .dat 拉取   : {API_BASE}/{args.owner}/{args.repo}/raw/updates/v_task.dat（App 拼 token）")
     print("  说明        : %s" % meta["note"])
+    print("")
+    print("⚠ 请在 Gitee 仓库 Release 页面手动上传 APK：")
+    print(f"   Release 页 : dailyTask-{args.tag}")
+    print("   建议直接用 CI 构建产物 artifact『dailyTask_alpha_release』里的 APK，")
+    print("   以保证 versionCode / MD5 与本版本信息一致。")
     print("=" * 56)
     return 0
 
