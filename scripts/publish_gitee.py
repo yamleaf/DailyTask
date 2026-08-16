@@ -102,15 +102,15 @@ def gitee_json(method: str, url: str, body: dict | None = None):
 
 
 def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_path: str):
-    """multipart 上传附件（curl），返回 browser_download_url。带超时+重试防止 Gitee 偶发卡死"""
+    """multipart 上传附件（curl），返回 browser_download_url。单次最长 10 分钟，失败直接报错不重试"""
     url = f"{API_BASE}/{owner}/{repo}/releases/{release_id}/attach_files"
     cmd = ["curl", "-sS", "-X", "POST", url,
-           # 单次最大 5 分钟；失败重试 3 次，间隔 5s；所有错误（含 5xx、网络）都重试
-           "--max-time", "300", "--retry", "3", "--retry-delay", "5", "--retry-all-errors",
+           # 单次最大 10 分钟；失败即报错、不重试（Gitee 持续慢时重试无意义且拖时长）
+           "--max-time", "600",
            "-F", f"access_token={token}", "-F", f"file=@{file_path}"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"curl 上传附件失败（已重试）: {r.stderr or 'curl exit ' + str(r.returncode)}")
+        raise RuntimeError(f"curl 上传附件失败（超时/网络，未重试）: {r.stderr or 'curl exit ' + str(r.returncode)}")
     try:
         resp = json.loads(r.stdout)
     except Exception:
