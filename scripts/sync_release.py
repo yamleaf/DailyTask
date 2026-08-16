@@ -14,6 +14,11 @@ Gitee Go 同步脚本：拉 GitHub 最新 release → 解压 7z → 传 Gitee re
   GITHUB_TOKEN         可选：GitHub API 额度提升
   VERSION_KEY          可选：.dat 加密密钥（默认 DailyTaskUpdateKey2026!，与 App 内置一致）
   KEEP_DAYS            可选：清理超过 N 天的旧 Gitee release（默认 180）
+  GH_PROXY             可选：GitHub 资产下载镜像前缀（默认 https://gh-proxy.com/；置空则直连）
+
+国内镜像策略（统一走镜像源）：
+  pip 依赖    → 清华 TUNA（流水线命令已指定 -i https://pypi.tuna.tsinghua.edu.cn/simple）
+  GitHub 资产 → GH_PROXY 镜像（gh-proxy.com，实测可用；失败自动退直连）
 
 GitHub Release 约定（workflow build-develop.yml 生成）：
   tag = dt-{versionCode}；body 含 "- versionName: `xxx`" 和 "- update note: xxx"
@@ -31,12 +36,12 @@ import urllib.parse
 try:
     import requests
 except ImportError:
-    print("错误：需要 requests（pip install requests）")
+    print("错误：需要 requests（国内镜像安装：pip install -i https://pypi.tuna.tsinghua.edu.cn/simple requests）")
     sys.exit(1)
 try:
     import py7zr
 except ImportError:
-    print("错误：需要 py7zr（pip install py7zr，用于解压加密 7z）")
+    print("错误：需要 py7zr（国内镜像安装：pip install -i https://pypi.tuna.tsinghua.edu.cn/simple py7zr，用于解压加密 7z）")
     sys.exit(1)
 
 # 关键：Gitee Go 管道下 stdout 默认块缓冲，print 不实时刷出会让人以为"卡死"。
@@ -74,6 +79,10 @@ ENC_PASS = os.environ.get("APK_ENCRYPT_PASSWORD", "")
 VERSION_KEY = os.environ.get("VERSION_KEY", "DailyTaskUpdateKey2026!").encode("utf-8")
 KEEP_DAYS = int(os.environ.get("KEEP_DAYS", "180"))
 KEEP_LATEST = 5  # 无论如何保留最新 5 个 release（兜底）
+# 下载镜像：GitHub 资产 CDN（objects.githubusercontent.com）国内访问慢/超时，
+# 统一走镜像源。实测 https://gh-proxy.com/ 可用（2026-08 国内直连测试）。
+# GH_PROXY 环境变量可覆盖（设为空字符串则直连）。
+GH_PROXY = os.environ.get("GH_PROXY", "https://gh-proxy.com/")
 
 
 def gh_headers():
@@ -99,12 +108,12 @@ def fetch_gh_latest_release() -> dict:
     raise RuntimeError(f"GitHub 无可用 release（latest HTTP {r.status_code}）")
 
 
-def download_asset(url: str, dest: str, total: int = 0) -> None:
-    """流式下载资产，每 2MB 打一次进度（避免长下载无输出被误判卡死）"""
+def _stream_download(src: str, dest: str, total: int = 0) -> None:
+    """单源流式下载：每 2MB 打进度；连接超时 10s、读超时 60s（避免干等）"""
     t0 = time.time()
-    with requests.get(url, headers=gh_headers(), stream=True, timeout=300) as r:
+    with requests.get(src, headers=gh_headers(), stream=True, timeout=(10, 60)) as r:
         if r.status_code != 200:
-            raise RuntimeError(f"下载资产失败 HTTP {r.status_code}")
+            raise RuntimeError(f"HTTP {r.status_code}")
         got = 0
         last_report = 0
         with open(dest, "wb") as f:
@@ -116,6 +125,29 @@ def download_asset(url: str, dest: str, total: int = 0) -> None:
                     pct = f" / {total // 1024}KB" if total else ""
                     log(f"  下载中… {got // 1024}KB{pct}（{got / 1024 / 1024 / max(time.time() - t0, 0.01):.1f}MB/s）")
         log(f"  下载完成：{got // 1024}KB，耗时 {time.time() - t0:.1f}s")
+
+
+def download_asset(url: str, dest: str, total: int = 0) -> None:
+    """下载资产：统一走镜像源（GH_PROXY），失败自动退直连"""
+    candidates = []
+    if GH_PROXY:
+        candidates.append(("镜像 " + GH_PROXY, GH_PROXY.rstrip("/") + "/" + url))
+    candidates.append(("直连", url))
+    last_err = None
+    for label, src in candidates:
+        log(f"  下载源：{label}")
+        try:
+            _stream_download(src, dest, total)
+            return
+        except Exception as e:
+            last_err = e
+            log(f"  {label} 失败：{type(e).__name__}: {str(e)[:120]}，切换下一源")
+            if os.path.exists(dest):
+                try:
+                    os.remove(dest)
+                except Exception:
+                    pass
+    raise RuntimeError(f"所有下载源均失败：{last_err}")
 
 
 def gitee_get_or_create_release(tag: str, name: str, body: str) -> int:

@@ -13,6 +13,11 @@
 #   GITHUB_TOKEN         GitHub 令牌（可选，提升 API 额度）
 #   VERSION_KEY          .dat 加密密钥（可选，默认与 App 内置一致）
 #   KEEP_DAYS            旧 release 清理阈值天（可选，默认 180）
+#   GH_PROXY             GitHub 资产下载镜像前缀（可选，默认 https://gh-proxy.com/；置空则直连）
+#
+# 镜像策略（国内统一走镜像源）：
+#   pip 依赖       → 清华 TUNA（下方命令已显式指定）
+#   GitHub 资产    → GH_PROXY 镜像（gh-proxy.com，脚本内实现，失败自动退直连）
 #
 # 定时：每 6 小时触发一次；也可在 Gitee 流水线页面手动点「立即执行」
 version: '1.0'
@@ -24,6 +29,7 @@ variables:
     - MY_GITEE_TOKEN
     - APK_ENCRYPT_PASSWORD
     - GITHUB_TOKEN
+    - GH_PROXY
 triggers:
   trigger: auto
   schedule:
