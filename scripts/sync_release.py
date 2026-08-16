@@ -45,8 +45,11 @@ GITEE_API = "https://gitee.com/api/v5/repos"
 GH_REPO = os.environ.get("GH_REPO", "yamleaf/DailyTask")
 GITEE_OWNER = os.environ.get("GITEE_OWNER", "yamleaf")
 GITEE_REPO = os.environ.get("GITEE_REPO", "DailyTaskUpdate")
-# Gitee Go 限制变量名不能以 GITEE_ 开头，用 MY_GITEE_TOKEN
-GITEE_TOKEN = os.environ.get("MY_GITEE_TOKEN", "")
+# Gitee Go 限制变量名不能以 GITEE_ 开头；多候选名容错，任配一个即可
+GITEE_TOKEN = (os.environ.get("MY_GITEE_TOKEN")
+               or os.environ.get("PUBLISH_TOKEN")
+               or os.environ.get("API_TOKEN")
+               or "")
 GH_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 ENC_PASS = os.environ.get("APK_ENCRYPT_PASSWORD", "")
 VERSION_KEY = os.environ.get("VERSION_KEY", "DailyTaskUpdateKey2026!").encode("utf-8")
