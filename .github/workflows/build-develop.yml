@@ -123,55 +123,14 @@ jobs:
           done
           ./gradlew --version
 
-      - name: Build debug APK (alpha)
-        run: ./gradlew assembleDebug --no-daemon
-
       - name: Build release APK (alpha)
         run: ./gradlew assembleRelease --no-daemon
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: dailyTask_alpha_debug
-          path: app/build/outputs/apk/debug/*.apk
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: dailyTask_alpha_release
           path: app/build/outputs/apk/release/*.apk
-
-      # ===== 手动触发才执行：debug/release 两个 APK 分别用 7z AES-256 加密压缩并推到 GitHub Release =====
-      # 密码从 Secret APK_ENCRYPT_PASSWORD 读取（未配置时此段整体跳过，不影响 push 自动构建）。
-      # -mhe=on 同时加密文件头，不解密连文件名都看不到。
-      - name: Encrypt & compress APKs (7z AES-256)
-        if: github.event_name == 'workflow_dispatch' && env.APK_ENCRYPT_PASSWORD != ''
-        env:
-          APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y p7zip-full
-          mkdir -p release tmp_debug tmp_release
-          cp app/build/outputs/apk/debug/*.apk tmp_debug/
-          cp app/build/outputs/apk/release/*.apk tmp_release/
-          # debug / release 分开压缩加密，便于只下载需要的包
-          cd tmp_debug && 7z a -t7z -p"$APK_ENCRYPT_PASSWORD" -mhe=on -mx=9 ../release/dailyTask_debug_${{ github.sha }}.7z *.apk && cd ..
-          cd tmp_release && 7z a -t7z -p"$APK_ENCRYPT_PASSWORD" -mhe=on -mx=9 ../release/dailyTask_release_${{ github.sha }}.7z *.apk && cd ..
-          rm -rf tmp_debug tmp_release
-          ls -la release
-
-      - name: Publish encrypted APKs to GitHub Release
-        if: github.event_name == 'workflow_dispatch' && env.APK_ENCRYPT_PASSWORD != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk-${{ env.BUILD_NUMBER }}
-          name: DailyTask alpha 加密 APK（build #${{ env.BUILD_NUMBER }}）
-          body: |
-            加密压缩包：7z AES-256（-mhe=on），密码见仓库 Secret `APK_ENCRYPT_PASSWORD`。
-            debug 与 release 已分开压缩：`dailyTask_debug_<sha>.7z` / `dailyTask_release_<sha>.7z`。
-            commit: ${{ github.sha }}
-          files: release/*.7z
-          draft: true
 
       # ===== 手动触发才执行：同步到 Gitee 公开镜像 Release（AES 加密 APK + 加密版本文件） =====
       # App「检查更新」从 Gitee 拉取 .dat（XOR 密文）→ 下载 AES 密文 APK → 内置密钥解密安装。
@@ -198,6 +157,7 @@ jobs:
             --version-name "${{ steps.gitee_version.outputs.version_name }}" \
             --apk "${{ steps.gitee_version.outputs.apk }}" \
             --tag "dailyTask-${{ env.BUILD_NUMBER }}" \
+            --ref "${{ github.sha }}" \
             --note "${{ inputs.note }}" \
             --force "${{ inputs.force == 'true' && '1' || '0' }}" \
             --owner "$GITEE_OWNER" \

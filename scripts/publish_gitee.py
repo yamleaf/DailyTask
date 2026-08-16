@@ -102,13 +102,15 @@ def gitee_json(method: str, url: str, body: dict | None = None):
 
 
 def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_path: str):
-    """multipart 上传附件（curl），返回 browser_download_url"""
+    """multipart 上传附件（curl），返回 browser_download_url。带超时+重试防止 Gitee 偶发卡死"""
     url = f"{API_BASE}/{owner}/{repo}/releases/{release_id}/attach_files"
     cmd = ["curl", "-sS", "-X", "POST", url,
+           # 单次最大 5 分钟；失败重试 3 次，间隔 5s；所有错误（含 5xx、网络）都重试
+           "--max-time", "300", "--retry", "3", "--retry-delay", "5", "--retry-all-errors",
            "-F", f"access_token={token}", "-F", f"file=@{file_path}"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"curl 上传附件失败: {r.stderr}")
+        raise RuntimeError(f"curl 上传附件失败（已重试）: {r.stderr or 'curl exit ' + str(r.returncode)}")
     try:
         resp = json.loads(r.stdout)
     except Exception:
@@ -119,8 +121,9 @@ def upload_attachment(owner: str, repo: str, release_id: int, token: str, file_p
     return dl
 
 
-def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str, body: str) -> int:
-    """复用已存在 tag 的 release，否则创建；返回 release_id（带 tag 已存在兜底）"""
+def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str, body: str, ref: str = "master") -> int:
+    """复用已存在 tag 的 release，否则创建；返回 release_id（带 tag 已存在兜底）。
+    ref 为 release 关联的 commit SHA（保证 release 指向本次构建的真实代码，而非镜像仓库默认分支的最新提交）"""
     tag_enc = urllib.parse.quote(tag, safe="")
     url = f"{API_BASE}/{owner}/{repo}/releases/tags/{tag_enc}?access_token={token}"
     status, data = gitee_json("GET", url)
@@ -131,7 +134,7 @@ def get_or_create_release(owner: str, repo: str, token: str, tag: str, name: str
         "tag_name": tag,
         "name": name,
         "body": body,
-        "target_commitish": "master",
+        "target_commitish": ref,
         "prerelease": True,
     }
     status, data = gitee_json("POST", f"{API_BASE}/{owner}/{repo}/releases", create_body)
@@ -179,6 +182,7 @@ def main() -> int:
     ap.add_argument("--version-name", required=True, help="versionName")
     ap.add_argument("--apk", required=True, help="本地 release APK 路径")
     ap.add_argument("--tag", required=True, help="Gitee Release tag（如 dailyTask-123）")
+    ap.add_argument("--ref", default="master", help="release 关联的 commit SHA（保证指向本次构建代码）")
     ap.add_argument("--note", default="常规更新", help="更新说明")
     ap.add_argument("--force", default="0", help="1/true=强制更新")
     ap.add_argument("--owner", default=os.environ.get("GITEE_OWNER", ""))
@@ -207,6 +211,7 @@ def main() -> int:
         args.owner, args.repo, args.token, args.tag,
         name=f"DailyTask v{args.version_name}",
         body=args.note,
+        ref=args.ref,
     )
     dl_url = upload_attachment(args.owner, args.repo, release_id, args.token, enc_path)
     print(f"加密包已上传 Release（id={release_id}）\n  直链: {dl_url}")
