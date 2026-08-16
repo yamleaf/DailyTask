@@ -1,0 +1,43 @@
+# Gitee Go 流水线：同步 GitHub Release 到 Gitee（国内执行，避开 GitHub Actions 跨境上传慢）
+#
+# 用途（用户方案）：
+#   1. 拉取 GitHub DailyTask 最新 release（加密 7z）
+#   2. 解压 → 传明文 APK 到 Gitee 私密仓库 release
+#   3. 生成 .dat 版本信息（XOR 加密）推 Gitee 仓库 updates/v_task.dat
+#   4. 清理超过 KEEP_DAYS 天的旧 Gitee release，释放附件额度
+# App 端检查更新：拉 .dat → 从 Gitee release 附件下载 APK（.dat 的 apk 字段=附件下载端点）
+#
+# 配置（Gitee 平台 → 流水线/变量管理）：
+#   GITEE_TOKEN          Gitee 写权限私人令牌（必填，建议密文）
+#   APK_ENCRYPT_PASSWORD 7z 解压密码（必填，与 GitHub Secret 一致，建议密文）
+#   GITHUB_TOKEN         GitHub 令牌（可选，提升 API 额度）
+#   VERSION_KEY          .dat 加密密钥（可选，默认与 App 内置一致）
+#   KEEP_DAYS            旧 release 清理阈值天（可选，默认 180）
+#
+# 定时：每 6 小时触发一次；也可在 Gitee 流水线页面手动点「立即执行」
+version: '1.0'
+name: sync-github-release-to-gitee
+displayName: 同步GitHub Release到Gitee
+triggers:
+  trigger: auto
+  schedule:
+    # Quartz cron：秒 分 时 日 月 周 ? 年 —— 每 6 小时的第 30 分执行
+    - cron: '0 30 */6 * * ? *'
+stages:
+  - name: sync-stage
+    displayName: 同步Release
+    strategy: naturally
+    trigger: auto
+    executor: [ ]
+    steps:
+      - step: build@python
+        name: run-sync
+        displayName: 执行同步脚本
+        pythonVersion: '3.11'
+        commands:
+          - pip install requests py7zr -q
+          - python3 scripts/sync_release.py
+        caches: [ ]
+        notify: [ ]
+        strategy:
+          retry: '0'

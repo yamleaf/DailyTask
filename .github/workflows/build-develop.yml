@@ -145,6 +145,21 @@ jobs:
           echo "version_name=$VN" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
 
+      # ===== 手动触发：APK 加密为 7z（AES-256，密码=APK_ENCRYPT_PASSWORD）供 Gitee Go 拉取解压 =====
+      # GitHub 仓库公开 → release 资产公开，加密防直接下载；Gitee 私有仓库存明文 APK。
+      - name: Encrypt APK (7z AES-256)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          pip install py7zr -q
+          python3 - <<'EOF'
+          import glob, os, py7zr
+          apk = glob.glob('app/build/outputs/apk/release/*.apk')[0]
+          out = 'dailyTask_release_%s.7z' % os.path.basename(apk)
+          with py7zr.SevenZipFile(out, 'w', password=os.environ['APK_ENCRYPT_PASSWORD']) as z:
+              z.write(apk, os.path.basename(apk))
+          print('加密包:', out)
+          EOF
+
       # ===== 发版（上传 APK + .dat 到 Gitee）已改为本地执行 =====
       # 原因：GitHub CI（美国）跨境上传 Gitee（国内）极慢（实测 >9min），
       # 本地跑 scripts/publish_local.sh 约 30s（clone 4s + push 14s + API 几秒）。
@@ -186,16 +201,16 @@ jobs:
             echo "GITEOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release draft
+      - name: Create GitHub Release (encrypted APK, for Gitee Go sync)
         if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: apk-${{ env.BUILD_NUMBER }}
+          # tag 用 versionCode，Gitee Go 据此解析版本号；body 含 versionName/note（Gitee Go 正则提取）
+          tag_name: dt-${{ steps.gitee_version.outputs.version_code }}
           name: DailyTask Alpha ${{ steps.gh_release_info.outputs.title_date }}
           body: ${{ steps.gh_release_info.outputs.body }}
-          draft: true
           files: |
-            app/build/outputs/apk/release/*.apk
+            dailyTask_release_*.7z
 
       # 自动构建成功：把当前时间戳写入仓库文件 last_auto_build（rate-check 据此限流）。
       # commit 带 [ci skip] 不会再次触发本 workflow，避免递归。
