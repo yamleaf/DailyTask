@@ -56,7 +56,7 @@ object UpdateChecker {
         }
     }
 
-    /** 静默检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
+    /** 检查发现新版本时写入；设置页据此显示「检查更新」红点（安装新版本后下次检查自动清除） */
     private const val PREF_HAS_UPDATE = "update_has_new_version"
 
     /** 预期安装版本（下载校验通过后写入）：安装完成（任意途径）后与真实安装版本比对，不一致则明确报错 */
@@ -80,7 +80,7 @@ object UpdateChecker {
         "DailyTaskUpdateKey2026!".toByteArray(Charsets.UTF_8)
     }
 
-    /** 设置页「检查更新」红点状态（由每日静默检查/手动检查更新） */
+    /** 设置页「检查更新」红点状态（由用户手动检查更新时写入） */
     fun hasPendingUpdate(): Boolean = SaveKeyValues.loadBoolean(PREF_HAS_UPDATE, false)
 
     data class VersionInfo(
