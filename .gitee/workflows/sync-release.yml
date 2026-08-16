@@ -18,6 +18,12 @@
 version: '1.0'
 name: sync-github-release-to-gitee
 displayName: 同步GitHub Release到Gitee
+# Gitee Go 变量须在此显式声明才会注入到 commands 环境（值在平台变量管理配置）
+variables:
+  global:
+    - MY_GITEE_TOKEN
+    - APK_ENCRYPT_PASSWORD
+    - GITHUB_TOKEN
 triggers:
   trigger: auto
   schedule:
