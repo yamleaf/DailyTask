@@ -248,6 +248,10 @@ object RuntimeStateApplier {
                 // 配置已变更：失效全量快照缓存，否则控制端 ACK 后触发的 forceRefreshSnapshot
                 // （buildJson 命中 30s TTL 缓存）会返回变更前的旧快照，把 UI 刷新回旧值
                 RemoteSnapshot.invalidateCache()
+                // 增量推送 settings/runtime/statuses 区块：闭环「ACK → 增量推送 → 控制端刷新」，
+                // 让控制端本地缓存即时更新（无需等待 QUERY 往返）；远程控制开关字段会影响
+                // runtime/statuses（连接/绑定状态），一并推送
+                MqttAgentService.pushSections(setOf("settings", "runtime", "statuses"))
             }
             MqttAgentService.publishAck(packet.rid, ackMsg)
             
