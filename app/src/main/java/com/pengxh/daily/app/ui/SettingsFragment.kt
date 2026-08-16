@@ -87,6 +87,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.google.gson.JsonParser
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 /**
  * 设置 Tab：外观 / 打卡设置 / 系统权限 / 伪息屏 / 高级功能 / 关于。
@@ -423,17 +427,52 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx.startActivity(Intent(ctx, CommandActivity::class.java))
         }
         binding.downloadRow.setOnClickListener {
-            val url = BuildConfig.CTRL_DOWNLOAD_URL.trim()
-            if (url.isEmpty()) {
-                UnifiedDialogKit.showInfo(
-                    ctx,
-                    "获取控制端 DailyController",
-                    "当前未配置控制端下载地址。控制端安装包由分发方通过构建参数注入，请向提供者获取安装方式。"
-                )
-            } else {
-                ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            val fallbackUrl = BuildConfig.CTRL_DOWNLOAD_URL.trim()
+            binding.downloadRow.isEnabled = false
+            lifecycleScope.launch {
+                // 动态查 GitHub DailyController 最新 release（含 prerelease）页面，
+                // 失败（离线/被墙）回退静态地址（/releases/latest 或列表页）
+                val latestUrl = fetchLatestControllerReleaseUrl()
+                binding.downloadRow.isEnabled = true
+                val url = latestUrl ?: fallbackUrl
+                if (url.isEmpty()) {
+                    UnifiedDialogKit.showInfo(
+                        ctx,
+                        "获取控制端 DailyController",
+                        "当前未配置控制端下载地址。控制端安装包由分发方通过构建参数注入，请向提供者获取安装方式。"
+                    )
+                } else {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }
             }
         }
+
+    /**
+     * 查 GitHub DailyController 最新 release（含 prerelease）的页面 URL。
+     * GitHub /releases/latest 只认正式版（非 draft 非 prerelease），控制端当前
+     * 均为 alpha 预发布，故改用 releases?per_page=1 取最新一条（draft 不对外，
+     * prerelease 照常返回）。公开仓库免认证，失败返回 null（调用方回退静态地址）。
+     */
+    private suspend fun fetchLatestControllerReleaseUrl(): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+            val req = Request.Builder()
+                .url("https://api.github.com/repos/yamleaf/DailyController/releases?per_page=1")
+                .header("Accept", "application/vnd.github+json")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching null
+                val arr = JsonParser.parseString(resp.body?.string().orEmpty()).asJsonArray
+                if (arr.size() == 0) return@runCatching null
+                arr[0].asJsonObject.get("html_url")?.asString
+            }
+        }.getOrNull()
+    }
+
         // 检查更新：拉取 Gitee 加密版本文件 → 版本对比 → 弹窗/下载/安装
         binding.updateRow.setOnClickListener {
             binding.updateStatus.text = "检查中…"
