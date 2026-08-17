@@ -53,9 +53,20 @@ object MqttKeepAliveStrategy {
         else -> Level.TIMER
     }
 
+    /** 最近一次级别切换时间戳（ms）；0 表示从未切换（或旧版本首次升级，尚未记录） */
+    fun lastChangedAt(): Long =
+        SaveKeyValues.loadLong(Constant.MQTT_KEEPALIVE_CHANGED_KEY, 0L)
+
+    /** 最近一次级别切换描述（如 "TIMER→ALARM"）；从未切换时返回 "—" */
+    fun lastChangedDesc(): String =
+        SaveKeyValues.loadString(Constant.MQTT_KEEPALIVE_CHANGED_DESC_KEY, "").ifBlank { "—" }
+
     private fun save(next: Level) {
+        val prev = level
         level = next
         SaveKeyValues.saveInt(Constant.MQTT_KEEPALIVE_LEVEL_KEY, next.ordinal)
+        SaveKeyValues.saveLong(Constant.MQTT_KEEPALIVE_CHANGED_KEY, System.currentTimeMillis())
+        SaveKeyValues.saveString(Constant.MQTT_KEEPALIVE_CHANGED_DESC_KEY, "${prev.name}→${next.name}")
         LogFileManager.action("MQTT 保活级别切换为 ${next.name}")
         Log.w(TAG, "MQTT 保活级别 → ${next.name}")
     }

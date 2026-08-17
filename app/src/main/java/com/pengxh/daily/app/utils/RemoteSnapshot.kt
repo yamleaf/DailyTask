@@ -13,6 +13,7 @@ import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.ForegroundRunningService
+import com.pengxh.daily.app.service.MqttKeepAliveStrategy
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
@@ -116,6 +117,15 @@ object RemoteSnapshot {
         o.addProperty("foregroundRunning", ForegroundRunningService.isRunning)
         o.addProperty("schedulerRunning", TaskScheduler.isRunning())
         o.addProperty("schedulerDesc", TaskScheduler.describeRunningState())
+        // 息屏保活三级自适应：当前级别 + 最近切换时间 + 切换方向（控制端在设备页息屏模式下展示）
+        o.addProperty("keepaliveLevel", keepaliveLevelText())
+        val changedAt = MqttKeepAliveStrategy.lastChangedAt()
+        o.addProperty(
+            "keepaliveLevelChangedAt",
+            if (changedAt > 0L) dtf.format(java.time.Instant.ofEpochMilli(changedAt).atZone(ZoneId.systemDefault()).toLocalDateTime())
+            else "—"
+        )
+        o.addProperty("keepaliveLevelChangedDesc", MqttKeepAliveStrategy.lastChangedDesc())
         o.addProperty("powerSaveMode", AppRuntimeConfig.isPowerSaveMode())
         o.addProperty("forcePseudoMask", AppRuntimeConfig.isForcePseudoMask())
         o.addProperty("wifi", wifiStatus(context))
@@ -201,6 +211,13 @@ object RemoteSnapshot {
         return String.format("%02d:00", hour)
     }
 
+    /** 保活级别可读文本：TIMER 最省电 / ALARM 闹钟心跳 / CPU 息屏持锁兜底 */
+    private fun keepaliveLevelText(): String = when (MqttKeepAliveStrategy.current()) {
+        MqttKeepAliveStrategy.Level.TIMER -> "TIMER 省电"
+        MqttKeepAliveStrategy.Level.ALARM -> "ALARM 闹钟"
+        MqttKeepAliveStrategy.Level.CPU -> "CPU 保活"
+    }
+
     /** 前台保活服务已运行分钟数（服务本次启动起计时，重启后重新计时） */
     private fun serviceRunningMinutes(): Long {
         val start = ForegroundRunningService.serviceStartAtMs
@@ -237,7 +254,7 @@ object RemoteSnapshot {
             o.addProperty("punched", punched)
             o.addProperty("scheduled", scheduled)
             o.addProperty("missed", missed)
-            o.addProperty("recentPunch", successSet.maxOrNull()?.toString() ?: "—")
+            o.addProperty("recentPunch", recentPunchText(today, successSet))
             o.addProperty("today", todayStatus(today, allTasks, successSet, timeoutSet))
 
             // 逐日状态（近两周 + 未来两周，共 29 天，与状态查询邮件窗口一致；
@@ -287,6 +304,25 @@ object RemoteSnapshot {
             TaskScheduler.isPunchScheduled(today, allTasks) -> "计划打卡（调度未运行）"
             allTasks.isEmpty() -> "未配置任务"
             else -> "今日休息（跳过）"
+        }
+    }
+
+    /**
+     * 最近一次打卡成功：若发生在今天，优先拼接通知里的完整时间（含时分秒）；
+     * 否则只显示日期（历史打卡记录未持久化到秒）。
+     */
+    private suspend fun recentPunchText(today: LocalDate, successSet: Set<LocalDate>): String {
+        val latest = successSet.maxOrNull() ?: return "—"
+        if (latest != today) return latest.toString()
+        return try {
+            val time = DatabaseWrapper.loadCurrentDayNotice()
+                .asSequence()
+                .filter { it.noticeMessage.contains("考勤打卡成功") }
+                .mapNotNull { it.postTime.takeIf { p -> p.startsWith("$today ") } }
+                .maxOrNull()
+            if (time != null) time else latest.toString()
+        } catch (_: Exception) {
+            latest.toString()
         }
     }
 
