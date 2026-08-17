@@ -89,6 +89,10 @@ object Constant {
     const val MQTT_KEEPALIVE_LEVEL_KEY = "MQTT_KEEPALIVE_LEVEL_KEY"
     /** 保活最近一次掉线时间戳（ms），用于长时间稳定(>5h)后自动降级回更省电级别 */
     const val MQTT_KEEPALIVE_LAST_DISC_KEY = "MQTT_KEEPALIVE_LAST_DISC_KEY"
+    /** 保活级别最近一次切换时间戳（ms），用于控制端展示切换时间点 */
+    const val MQTT_KEEPALIVE_CHANGED_KEY = "MQTT_KEEPALIVE_CHANGED_KEY"
+    /** 保活级别最近一次切换描述（如 "TIMER→ALARM"），用于控制端展示切换方向 */
+    const val MQTT_KEEPALIVE_CHANGED_DESC_KEY = "MQTT_KEEPALIVE_CHANGED_DESC_KEY"
 
     // ===== EMQX Serverless API 配置（被控端专用；用于 HTTP 方式管理/测试部署）=====
     const val MQTT_SERVERLESS_API_URL_KEY = "MQTT_SERVERLESS_API_URL_KEY" // 如 https://xxx.emqxsl.com/api/v5
