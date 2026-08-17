@@ -236,10 +236,18 @@ class ForegroundRunningService : Service() {
         KeepAliveReceiver.scheduleBatteryAlert(this)
         KeepAliveReceiver.startMqttAgentIfEnabled(this)
         if (intent?.action == KeepAliveReceiver.ACTION_RESET_TASK) {
-            if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
-                && !TaskScheduler.isRunning()
-            ) {
-                TaskScheduler.startTask()
+            if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
+                if (TaskScheduler.isRunning()) {
+                    // 调度在跑（可能处于「等待重置期」被冻结，isRunning()=true 但实际空转）→
+                    // 发信号让 waitUntilNextReset 立即返回重排；旧逻辑直接 return 导致重置永远无法推进
+                    TaskScheduler.notifyResetTimeReached()
+                } else {
+                    TaskScheduler.startTask()
+                    // 无等待期信号可释放，主动卸掉 RESET 闹钟持的推进锁
+                    KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
+                }
+            } else {
+                KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
             }
             cleanupTempDiagnosticFiles()
         }
@@ -657,9 +665,14 @@ class ForegroundRunningService : Service() {
         // 标记今天已重置，防止重复触发
         SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
 
-        // 任务重置
+        // 任务重置：调度未跑 → 补启；调度在跑（等待重置期被冻结）→ 发信号立即重排。
+        // 旧逻辑在 isRunning()=true 时直接跳过，配合协程 delay 被冻结，重置永远无法推进（08-15/16 漏执行）
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
-            TaskScheduler.startTask()
+            if (TaskScheduler.isRunning()) {
+                TaskScheduler.notifyResetTimeReached()
+            } else {
+                TaskScheduler.startTask()
+            }
         }
     }
 

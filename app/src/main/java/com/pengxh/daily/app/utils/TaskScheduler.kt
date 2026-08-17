@@ -59,6 +59,16 @@ object TaskScheduler {
     @Volatile
     private var pendingResetSignal: CompletableDeferred<Unit>? = null
 
+    /** PUNCH_DUE 精确闹钟到点信号：进程冻结时协程 delay 不可靠，闹钟广播唤醒阶段1 立即进入打卡 */
+    @Volatile
+    private var pendingPunchDueSignal: CompletableDeferred<Unit>? = null
+
+    /** 重置点到达信号（RESET_TASK 闹钟 / TIME_TICK 兜底）：唤醒 waitUntilNextReset 立即返回重排。
+     * 修复根因：调度协程在「等待重置期」时 isRunning() 仍为 true，旧逻辑所有兜底（RESET_TASK /
+     * TIME_TICK / PUNCH_DUE）因 isRunning() 判断直接 return，重置永远无法推进——08-15/16 任务漏执行即此 */
+    @Volatile
+    private var pendingResetReachedSignal: CompletableDeferred<Unit>? = null
+
     /**
      * UI 文本事件（tipsView / adapter 高亮），不参与按钮逻辑
      * */
@@ -230,17 +240,52 @@ object TaskScheduler {
                         "延迟=${delayMs / 1000}s"
             )
 
+            // 先挂 due 信号再排闹钟，避免到点极近时闹钟先到、信号未挂上导致 notifyPunchDue 空操作
+            val dueSignal = if (delayMs > 0L) {
+                CompletableDeferred<Unit>().also { pendingPunchDueSignal = it }
+            } else null
+
             // 精确闹钟兜底：进程被杀后仍能到点唤醒；进程存活时与协程 delay 并行，到点闹钟多为空操作
             KeepAliveReceiver.scheduleNextPunchAlarms(
                 DailyTaskApplication.get(),
                 task.actualTimeMillis
             )
 
-            if (delayMs > 0L) {
-                updateCountdownWithNotification(delayMs) { remaining ->
-                    val seconds = (remaining / 1000).toInt()
-                    ForegroundRunningService.emitNotificationText("${seconds.formatTime()}后执行第${task.displayIndex}个任务")
+            if (dueSignal != null) {
+                // 到点等待：协程 delay 为主，PUNCH_DUE 精确闹钟为兜底。
+                // 进程冻结时协程 delay 不可靠，闹钟（系统级）到点广播会触发 notifyPunchDue()，
+                // select 立即走信号分支进入打卡，避免"闹钟已触发但调度仍在倒计时傻等"（08-15/16 漏卡根因）。
+                val countdownJob = launch {
+                    updateCountdownWithNotification(delayMs) { remaining ->
+                        val seconds = (remaining / 1000).toInt()
+                        ForegroundRunningService.emitNotificationText("${seconds.formatTime()}后执行第${task.displayIndex}个任务")
+                    }
                 }
+                try {
+                    select<Unit> {
+                        countdownJob.onJoin { Unit }   // 自然到点
+                        dueSignal.onAwait { Unit }     // PUNCH_DUE 闹钟兜底唤醒
+                    }
+                } finally {
+                    countdownJob.cancel()
+                    pendingPunchDueSignal = null
+                    // 闹钟路径持的调度推进锁：select 已返回说明 Main 协程已跑起来，可释放省电
+                    KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
+                }
+            }
+            // 统一宽限校验（防"错误时间补执行"）：无论阶段1 因协程 delay 自然恢复还是 PUNCH_DUE 闹钟
+            // 信号唤醒，唤醒时刻若已超过任务时刻 + 宽限（如被冻结两天后恢复、闹钟延迟投递），
+            // 本场直接跳过，绝不在错误时间补打旧任务（08-15/16 压 2 天场景的最终兜底）。
+            val wokeAt = System.currentTimeMillis()
+            if (wokeAt - task.actualTimeMillis > PUNCH_LATE_GRACE_MS) {
+                skippedCount++
+                LogFileManager.writeLog(
+                    "第 ${task.displayIndex} 个任务唤醒时已超过宽限（计划=${task.plannedTime}，" +
+                            "实际=${task.actualTime}，晚到=${(wokeAt - task.actualTimeMillis) / 1000}s），跳过"
+                )
+                // 取消本场闹钟，避免残留广播再次触发
+                KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
+                continue
             }
             // 进入打卡阶段前取消本场闹钟，避免与执行中的流程叠触发
             KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
@@ -457,11 +502,23 @@ object TaskScheduler {
             val waitSeconds = calculateSecondsUntilReset(resetHour)
 
             // 功耗最低：单次精确挂起到下一个整点重置点，无 CPU 唤醒；
-            // 重置时间被修改时由信号立即唤醒重算（不改正在执行的任务）
+            // 重置时间被修改时由信号立即唤醒重算（不改正在执行的任务）。
+            // 等待结束三途径：自然到点（withTimeout 超时）/ 重置时间修改（signal）/ 重置到点闹钟兜底（reachedSignal）
             val signal = CompletableDeferred<Unit>()
             pendingResetSignal = signal
+            val reachedSignal = CompletableDeferred<Unit>()
+            pendingResetReachedSignal = reachedSignal
             try {
-                withTimeout(waitSeconds * 1000L) { signal.await() }
+                val reached = withTimeout(waitSeconds * 1000L) {
+                    select<Boolean> {
+                        signal.onAwait { false }        // 重置时间被修改 → 重新计算
+                        reachedSignal.onAwait { true }  // RESET_TASK/TIME_TICK 兜底 → 立即重排
+                    }
+                }
+                if (reached) {
+                    LogFileManager.action("到达重置时间点（闹钟兜底），重排下一轮任务")
+                    return
+                }
             } catch (_: TimeoutCancellationException) {
                 // 自然到达重置点，交给外层循环重排下一轮任务
                 LogFileManager.action("到达重置时间点，重排下一轮任务")
@@ -469,6 +526,8 @@ object TaskScheduler {
                 return
             } finally {
                 pendingResetSignal = null
+                pendingResetReachedSignal = null
+                KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
             }
             // 被信号唤醒：重置时间已修改，重新计算等待
             LogFileManager.writeLog("重置时间被修改，重新计算每日重置等待")
@@ -481,6 +540,34 @@ object TaskScheduler {
      */
     fun notifyResetTimeChanged() {
         pendingResetSignal?.complete(Unit)
+    }
+
+    /**
+     * PUNCH_DUE 精确闹钟到点：调度处于阶段1 倒计时等待（可能协程被冻结）时，
+     * 唤醒 select 立即进入打卡。调度未运行或不在阶段1 时无操作（幂等）并释放推进锁。
+     * 由 KeepAliveReceiver.ACTION_PUNCH_DUE 调用。
+     */
+    fun notifyPunchDue() {
+        val sig = pendingPunchDueSignal
+        if (sig == null) {
+            KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
+            return
+        }
+        sig.complete(Unit)
+    }
+
+    /**
+     * 重置点已到（RESET_TASK 闹钟 / TIME_TICK 兜底触发）：唤醒 [waitUntilNextReset] 立即返回，
+     * 交给外层循环重排下一轮任务。调度未在等待期时无操作（幂等）并释放推进锁。
+     * 修复旧漏洞：调度协程在等待期 isRunning()=true，旧兜底逻辑直接 return 导致重置永远无法推进。
+     */
+    fun notifyResetTimeReached() {
+        val sig = pendingResetReachedSignal
+        if (sig == null) {
+            KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
+            return
+        }
+        sig.complete(Unit)
     }
 
     /**
@@ -611,6 +698,8 @@ object TaskScheduler {
         KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
         job?.cancel()
         job = null
+        pendingPunchDueSignal = null
+        pendingResetReachedSignal = null
         _isRunning.value = false
         runningDetail = "空闲"
         RemoteSnapshot.invalidateCache()
@@ -631,6 +720,8 @@ object TaskScheduler {
         KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
         job?.cancel()
         job = null
+        pendingPunchDueSignal = null
+        pendingResetReachedSignal = null
         _isRunning.value = false
         runningDetail = "空闲"
         RemoteSnapshot.invalidateCache()
