@@ -247,6 +247,21 @@ class MqttAgentService : Service() {
         }
 
         /**
+         * 运行中保活级别降级检查：由 KeepAliveReceiver 心跳闹钟（15min）周期性驱动。
+         * 升级后若网络已稳定（距最后掉线 >5h），回退更省电级别并重建连接——覆盖「夜间待机不重启、
+         * 启动降级永远不触发」的场景：夜间某时段网络波动升级后，稳定 5h 即自动降级恢复省电。
+         * 服务未运行（instance 为 null）时只持久化降级，下次启动按降级后级别建连。
+         */
+        fun maybeDowngradeKeepAlive() {
+            val next = MqttKeepAliveStrategy.checkDowngrade() ?: return
+            val svc = instance
+            if (svc != null) {
+                LogFileManager.action("保活级别运行中降级为 ${next.name}，重建 MQTT 连接")
+                svc.rebuildMqttClient()
+            }
+        }
+
+        /**
          * 取消 MQTT 复活/救援闹钟（服务实例可能已销毁，仍按相同 PendingIntent 取消）。
          * 「暂停使用」路径必须调用，避免残留闹钟在暂停期间再次拉起服务。
          */
@@ -276,6 +291,8 @@ class MqttAgentService : Service() {
     @Volatile private var _connected = false
     @Volatile private var _bound = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
     private var mqttClient: MqttClient? = null
+    /** 闹钟驱动的心跳发送器（仅 ALARM 级别使用）。Paho close() 会调其 stop()，onDestroy 显式 stop() 幂等兜底 */
+    private var alarmPingSender: AlarmPingSender? = null
     private var connectOptions: MqttConnectOptions? = null
     private var deviceId: String = ""
     private val channelId = "MqttAgentService"
@@ -303,12 +320,17 @@ class MqttAgentService : Service() {
     /** 息屏保活 WiFi 锁：阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock） */
     private var wifiLock: WifiManager.WifiLock? = null
 
-    /** 息屏保活 PARTIAL_WAKE_LOCK：息屏时保 CPU 调度（Paho 心跳线程），亮屏释放省电；与 WifiLock 双保险 */
+    /** 命令处理 PARTIAL_WAKE_LOCK：收到控制端指令时持 30s 短时锁（超时自动释放），
+     * 确保异步处理（快照构建/设置下发等）完成前 CPU 不睡回 */
+    private var commandWakeLock: PowerManager.WakeLock? = null
+
+    // ===== CPU 保活级别（兜底）：息屏持 PARTIAL_WAKE_LOCK，CPU 不深睡 → Timer 心跳线程始终被调度 =====
+    /** 息屏保活 PARTIAL_WAKE_LOCK：SCREEN_OFF 持有、SCREEN_ON 释放（仅 CPU 级别使用） */
     private var screenWakeLock: PowerManager.WakeLock? = null
 
     private var screenReceiverRegistered = false
 
-    /** 屏幕广播：SCREEN_OFF → 获取 WakeLock 保心跳；SCREEN_ON → 释放省电 */
+    /** 屏幕广播：SCREEN_OFF → 获取 WakeLock 保 CPU 调度；SCREEN_ON → 释放省电 */
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -317,6 +339,10 @@ class MqttAgentService : Service() {
             }
         }
     }
+
+    /** 保活级别升级时正在重建连接（防 connectionLost 与 rebuild 循环触发） */
+    @Volatile
+    private var isRebuilding = false
 
     @Volatile
     private var lastNetworkReconnectAtMs = 0L
@@ -372,12 +398,12 @@ class MqttAgentService : Service() {
             return
         }
         registerNetworkCallback()
-        // 息屏保活：持有 WiFi 锁阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock）
+        // 息屏保活：持有 WiFi 锁阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock）。
+        // 心跳调度按自适应保活级别（TIMER=Timer 线程 / ALARM=闹钟 / CPU=息屏持锁）决定，
+        // 由 MqttKeepAliveStrategy 根据掉线频率自动升级，省电优先。
         acquireWifiLock()
-        // 息屏保活（方案 B）：息屏时持有 PARTIAL_WAKE_LOCK 保 CPU 调度（Paho Timer 心跳线程），
-        // 亮屏释放省电。根因复核：WifiLock 只保 WiFi 不保 CPU 调度——未插电 deep idle 下 CPU 深度睡眠，
-        // Paho TimerPingSender 线程不被调度 → PINGREQ 停发 → broker 在 keepalive×1.5 后踢线失联。
-        registerScreenStateReceiver()
+        // 自适应保活降级检查：上次运行若因网络波动升到高耗电级别，且已稳定 >5h → 降级回省电级别
+        MqttKeepAliveStrategy.checkDowngrade()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
         Thread { initMqtt() }.start()
@@ -453,7 +479,28 @@ class MqttAgentService : Service() {
         // 可参考控制端 OfflineMonitorService 用独立 clientId 避免互踢的既有做法。
         val clientId = "dev-$deviceId-${UUID.randomUUID().toString().take(8)}"
         currentClientId = clientId
-        mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence())
+        // 自适应保活：按当前级别创建 client（pingSender 在构造时注入，级别切换需重建连接）
+        when (MqttKeepAliveStrategy.current()) {
+            MqttKeepAliveStrategy.Level.CPU -> {
+                // CPU 兜底：TimerPingSender + 息屏持 PARTIAL_WAKE_LOCK（CPU 不深睡 → 心跳线程始终被调度）
+                mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence())
+                registerScreenStateReceiver()
+                Log.d(TAG, "保活级别 CPU：TimerPingSender + 息屏持锁")
+            }
+            MqttKeepAliveStrategy.Level.ALARM -> {
+                // 闹钟保活：AlarmPingSender（系统精确闹钟）驱动心跳
+                alarmPingSender = AlarmPingSender(this)
+                mqttClient = MqttClientWithAlarmPingSender(
+                    BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence(), alarmPingSender!!
+                )
+                Log.d(TAG, "保活级别 ALARM：闹钟驱动心跳")
+            }
+            else -> {
+                // TIMER 最省电：Paho 默认 TimerPingSender（a9b1e1f 已验证行为）
+                mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence())
+                Log.d(TAG, "保活级别 TIMER：TimerPingSender（最省电）")
+            }
+        }
         connectOptions = MqttConnectOptions().apply {
             // 使用全新会话：Doze 挂网产生半死僵尸会话后，重连若沿用旧会话（cleanSession=false）
             // 会触发 EMQX 会话接管/合并，导致重订阅被 broker 以 SUBACK 0x80(ACL) 拒绝。
@@ -466,7 +513,8 @@ class MqttAgentService : Service() {
             connectionTimeout = 10
             // 自动重连：网络切换（WiFi↔移动）或瞬时掉线后由 Paho 自带退避重连，无需我们持有 WakeLock
             isAutomaticReconnect = true
-            // 心跳间隔 4 分钟：在不持有 WakeLock 的前提下维持长连接，显著减少心跳包以省电
+            // 心跳间隔 4 分钟：TIMER 级别由 Paho Timer 线程调度、ALARM 级别由闹钟调度、
+            // CPU 级别持锁保证 Timer 线程运行。间隔长可减少心跳包与唤醒次数以省电。
             keepAliveInterval = 240
             // LWT：断线后由 Broker 代为发布 retained offline，控制端据此感知掉线
             setWill(topicStatus(), "offline".toByteArray(), 1, true)
@@ -484,6 +532,12 @@ class MqttAgentService : Service() {
                 if (instance !== this@MqttAgentService) return
                 Log.w(TAG, "MQTT 连接丢失：${cause?.message}", cause)
                 onDisconnected()
+                // 自适应保活升级：30min 窗口内掉线 ≥2 次 → 升一级（TIMER→ALARM→CPU）。
+                // 升级后重建连接（pingSender 在 client 构造时注入，级别切换必须重建）。
+                // isRebuilding 守卫防止 rebuild 过程中 disconnect 触发本回调造成循环。
+                if (!isRebuilding && MqttKeepAliveStrategy.recordDisconnect() != null) {
+                    rebuildMqttClient()
+                }
                 // 进程存活时的瞬时掉线，统一交给 Paho isAutomaticReconnect 自行退避重连：
                 // connectComplete(reconnect=true) 会幂等重订阅并发布 online，进程内无需再做任何事。
                 // 此前在此处排复活闹钟 + 3s 后手动 reconnect()，与 Paho 自动重连构成双驱动，
@@ -495,6 +549,9 @@ class MqttAgentService : Service() {
             override fun messageArrived(topic: String?, message: MqttMessage?) {
                 message?.payload?.let {
                     MqttQuota.add(this@MqttAgentService, 0, 1)
+                    // 持 30s 超时短时锁，覆盖 handleIncoming 内异步处理（快照/任务落库等）。
+                    // 不在此处提前 release：同步返回时异步尚未完成；靠超时自动释放省电。
+                    acquireCommandWakeLock()
                     handleIncoming(String(it))
                 }
             }
@@ -516,7 +573,7 @@ class MqttAgentService : Service() {
                     if (!okCmd || !okPair) {
                         "MQTT 订阅被 broker 拒绝：请检查 EMQX 中 DEV 账户（${SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")}）的 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/#".showToast()
                     }
-                    publishStatus("online")
+                    if (_bound) publishStatus("online")
                 } catch (e: Exception) {
                     Log.e(TAG, "caught exception", e)
                     "MQTT 订阅/状态上报失败：${e.message}".showToast()
@@ -535,7 +592,7 @@ class MqttAgentService : Service() {
                 if (!okCmd || !okPair) {
                     "MQTT 订阅被 broker 拒绝：请检查 EMQX 中 DEV 账户（${SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")}）的 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/#".showToast()
                 }
-                publishStatus("online")
+                if (_bound) publishStatus("online")
             } catch (e: Exception) {
                 Log.e(TAG, "caught exception", e)
                 "MQTT 订阅/状态上报失败：${e.message}".showToast()
@@ -1212,6 +1269,44 @@ class MqttAgentService : Service() {
         }
     }
 
+    /**
+     * 保活级别升级后重建 MQTT 连接。
+     *
+     * pingSender（Timer / Alarm）在 MqttClient 构造时注入，无法动态更换，因此级别切换必须
+     * 关闭旧 client 并按新级别重新创建。流程：关闭旧连接（disconnect 会停掉 Paho 自动重连循环，
+     * 避免与新连接抢同一 clientId 槽位）→ 释放闹钟/屏幕锁 → 调 initMqtt 按当前级别重建并连接。
+     * 在 IO 协程执行（connect 阻塞最长 10s）；isRebuilding 防重入与防 connectionLost 循环触发。
+     */
+    private fun rebuildMqttClient() {
+        if (isRebuilding) return
+        if (mqttClient == null) return
+        isRebuilding = true
+        scope.launch {
+            try {
+                LogFileManager.action(
+                    "保活级别重建（${MqttKeepAliveStrategy.current().name}），重建 MQTT 连接"
+                )
+                // 关闭旧连接：disconnect 会停掉 Paho isAutomaticReconnect 循环；close 释放内部资源
+                runCatching { mqttClient?.disconnect() }
+                runCatching { mqttClient?.close() }
+                mqttClient = null
+                alarmPingSender?.stop()
+                alarmPingSender = null
+                // 注销 CPU 级别屏幕广播并释放息屏锁（升级/降级后按新级别重新决定是否持锁；
+                // 若从 CPU 降级，receiver 不注销会残留并在息屏时误持锁）
+                unregisterScreenStateReceiver()
+                // 按新级别重新初始化并连接（initMqtt 内部读取 MqttKeepAliveStrategy.current()）
+                initMqtt()
+            } catch (e: Exception) {
+                Log.e(TAG, "重建 MQTT 失败", e)
+                onDisconnected()
+                scheduleResurrectWithBackoff()
+            } finally {
+                isRebuilding = false
+            }
+        }
+    }
+
     // ===== 主题构建（最终模型 dt/{id}/...）=====
     private fun topicCmd() = "${Protocol.TOPIC_PREFIX}/$deviceId/cmd"
     private fun topicStatus() = "${Protocol.TOPIC_PREFIX}/$deviceId/status"
@@ -1352,20 +1447,48 @@ class MqttAgentService : Service() {
     }
 
     /**
-     * 注册屏幕广播并做初始对齐。息屏保活（方案 B）：
-     * - SCREEN_OFF：持有 PARTIAL_WAKE_LOCK，保证 Paho 的 TimerPingSender 心跳线程在 CPU 深度睡眠时
-     *   仍被调度（未插电 deep idle 下，WifiLock 与 Doze 白名单都不豁免 CPU 调度——这是心跳停发失联的根因）
+     * 命令处理持锁：收到控制端指令时 acquire 30s 超时短时锁，覆盖 handleIncoming 及其异步处理。
+     * 不在 messageArrived 同步返回时提前 release（异步尚未完成）；超时自动释放防泄漏。
+     * 幂等：已持有则不再重复 acquire（非引用计数锁）。
+     */
+    private fun acquireCommandWakeLock() {
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            if (commandWakeLock == null) {
+                commandWakeLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK, "daily_task_mqtt_command"
+                ).apply { setReferenceCounted(false) }
+            }
+            if (commandWakeLock?.isHeld != true) commandWakeLock?.acquire(30_000L)
+        }.onFailure { e ->
+            Log.w(TAG, "获取命令处理 WakeLock 失败: ${e.message}")
+        }
+    }
+
+    /** 释放命令处理锁。幂等；onDestroy 等路径可显式调用 */
+    private fun releaseCommandWakeLock() {
+        runCatching {
+            if (commandWakeLock?.isHeld == true) commandWakeLock?.release()
+        }.onFailure { _ -> }
+    }
+
+    // ===== CPU 保活级别（兜底）：息屏持 PARTIAL_WAKE_LOCK，保 CPU 调度（Timer 心跳线程持续运行）=====
+
+    /**
+     * 注册屏幕广播并做初始对齐。仅 CPU 级别启用：
+     * - SCREEN_OFF：持有 PARTIAL_WAKE_LOCK，CPU 不深睡 → Paho TimerPingSender 线程始终被调度，
+     *   心跳必然可靠（对 WifiLock/闹钟都无法保活的极端深睡设备兜底）
      * - SCREEN_ON：释放，亮屏时 CPU 本就活跃，不白耗电
      */
     private fun registerScreenStateReceiver() {
         if (screenReceiverRegistered) return
         try {
-            val filter = IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_OFF)
-                addAction(Intent.ACTION_SCREEN_ON)
-            }
             ContextCompat.registerReceiver(
-                this, screenStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+                this, screenStateReceiver, IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_OFF)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED
             )
             screenReceiverRegistered = true
         } catch (_: Exception) {
@@ -1376,7 +1499,7 @@ class MqttAgentService : Service() {
                 })
                 screenReceiverRegistered = true
             } catch (_: Exception) {
-                Log.w(TAG, "注册屏幕广播失败（息屏保活降级：无法按屏幕状态持锁）")
+                Log.w(TAG, "注册屏幕广播失败（CPU 保活降级：无法按屏幕状态持锁）")
             }
         }
         // 初始对齐：服务启动时若已处于息屏（如保活闹钟在后台拉起），立即持有，避免空窗掉线
@@ -1384,6 +1507,7 @@ class MqttAgentService : Service() {
         if (pm?.isInteractive == false) acquireScreenWakeLock()
     }
 
+    /** 注销屏幕广播并释放锁（onDestroy / 级别重建时调用）。幂等 */
     private fun unregisterScreenStateReceiver() {
         if (screenReceiverRegistered) {
             screenReceiverRegistered = false
@@ -1392,7 +1516,7 @@ class MqttAgentService : Service() {
         releaseScreenWakeLock()
     }
 
-    /** 持有 PARTIAL_WAKE_LOCK：保 CPU 调度（Paho 心跳线程持续运行）。幂等 */
+    /** 持有 PARTIAL_WAKE_LOCK：保 CPU 调度。幂等 */
     private fun acquireScreenWakeLock() {
         runCatching {
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
@@ -1402,7 +1526,7 @@ class MqttAgentService : Service() {
                 ).apply { setReferenceCounted(false) }
             }
             if (screenWakeLock?.isHeld != true) screenWakeLock?.acquire()
-            Log.d(TAG, "已获取 PARTIAL_WAKE_LOCK（息屏保 CPU 心跳）")
+            Log.d(TAG, "已获取 PARTIAL_WAKE_LOCK（CPU 保活）")
         }.onFailure { e ->
             Log.w(TAG, "获取 PARTIAL_WAKE_LOCK 失败（心跳可能停发，由重连机制兜底）: ${e.message}")
         }
@@ -1412,7 +1536,7 @@ class MqttAgentService : Service() {
     private fun releaseScreenWakeLock() {
         runCatching {
             if (screenWakeLock?.isHeld == true) screenWakeLock?.release()
-            Log.d(TAG, "已释放 PARTIAL_WAKE_LOCK（亮屏）")
+            Log.d(TAG, "已释放 PARTIAL_WAKE_LOCK")
         }.onFailure { e ->
             Log.w(TAG, "释放 PARTIAL_WAKE_LOCK 异常: ${e.message}")
         }
@@ -1486,7 +1610,13 @@ class MqttAgentService : Service() {
         super.onDestroy()
         unregisterNetworkCallback()
         releaseWifiLock()
+        // 显式停掉心跳闹钟并注销接收器（Paho close 也会调 stop，此处幂等兜底；
+        // 置空引用防服务重建时旧实例残留）
+        alarmPingSender?.stop()
+        alarmPingSender = null
+        // CPU 保活级别：注销屏幕广播并释放息屏锁
         unregisterScreenStateReceiver()
+        releaseCommandWakeLock()
         try { unregisterReceiver(remoteChangedReceiver) } catch (_: Exception) { }
         _connected = false
         instance = null

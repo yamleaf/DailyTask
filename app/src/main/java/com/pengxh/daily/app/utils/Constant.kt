@@ -84,6 +84,12 @@ object Constant {
     /** 远程控制服务总开关：默认关闭；开启且账号配置有效才连接 MQTT，关闭则完全停止服务（断开连接、撤销前台通知、零耗电） */
     const val MQTT_ENABLED_KEY = "MQTT_ENABLED_KEY"
 
+    // ===== MQTT 保活自适应级别（0=TIMER 1=ALARM 2=CPU，省电优先自动升级）=====
+    /** 当前保活级别：TIMER=TimerPingSender(最省电) / ALARM=闹钟心跳 / CPU=息屏持锁(兜底) */
+    const val MQTT_KEEPALIVE_LEVEL_KEY = "MQTT_KEEPALIVE_LEVEL_KEY"
+    /** 保活最近一次掉线时间戳（ms），用于长时间稳定(>5h)后自动降级回更省电级别 */
+    const val MQTT_KEEPALIVE_LAST_DISC_KEY = "MQTT_KEEPALIVE_LAST_DISC_KEY"
+
     // ===== EMQX Serverless API 配置（被控端专用；用于 HTTP 方式管理/测试部署）=====
     const val MQTT_SERVERLESS_API_URL_KEY = "MQTT_SERVERLESS_API_URL_KEY" // 如 https://xxx.emqxsl.com/api/v5
     const val MQTT_SERVERLESS_API_APP_ID_KEY = "MQTT_SERVERLESS_API_APP_ID_KEY"

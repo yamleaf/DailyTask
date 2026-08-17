@@ -11,6 +11,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.provider.Settings
@@ -57,9 +58,50 @@ class KeepAliveReceiver : BroadcastReceiver() {
         private const val ENSURE_SERVICES_DEBOUNCE_MS = 8_000L
         /** FGS 配额耗尽后救援间隔：避免 30s 连撞 Android 15 后台 FGS 限额 */
         private const val FGS_QUOTA_BACKOFF_MS = 10 * 60 * 1000L
+        /**
+         * PUNCH_DUE / RESET_TASK 闹钟广播结束后系统临时唤醒可能立刻结束，
+         * Main 上的调度协程来不及跑完 select → 又睡回冻结。短时锁撑到调度推进。
+         */
+        private const val SCHEDULER_ADVANCE_WAKE_MS = 60_000L
 
         @Volatile
         private var lastEnsureServicesAtMs = 0L
+
+        /** 调度推进短时锁：PUNCH_DUE/RESET 持有，TaskScheduler 推进后释放；超时自动兜底 */
+        @Volatile
+        private var schedulerAdvanceWakeLock: PowerManager.WakeLock? = null
+
+        /**
+         * 闹钟到点后持锁，保证 Main 调度协程能跑完 due/reset 信号分支。
+         * 超时 [SCHEDULER_ADVANCE_WAKE_MS] 自动释放，防泄漏。
+         */
+        fun acquireSchedulerAdvanceWakeLock(context: Context) {
+            runCatching {
+                val pm = context.applicationContext
+                    .getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+                var lock = schedulerAdvanceWakeLock
+                if (lock == null) {
+                    lock = pm.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "daily_task:scheduler_advance"
+                    ).apply { setReferenceCounted(false) }
+                    schedulerAdvanceWakeLock = lock
+                }
+                if (lock?.isHeld != true) {
+                    lock?.acquire(SCHEDULER_ADVANCE_WAKE_MS)
+                }
+            }.onFailure { e ->
+                Log.w("KeepAliveReceiver", "调度推进 WakeLock 获取失败: ${e.message}")
+            }
+        }
+
+        /** 调度已推进（进入打卡 / 开始重排）后立即释放省电。幂等 */
+        fun releaseSchedulerAdvanceWakeLock() {
+            runCatching {
+                val lock = schedulerAdvanceWakeLock
+                if (lock?.isHeld == true) lock.release()
+            }.onFailure { _ -> }
+        }
 
         private fun resurrectIntent(context: Context): Intent =
             Intent(context, KeepAliveReceiver::class.java).apply { action = ACTION_RESURRECT }
@@ -561,17 +603,29 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 scheduleResetAlarm(context)
                 ensureServicesAlive(context, "resurrect")
                 tryResumeSchedulerIfWanted(context)
+                // 运行中保活级别降级检查：升级后网络稳定(>5h)自动回退省电级别并重建连接。
+                // 心跳闹钟 15min 周期驱动，覆盖「夜间待机不重启、启动降级不触发」的场景。
+                MqttAgentService.maybeDowngradeKeepAlive()
             }
             ACTION_PUNCH_PREWARM -> {
                 // 到点前只预热服务，不亮屏，降低自然息屏下的耗电
                 ensureServicesAlive(context, "punch_prewarm")
             }
             ACTION_PUNCH_DUE -> {
+                // 先持锁再投递 Main：广播返回后系统临时唤醒可能立刻结束，
+                // 否则 select 续体来不及跑又睡回冻结（08-15/16 类场景残留风险）
+                acquireSchedulerAdvanceWakeLock(context)
                 ensureServicesAlive(context, "punch_due")
-                tryResumeSchedulerIfWanted(context)
+                // PUNCH_DUE 兜底：调度在跑（阶段1）→ 发信号立即推进；未跑 → tryResume 补启。
+                // 投到 Main：TaskScheduler 协程在 Dispatchers.Main，与持锁窗口对齐。
+                Handler(Looper.getMainLooper()).post {
+                    TaskScheduler.notifyPunchDue()
+                    tryResumeSchedulerIfWanted(context)
+                }
             }
             ACTION_RESET_TASK -> {
                 if (!SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) return
+                acquireSchedulerAdvanceWakeLock(context)
                 val serviceIntent = Intent(context, ForegroundRunningService::class.java).apply {
                     action = ACTION_RESET_TASK
                 }
@@ -579,6 +633,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
                     context.startForegroundService(serviceIntent)
                 } catch (e: Exception) {
                     Log.e(javaClass.simpleName, "KeepAliveReceiver 操作异常", e)
+                    releaseSchedulerAdvanceWakeLock()
                 }
                 startMqttAgentIfEnabled(context)
                 scheduleResetAlarm(context)
