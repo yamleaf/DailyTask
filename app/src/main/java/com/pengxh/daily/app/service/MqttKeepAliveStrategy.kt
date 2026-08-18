@@ -8,26 +8,24 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
 import java.util.ArrayDeque
 
 /**
- * MQTT 息屏保活策略（省电优先）。
+ * MQTT 息屏保活策略。
  *
- * 支持两种工作模式（设置页「息屏保活」选项，仅屏幕模式=息屏时显示）：
- * - AUTO（默认）：每次 MQTT 服务启动/开启时重置为 TIMER（最省电，等价 a9b1e1f 行为），
- *   运行期间按掉线频率升级 TIMER→ALARM→CPU（30min 窗口内掉线 ≥2 次升一级），**不降级**——
- *   升级状态保持到下次启动重置，避免夜间反复升降级抖动。
- * - 指定模式（TIMER / ALARM / CPU）：固定使用该级别，**不升级、不降级**。
+ * 设置页「息屏保活」选项（仅屏幕模式=息屏时显示）提供 AUTO / ALARM / CPU 三档：
+ * - AUTO（默认）：每次 MQTT 服务启动/开启时重置为 ALARM（闹钟心跳，已缩至 keepAlive/3≈80s 抗系统节流），
+ *   运行期间若仍频繁掉线（30min 窗口内 ≥2 次）则升级 ALARM→CPU（**不降级**，保持到下次启动重置）。
+ * - 指定模式（ALARM / CPU）：固定使用该级别，**不升级、不降级**。
  *
- * 说明：TIMER=Paho 默认 TimerPingSender（最省电，K20 Pro 实测）；ALARM=AlarmPingSender 系统精确闹钟
- * 驱动心跳（TIMER 频繁掉线时升级）；CPU=息屏持 PARTIAL_WAKE_LOCK + TimerPingSender（兜底，CPU 不深睡
- * → Timer 线程始终被调度 → 心跳必然可靠）。
+ * 说明：纯 TIMER 保活已移除——息屏无人值守时 Paho Timer 线程不被调度→心跳停发→broker 踢线，
+ * 且重连风暴反而比 ALARM 稳定心跳更耗电；其机制仅保留给 CPU 模式（TimerPingSender + 持锁）复用。
+ * ALARM=AlarmPingSender 系统精确闹钟驱动心跳；CPU=息屏持 PARTIAL_WAKE_LOCK + TimerPingSender（兜底）。
  */
 object MqttKeepAliveStrategy {
 
-    enum class Level { TIMER, ALARM, CPU }
+    enum class Level { ALARM, CPU }
 
     /** 息屏保活模式，与 Constant.KEEPALIVE_MODE_* 一一对应 */
     enum class Mode(val code: Int) {
         AUTO(Constant.KEEPALIVE_MODE_AUTO),
-        TIMER(Constant.KEEPALIVE_MODE_TIMER),
         ALARM(Constant.KEEPALIVE_MODE_ALARM),
         CPU(Constant.KEEPALIVE_MODE_CPU);
 
@@ -42,9 +40,9 @@ object MqttKeepAliveStrategy {
     /** 窗口内掉线次数达到该值即升级（仅 auto 模式） */
     private const val UPGRADE_THRESHOLD = 2
 
-    /** auto 模式下当前升级到的级别；指定模式忽略。启动时由 [onServiceStart] 重置为 TIMER */
+    /** auto 模式下当前升级到的级别；指定模式忽略。启动时由 [onServiceStart] 重置为 ALARM */
     @Volatile
-    private var level: Level = Level.TIMER
+    private var level: Level = Level.ALARM
 
     /** 掉线时间窗口（进程内计数，仅 auto 模式使用） */
     private val disconnectTimes = ArrayDeque<Long>()
@@ -55,12 +53,11 @@ object MqttKeepAliveStrategy {
 
     /**
      * 当前生效的保活级别：
-     * - auto：返回升级状态（启动已重置 TIMER）；
+     * - auto：返回升级状态（启动已重置 ALARM）；
      * - 指定模式：返回固定级别。
      */
     fun current(): Level = when (mode()) {
         Mode.AUTO -> level
-        Mode.TIMER -> Level.TIMER
         Mode.ALARM -> Level.ALARM
         Mode.CPU -> Level.CPU
     }
@@ -70,19 +67,19 @@ object MqttKeepAliveStrategy {
 
     /**
      * MQTT 服务启动 / 开启时调用：
-     * - auto 模式：重置为 TIMER（每次启动从最省电开始，清残留升级状态与掉线窗口）；
+     * - auto 模式：重置为 ALARM（起步即闹钟心跳，清残留升级状态与掉线窗口）；
      * - 指定模式：保持固定级别，无操作。
      */
     fun onServiceStart() {
         if (mode() != Mode.AUTO) return
         synchronized(lock) {
             disconnectTimes.clear()
-            if (level != Level.TIMER || SaveKeyValues.loadInt(Constant.MQTT_KEEPALIVE_LEVEL_KEY, 0) != 0) {
-                level = Level.TIMER
-                SaveKeyValues.saveInt(Constant.MQTT_KEEPALIVE_LEVEL_KEY, 0)
-                recordChanged("启动重置 TIMER")
-                LogFileManager.action("MQTT 保活级别重置为 TIMER（auto 模式）")
-                Log.w(TAG, "MQTT 保活级别重置为 TIMER（auto 模式）")
+            if (level != Level.ALARM || SaveKeyValues.loadInt(Constant.MQTT_KEEPALIVE_LEVEL_KEY, Level.ALARM.ordinal) != Level.ALARM.ordinal) {
+                level = Level.ALARM
+                SaveKeyValues.saveInt(Constant.MQTT_KEEPALIVE_LEVEL_KEY, Level.ALARM.ordinal)
+                recordChanged("启动重置 ALARM")
+                LogFileManager.action("MQTT 保活级别重置为 ALARM（auto 模式）")
+                Log.w(TAG, "MQTT 保活级别重置为 ALARM（auto 模式）")
             }
         }
     }
@@ -105,7 +102,7 @@ object MqttKeepAliveStrategy {
                 disconnectTimes.removeFirst()
             }
             if (disconnectTimes.size < UPGRADE_THRESHOLD) return null
-            val next = if (level == Level.TIMER) Level.ALARM else Level.CPU
+            val next = Level.CPU
             disconnectTimes.clear()
             save(next)
             return next

@@ -2043,7 +2043,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     }
 
     private fun keepAliveModeLabel(mode: Int): String = when (mode) {
-        Constant.KEEPALIVE_MODE_TIMER -> getString(R.string.settings_keepalive_mode_timer)
         Constant.KEEPALIVE_MODE_ALARM -> getString(R.string.settings_keepalive_mode_alarm)
         Constant.KEEPALIVE_MODE_CPU -> getString(R.string.settings_keepalive_mode_cpu)
         else -> getString(R.string.settings_keepalive_mode_auto)
@@ -2056,23 +2055,26 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     }
 
     private fun showKeepAliveModeDialog() {
-        val current = AppRuntimeConfig.getKeepAliveMode()
-            .coerceIn(Constant.KEEPALIVE_MODE_AUTO, Constant.KEEPALIVE_MODE_CPU)
-        val items = listOf(
-            "${getString(R.string.settings_keepalive_mode_auto)}：${getString(R.string.settings_keepalive_mode_auto_desc)}",
-            "${getString(R.string.settings_keepalive_mode_timer)}：${getString(R.string.settings_keepalive_mode_timer_desc)}",
-            "${getString(R.string.settings_keepalive_mode_alarm)}：${getString(R.string.settings_keepalive_mode_alarm_desc)}",
-            "${getString(R.string.settings_keepalive_mode_cpu)}：${getString(R.string.settings_keepalive_mode_cpu_desc)}"
+        val currentCode = AppRuntimeConfig.getKeepAliveMode()
+        // AUTO / ALARM / CPU 三档。用显式 (code, label, desc) 列表，回调用 code 写回，
+        // 避免列表索引与常量值错位。
+        val entries = listOf(
+            Triple(Constant.KEEPALIVE_MODE_AUTO, R.string.settings_keepalive_mode_auto, R.string.settings_keepalive_mode_auto_desc),
+            Triple(Constant.KEEPALIVE_MODE_ALARM, R.string.settings_keepalive_mode_alarm, R.string.settings_keepalive_mode_alarm_desc),
+            Triple(Constant.KEEPALIVE_MODE_CPU, R.string.settings_keepalive_mode_cpu, R.string.settings_keepalive_mode_cpu_desc)
         )
+        val items = entries.map { "${getString(it.second)}：${getString(it.third)}" }
+        val currentIndex = entries.indexOfFirst { it.first == currentCode }.coerceAtLeast(0)
         UnifiedDialogKit.showSingleChoice(
             ctx,
             getString(R.string.settings_keepalive_mode_dialog_title),
             items,
-            current
+            currentIndex
         ) { which ->
-            AppRuntimeConfig.setKeepAliveMode(which)
+            val code = entries[which].first
+            AppRuntimeConfig.setKeepAliveMode(code)
             refreshKeepAliveModeRow()
-            LogFileManager.writeLog("息屏保活方式：${keepAliveModeLabel(which)}")
+            LogFileManager.writeLog("息屏保活方式：${keepAliveModeLabel(code)}")
             ConfigImportSignal.notifyRemoteChanged(ctx)
             // 非实时生效提示：策略在 MQTT 服务启动时读取模式，修改需下次启动才生效
             getString(R.string.settings_keepalive_mode_effect_toast).show(ctx)
