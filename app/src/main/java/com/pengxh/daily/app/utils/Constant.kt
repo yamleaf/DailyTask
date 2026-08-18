@@ -69,7 +69,7 @@ object Constant {
     const val IDLE_PSEUDO_MASK_TIMEOUT_KEY = "IDLE_PSEUDO_MASK_TIMEOUT_KEY" // Int
     /** 伪息屏：关闭时钟显示（Boolean，默认 false=显示时钟）。开启后伪息屏只显示黑屏，更省电 */
     const val PSEUDO_MASK_NO_CLOCK_KEY = "PSEUDO_MASK_NO_CLOCK_KEY" // Boolean
-    /** 伪息屏增强分组展开状态（Boolean，默认 true=展开） */
+    /** 息屏分组展开状态（Boolean，默认 true=展开） */
     const val PSEUDO_MASK_GROUP_EXPANDED_KEY = "PSEUDO_MASK_GROUP_EXPANDED_KEY"
 
     // ===== 远程控制 MQTT 配置（被控端持久化；解绑时【不】清除，下次绑定无需重输）=====

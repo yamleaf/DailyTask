@@ -758,7 +758,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             showKeepAliveModeDialog()
         }
         refreshKeepAliveModeRow()
-        // 伪息屏增强分组开关：仅控制子项展开/收起，功能开关保留在子项内（forcePseudoMaskSwitch）
+        // 息屏分组开关：仅控制子项展开/收起，功能开关保留在子项内（forcePseudoMaskSwitch）
         val applyPseudoMaskGroupExpand = { expanded: Boolean ->
             binding.pseudoMaskGroupContent.visibility = if (expanded) View.VISIBLE else View.GONE
             binding.pseudoMaskGroupArrow.animate()

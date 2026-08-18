@@ -1203,7 +1203,7 @@
                         android:layout_marginHorizontal="@dimen/dp_16"
                         android:background="@color/md_outlineVariant" />
 
-                    <!-- 伪息屏增强：可展开分组（标题行带总开关，点击箭头/标题区域展开/收起） -->
+                    <!-- 息屏分组：可展开分组（标题行带总开关，点击箭头/标题区域展开/收起） -->
                     <LinearLayout
                         android:id="@+id/pseudoMaskGroupHeader"
                         android:layout_width="match_parent"

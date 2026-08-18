@@ -25,8 +25,8 @@
     <string name="settings_gesture_tip">开启后，双指下滑开启伪息屏，单指/双指上滑关闭</string>
     <string name="settings_power_save_title">节能模式</string>
     <string name="settings_power_save_tip">降低倒计时通知、内存监控和息屏蒙层动画刷新频率</string>
-    <string name="settings_pseudo_mask_group_title">伪息屏增强</string>
-    <string name="settings_pseudo_mask_group_tip">离开本软件超过设定秒数后主动进入伪息屏</string>
+    <string name="settings_pseudo_mask_group_title">息屏分组</string>
+    <string name="settings_pseudo_mask_group_tip">伪息屏及屏幕模式设置</string>
     <string name="settings_force_mask_title">伪息屏</string>
     <string name="settings_force_mask_tip">开启后，后台超时或前台无操作超时均进入伪息屏（可能打断其它 App 使用）</string>
     <string name="settings_screen_mode_title">屏幕模式</string>
