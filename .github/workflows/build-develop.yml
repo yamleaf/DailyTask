@@ -211,7 +211,7 @@ jobs:
             echo "- commit: \`${{ github.sha }}\`"
             echo "- versionCode: ${{ steps.gitee_version.outputs.version_code }}"
             echo "- versionName: \`${{ steps.gitee_version.outputs.version_name }}\`"
-            printf -- "- update note: %s\n" "$NOTE_FMT"
+            printf -- "- update note:\n%s\n" "$NOTE_FMT"
             echo "GITEOF"
           } >> "$GITHUB_OUTPUT"
 
