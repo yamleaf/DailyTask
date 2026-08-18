@@ -168,12 +168,19 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     /** Paho 每次 checkForActivity 后按剩余 keepalive 时间调用；同 PendingIntent 多次 set 自动覆盖旧闹钟 */
     override fun schedule(delayInMilliseconds: Long) {
         if (delayInMilliseconds <= 0) return
-        val triggerAt = SystemClock.elapsedRealtime() + delayInMilliseconds
+        // ALARM 加固（08-18）：息屏待机时 App Standby Bucket 把精确闹钟延迟约 60s，
+        // 名义 240s 心跳实际≈300s，逼近 broker 360s 踢线死线（裕度仅 60s）。
+        // 把排程间隔压缩为 1/ALARM_PING_COMPRESS_DIVISOR（≈80s），即便被 Standby 推到窗口末端
+        // (+248s) 有效间隔仍 <360s，稳；PINGREQ 发得比 keepAlive(240s) 更勤完全合法，
+        // broker 只要求 ≤keepAlive 内有活动，发更勤只会更确信连接存活。
+        // 注：本方法被 start() 与 Paho checkForActivity() 驱动的下一轮排程共用，入口统一压缩即覆盖全部节律。
+        val actualDelay = delayInMilliseconds / ALARM_PING_COMPRESS_DIVISOR
+        val triggerAt = SystemClock.elapsedRealtime() + actualDelay
         try {
             alarmManager.setExactAndAllowWhileIdle(
                 AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pingPendingIntent()
             )
-            Log.d(TAG, "已排 PING 闹钟 ${delayInMilliseconds}ms")
+            Log.d(TAG, "已排 PING 闹钟 ${actualDelay}ms（原始 ${delayInMilliseconds}ms /${ALARM_PING_COMPRESS_DIVISOR}）")
         } catch (e: Exception) {
             // 精确闹钟权限缺失等异常：降级非精确（Doze 下可能延迟，由 Paho 自动重连兜底）
             Log.w(TAG, "精确闹钟失败，降级 set（Doze 下可能延迟，由 Paho 重连兜底）: ${e.message}")
@@ -222,7 +229,7 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     /**
      * 3s 超时自动释放：够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule，防处理中 CPU 睡回。
      * 窗口已从 5s 再缩到 3s（08-18 优化：心跳 PINGRESP 通常在几百 ms 内返回，3s 足够；
-     * CPU 活跃 5s/240s=2.08% → 3s/240s=1.25%，省电约 40%）。
+     * CPU 活跃 3s/80s≈3.75%（ALARM 心跳压缩为 80s 后），闹钟频率提升占比略升但仍极低。
      * 历史：30s/240s 会让 CPU 活跃率高达 12.5%（实测 1.5%/h 耗电），5s 仅 ~2%。 */
     private fun acquireWakeLock() {
         runCatching {
@@ -250,6 +257,8 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         private const val PING_REQUEST_CODE = 1010
         /** start() 时 comms 异常为 null 的兜底：keepAlive=240s（与 connectOptions 配置一致） */
         private const val DEFAULT_KEEPALIVE_MS = 240_000L
+        /** ALARM 心跳间隔压缩系数（08-18）：keepAlive 240s → 实际排程 80s，对抗 App Standby 对精确闹钟的 ~60s 延迟 */
+        private const val ALARM_PING_COMPRESS_DIVISOR = 3
     }
 }
 
