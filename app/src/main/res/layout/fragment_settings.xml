@@ -1380,6 +1380,67 @@
                             android:layout_marginHorizontal="@dimen/dp_16"
                             android:background="@color/md_outlineVariant" />
 
+                        <!-- 息屏保活：仅屏幕模式=息屏（SCREEN_MODE_OFF）时显示 -->
+                        <LinearLayout
+                            android:id="@+id/keepAliveModeLayout"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingHorizontal="@dimen/dp_16"
+                            android:paddingVertical="@dimen/dp_12"
+                            android:visibility="gone">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="@dimen/dp_28"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/settings_keepalive_mode_title"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textColor="@color/md_onSurface" />
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="@dimen/dp_2"
+                                    android:maxLines="4"
+                                    android:text="@string/settings_keepalive_mode_tip"
+                                    android:textSize="@dimen/sp_10" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:id="@+id/keepAliveModeValueText"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                                <com.google.android.material.textview.MaterialTextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="@dimen/dp_4"
+                                    android:text="›"
+                                    android:textSize="@dimen/sp_18" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="@dimen/dividerLine"
+                            android:layout_marginHorizontal="@dimen/dp_16"
+                            android:background="@color/md_outlineVariant" />
+
                         <LinearLayout
                             android:id="@+id/pseudoMaskDelayLayout"
                             android:layout_width="match_parent"

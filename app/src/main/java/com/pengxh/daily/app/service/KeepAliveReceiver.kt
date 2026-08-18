@@ -603,9 +603,6 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 scheduleResetAlarm(context)
                 ensureServicesAlive(context, "resurrect")
                 tryResumeSchedulerIfWanted(context)
-                // 运行中保活级别降级检查：升级后网络稳定(>5h)自动回退省电级别并重建连接。
-                // 心跳闹钟 15min 周期驱动，覆盖「夜间待机不重启、启动降级不触发」的场景。
-                MqttAgentService.maybeDowngradeKeepAlive()
             }
             ACTION_PUNCH_PREWARM -> {
                 // 到点前只预热服务，不亮屏，降低自然息屏下的耗电

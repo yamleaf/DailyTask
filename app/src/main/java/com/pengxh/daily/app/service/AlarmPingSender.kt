@@ -6,15 +6,22 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.LogLevel
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient
 import org.eclipse.paho.client.mqttv3.MqttClient
 import org.eclipse.paho.client.mqttv3.MqttClientPersistence
 import org.eclipse.paho.client.mqttv3.MqttPingSender
+import org.eclipse.paho.client.mqttv3.MqttToken
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
+import org.eclipse.paho.client.mqttv3.internal.wire.MqttPingReq
 
 /**
  * MQTT 保活自适应第二级（ALARM）：以系统精确闹钟替代 Paho TimerPingSender 的 java.util.Timer
@@ -46,6 +53,10 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     @Volatile
     private var receiverRegistered = false
 
+    /** PING 诊断（08-18）：上次闹钟唤醒的 elapsedRealtime，用于计算实际唤醒间隔（判断闹钟是否被 Doze 节流） */
+    @Volatile
+    private var lastPingWakeElapsedMs = 0L
+
     private val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     /** 动态注册接收 PING 闹钟广播；闹钟到点由系统唤醒 CPU 后在此触发心跳 */
@@ -54,13 +65,86 @@ class AlarmPingSender(context: Context) : MqttPingSender {
             if (intent?.action != ACTION_PING) return
             Log.d(TAG, "PING 闹钟到点：唤醒 CPU 发心跳")
             acquireWakeLock()
+            // PING 诊断（降级 Log.d，logcat 保留；诊断结论已定，不再落盘刷日志）：
+            // 采样唤醒间隔 + 网络状态，用于核对闹钟节奏与网络可用性
+            val wakeAtElapsed = SystemClock.elapsedRealtime()
+            val sinceLastWake = if (lastPingWakeElapsedMs > 0L) wakeAtElapsed - lastPingWakeElapsedMs else -1L
+            lastPingWakeElapsedMs = wakeAtElapsed
+            val (netOk, netDesc) = sampleNetwork()
+            Log.d(TAG, "PING 唤醒：距上次=${if (sinceLastWake < 0) "首次" else "${sinceLastWake / 1000}s"} 网络=$netDesc")
+            if (!netOk) {
+                // 唤醒瞬间网络未验证可用：后台轮询记录「网络恢复耗时」（Log.d，不刷盘）
+                observeNetworkRecovery(wakeAtElapsed)
+            }
             try {
-                // Paho 内部判定：距上次出站活动超过 keepalive 则发 PINGREQ，并再次 schedule 下一轮
-                comms?.checkForActivity()
+                // 问题2修复（08-18 实测实证）：Paho checkForActivity 的「该发 PINGREQ」判定在闹钟驱动下
+                // 持续 false（① PINGRESP 一次没回导致 pingOutstanding 卡住，之后永远不发新 ping；
+                // ② 重连后 lastOutbound=CONNECT 时刻，240s 边界毫秒误差判定未到点），心跳从未实际发出
+                // → broker 360s 踢线（实测 3 次唤醒 0 次 PINGREQ）。
+                // 改为闹钟到点【无条件强制发 PINGREQ】：sendNoWait 直接入队（已连接时由 CommsSender 写出，
+                // 不经过"该发判定"）；随后 checkForActivity 仅用于让 Paho 更新内部计时并排下一轮闹钟。
+                // 注意：token 必须非 null——实测传 null 触发 Paho internalSend 内部 token.getClient() NPE
+                // （反编译确认：internalSend 会自动把 comms 的 client 设进 token，传 MqttToken(clientId) 即可）。
+                val commsRef = comms
+                if (commsRef != null && commsRef.isConnected) {
+                    commsRef.sendNoWait(MqttPingReq(), MqttToken(commsRef.getClient().clientId))
+                    Log.d(TAG, "PING 强制发送 PINGREQ")
+                    commsRef.checkForActivity()
+                } else {
+                    // 未连接（掉线重连中）：Paho 重连机制兜底，本帧跳过
+                    Log.d(TAG, "PING 未连接，跳过强制发送")
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "checkForActivity 异常（Paho 重连机制兜底）: ${e.message}")
+                Log.w(TAG, "强制发送 PINGREQ 异常（Paho 重连机制兜底）: ${e.message}")
+                LogFileManager.writeLog(LogLevel.W, "PING诊断 强制发送 PINGREQ 异常：${e.message}")
+                // 兜底重排下一轮闹钟，防止闹钟链断裂（异常时 checkForActivity 未执行，无下一轮排期）
+                runCatching { schedule(comms?.getKeepAlive()?.takeIf { it > 0 } ?: DEFAULT_KEEPALIVE_MS) }
             }
         }
+    }
+
+    /**
+     * 采样当前网络状态，返回 (网络是否可用, 描述串)。
+     * 可用 = 存在 activeNetwork 且 NET_CAPABILITY_VALIDATED（系统已验证可上网）；描述串含 WiFi ssid/rssi/速率。
+     */
+    private fun sampleNetwork(): Pair<Boolean, String> = runCatching {
+        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val network = cm?.activeNetwork
+        val caps = network?.let { cm.getNetworkCapabilities(it) }
+        val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        val internet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val wifiInfo = getWifiInfo()
+        val desc = buildString {
+            append("active=${network != null} validated=$validated internet=$internet")
+            if (wifiInfo != null) append(" $wifiInfo")
+        }
+        (network != null && validated) to desc
+    }.getOrDefault(false to "采样异常")
+
+    @Suppress("DEPRECATION") // WifiManager.getConnectionInfo 在 API 31 起 discouraged，诊断期仍可用
+    private fun getWifiInfo(): String? = runCatching {
+        val wm = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return null
+        val info = wm.connectionInfo ?: return null
+        val ssid = info.ssid?.takeIf { it.isNotBlank() && it != "<unknown ssid>" } ?: return null
+        "ssid=$ssid rssi=${info.rssi} link=${info.linkSpeed}Mbps"
+    }.getOrNull()
+
+    /** 唤醒时网络未验证可用 → 后台线程轮询记录「网络恢复耗时」（最多 3s），仅诊断，不阻塞主线程 */
+    private fun observeNetworkRecovery(wakeAtElapsed: Long) {
+        Thread {
+            var probeCount = 0
+            var recoveredMs = -1L
+            while (probeCount++ < 6 && recoveredMs < 0) {
+                Thread.sleep(500)
+                val (ok, _) = sampleNetwork()
+                if (ok) recoveredMs = SystemClock.elapsedRealtime() - wakeAtElapsed
+            }
+            if (recoveredMs >= 0) {
+                Log.d(TAG, "PING 网络恢复：唤醒后 ${recoveredMs}ms 可用")
+            } else {
+                Log.d(TAG, "PING 网络 3s 内未恢复")
+            }
+        }.apply { name = "PING-net-probe"; isDaemon = true }.start()
     }
 
     override fun init(comms: ClientComms) {
@@ -135,8 +219,11 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         }
     }
 
-    /** 5s 超时自动释放：够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule，防处理中 CPU 睡回。
-     * 注意保持短窗口——30s/240s 会让 CPU 活跃率高达 12.5%（实测 1.5%/h 耗电），5s 仅 ~2%。 */
+    /**
+     * 3s 超时自动释放：够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule，防处理中 CPU 睡回。
+     * 窗口已从 5s 再缩到 3s（08-18 优化：心跳 PINGRESP 通常在几百 ms 内返回，3s 足够；
+     * CPU 活跃 5s/240s=2.08% → 3s/240s=1.25%，省电约 40%）。
+     * 历史：30s/240s 会让 CPU 活跃率高达 12.5%（实测 1.5%/h 耗电），5s 仅 ~2%。 */
     private fun acquireWakeLock() {
         runCatching {
             if (wakeLock == null) {
@@ -144,7 +231,7 @@ class AlarmPingSender(context: Context) : MqttPingSender {
                 wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "daily_task_mqtt_ping")
                     .apply { setReferenceCounted(false) }
             }
-            if (wakeLock?.isHeld != true) wakeLock?.acquire(5_000L)
+            if (wakeLock?.isHeld != true) wakeLock?.acquire(3_000L)
         }.onFailure { e ->
             Log.w(TAG, "获取 PING WakeLock 失败: ${e.message}")
         }

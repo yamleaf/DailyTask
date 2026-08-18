@@ -67,6 +67,18 @@ object DatabaseWrapper {
     }
 
     /**
+     * 查询指定日期最近一次「考勤打卡成功」通知的完整时间（"yyyy-MM-dd HH:mm:ss"），无则返回 null。
+     * 用于快照「最近打卡」展示具体时间点（历史日期也精确到时分秒，而非仅日期）。
+     */
+    suspend fun loadLatestPunchTime(day: LocalDate): String? = withContext(Dispatchers.IO) {
+        val notices = noticeDao.loadBetween("${day} 00:00:00", "${day.plusDays(1)} 00:00:00")
+        notices.asSequence()
+            .filter { it.noticeMessage.contains("考勤打卡成功") }
+            .mapNotNull { it.postTime.takeIf { p -> p.startsWith("$day ") } }
+            .maxOrNull()
+    }
+
+    /**
      * 写入一条通知记录。
      * 注意：底层 noticeDao.insert 是非 suspend 的阻塞式 @Insert，必须在 IO 线程执行，
      * 否则当调用方位于主线程（如 TaskScheduler.scope=Dispatchers.Main、

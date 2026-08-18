@@ -753,6 +753,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             showScreenModeDialog()
         }
         refreshScreenModeRow()
+        // 息屏保活方式：仅屏幕模式=息屏时可见（refreshScreenModeRow 联动显隐）
+        binding.keepAliveModeLayout.setOnClickListener {
+            showKeepAliveModeDialog()
+        }
+        refreshKeepAliveModeRow()
         // 伪息屏增强分组开关：仅控制子项展开/收起，功能开关保留在子项内（forcePseudoMaskSwitch）
         val applyPseudoMaskGroupExpand = { expanded: Boolean ->
             binding.pseudoMaskGroupContent.visibility = if (expanded) View.VISIBLE else View.GONE
@@ -2033,6 +2038,45 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             else R.string.settings_screen_mode_tip
         )
         binding.screenModeValueText.text = screenModeLabel(AppRuntimeConfig.getScreenMode())
+        // 息屏保活行：仅屏幕模式=息屏时可见
+        refreshKeepAliveModeRow()
+    }
+
+    private fun keepAliveModeLabel(mode: Int): String = when (mode) {
+        Constant.KEEPALIVE_MODE_TIMER -> getString(R.string.settings_keepalive_mode_timer)
+        Constant.KEEPALIVE_MODE_ALARM -> getString(R.string.settings_keepalive_mode_alarm)
+        Constant.KEEPALIVE_MODE_CPU -> getString(R.string.settings_keepalive_mode_cpu)
+        else -> getString(R.string.settings_keepalive_mode_auto)
+    }
+
+    private fun refreshKeepAliveModeRow() {
+        val show = AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
+        binding.keepAliveModeLayout.visibility = if (show) View.VISIBLE else View.GONE
+        binding.keepAliveModeValueText.text = keepAliveModeLabel(AppRuntimeConfig.getKeepAliveMode())
+    }
+
+    private fun showKeepAliveModeDialog() {
+        val current = AppRuntimeConfig.getKeepAliveMode()
+            .coerceIn(Constant.KEEPALIVE_MODE_AUTO, Constant.KEEPALIVE_MODE_CPU)
+        val items = listOf(
+            "${getString(R.string.settings_keepalive_mode_auto)}：${getString(R.string.settings_keepalive_mode_auto_desc)}",
+            "${getString(R.string.settings_keepalive_mode_timer)}：${getString(R.string.settings_keepalive_mode_timer_desc)}",
+            "${getString(R.string.settings_keepalive_mode_alarm)}：${getString(R.string.settings_keepalive_mode_alarm_desc)}",
+            "${getString(R.string.settings_keepalive_mode_cpu)}：${getString(R.string.settings_keepalive_mode_cpu_desc)}"
+        )
+        UnifiedDialogKit.showSingleChoice(
+            ctx,
+            getString(R.string.settings_keepalive_mode_dialog_title),
+            items,
+            current
+        ) { which ->
+            AppRuntimeConfig.setKeepAliveMode(which)
+            refreshKeepAliveModeRow()
+            LogFileManager.writeLog("息屏保活方式：${keepAliveModeLabel(which)}")
+            ConfigImportSignal.notifyRemoteChanged(ctx)
+            // 非实时生效提示：策略在 MQTT 服务启动时读取模式，修改需下次启动才生效
+            getString(R.string.settings_keepalive_mode_effect_toast).show(ctx)
+        }
     }
 
     private fun showScreenModeDialog() {
