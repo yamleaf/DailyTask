@@ -2205,7 +2205,6 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     private fun showVersionInfo() {
         val appInfo = ctx.packageManager.getApplicationInfo(ctx.packageName, 0)
         val info = linkedMapOf(
-            "Git 提交" to BuildConfig.GIT_SHA,
             "版本号" to BuildConfig.VERSION_NAME,
             "Version Code" to BuildConfig.VERSION_CODE.toString(),
             "构建来源" to BuildConfig.BUILD_SOURCE,
