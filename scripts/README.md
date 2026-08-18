@@ -41,7 +41,7 @@ curl -s "https://gitee.com/api/v5/user?access_token=你的令牌"
 
 1. 代码提交并推送
 2. GitHub 仓库 → **Actions** → **Build Alpha** → **Run workflow**（手动触发）
-3. 填写：`note`（更新说明）、`force`（是否强制）
+3. 填写：`note`（更新说明，多行请用 `\n` 分隔，如 `修复A\n修复B`）、`force`（是否强制）
 4. 该工作流会自动：编译 debug+release → 上传 GitHub 构建产物 → 7z 加密包推 GitHub Release（人工分发）→ **aapt 读版本号 → AES 加密 release APK → 传 Gitee Release → 生成 .dat → 推 Gitee 仓库**
 5. 等待 5~15 分钟，检查：
    - Gitee 仓库 Release 里出现 `dailyTask_<tag>.apk.enc`（AES 密文）

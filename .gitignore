@@ -80,3 +80,6 @@ lint/tmp/
 # Python 缓存（scripts 发布脚本）
 __pycache__/
 *.pyc
+
+# CI 自动编译限流时间戳（存 GitHub Actions Cache，不入库）
+last_auto_build
