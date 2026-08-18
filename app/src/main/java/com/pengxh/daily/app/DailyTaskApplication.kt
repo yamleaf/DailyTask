@@ -79,7 +79,7 @@ class DailyTaskApplication : Application() {
         SaveKeyValues.initialize(this)
         AppRuntimeConfig.refreshFromStore()
         // 前台「无操作」自动进入伪息屏：由基类（KotlinBaseActivity）经桥接器回调，
-        // 统一驱动所有前台页面（任务页 / 远程页 / 设置页等），延迟复用「伪息屏增强」配置。
+        // 统一驱动所有前台页面（任务页 / 远程页 / 设置页等），延迟复用「息屏分组」配置。
         ForegroundIdleBridge.onResume = { IdlePseudoMaskController.startIdleMask(it) }
         ForegroundIdleBridge.onPause = { IdlePseudoMaskController.stopIdleMask() }
         ForegroundIdleBridge.onUserInteraction = { IdlePseudoMaskController.notifyUserActivity(it) }

@@ -107,7 +107,7 @@ object StatusReporter {
                 }"
             )
             appendLine(
-                "· 伪息屏增强：${
+                "· 伪息屏：${
                     if (AppRuntimeConfig.isForcePseudoMask()) {
                         val sec = SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
                         "开启（离开本软件超过 ${sec} 秒会主动盖黑屏）"
@@ -856,7 +856,7 @@ object StatusReporter {
                 row("最近打卡", recentPunchText(d.cal)),
                 row("省电模式", powerSaveText),
                 row("跳过节假日", holidayText),
-                row("伪息屏增强", maskText),
+                row("伪息屏", maskText),
                 row("通知转移", transferText)
             ))
 
