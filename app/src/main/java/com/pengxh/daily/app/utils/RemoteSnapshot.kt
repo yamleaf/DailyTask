@@ -259,10 +259,13 @@ object RemoteSnapshot {
             val punched = successSet.size
             val scheduled = scheduledSet.size
             val missed = (scheduled - successSet.size).coerceAtLeast(0)
+            // 「最近打卡」按日维度：成功 OR 超时都算打过卡；与 StatusReporter.recentPunchText 的成功∪超时口径对齐，
+            // 否则今天只有超时的情况下成功集合为空，会误回 "—"（见 feedback 2026-08-18 总览页 vs 日历页不一致）
+            val punchedSet = successSet + timeoutSet
             o.addProperty("punched", punched)
             o.addProperty("scheduled", scheduled)
             o.addProperty("missed", missed)
-            o.addProperty("recentPunch", recentPunchText(today, successSet))
+            o.addProperty("recentPunch", recentPunchText(today, punchedSet))
             o.addProperty("today", todayStatus(today, allTasks, successSet, timeoutSet))
 
             // 逐日状态（近两周 + 未来两周，共 29 天，与状态查询邮件窗口一致；
@@ -316,14 +319,15 @@ object RemoteSnapshot {
     }
 
     /**
-     * 最近一次打卡成功：若发生在今天，优先拼接通知里的完整时间（含时分秒）；
-     * 否则只显示日期（历史打卡记录未持久化到秒）。
+     * 最近一次打卡（成功或超时）：若发生在今天，拼接通知里的完整时间（含时分秒）；
+     * 否则只显示日期（历史打卡记录按日展示）。
+     * [punchedSet] = 成功集 ∪ 超时集，确保今天只有超时时也能查到具体时间，与日历页 history 口径一致。
      */
-    private suspend fun recentPunchText(today: LocalDate, successSet: Set<LocalDate>): String {
-        val latest = successSet.maxOrNull() ?: return "—"
+    private suspend fun recentPunchText(today: LocalDate, punchedSet: Set<LocalDate>): String {
+        val latest = punchedSet.maxOrNull() ?: return "—"
         // 非今天：按日记录即可（仅显示日期，无时间）
         if (latest != today) return latest.toString()
-        // 今天：显示具体时间点
+        // 今天：显示具体时间点（成功或超时均可，loadLatestPunchTime 已识别两种类型）
         return try {
             DatabaseWrapper.loadLatestPunchTime(today) ?: latest.toString()
         } catch (_: Exception) {
