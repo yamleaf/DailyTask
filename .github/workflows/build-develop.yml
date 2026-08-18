@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       note:
-        description: '更新说明（同步到 Gitee Release）'
+        description: '更新说明（同步到 Gitee Release；多行请用 \n 分隔）'
         required: false
         default: '常规更新'
       force:
@@ -16,22 +16,29 @@ on:
 
 permissions:
   contents: write
-  # 自动编译限流需要读写 repository variable（LAST_AUTO_BUILD 时间戳）
+  # 自动编译限流：时间戳存 GitHub Actions Cache（GITHUB_TOKEN 可读写 cache；
+  # repository variables API 对 GITHUB_TOKEN 写受限 403，故改用 cache，不污染仓库提交历史）
   actions: write
 
 jobs:
-  # 自动编译限流：时间戳存仓库文件 last_auto_build（GITHUB_TOKEN 写仓库 contents 必然可用，
-  # 而 repository variables API 对 GITHUB_TOKEN 写受限 403）。manual 直接放行；push 走
-  # "每小时一次"检查（build 成功后会更新该文件，commit 带 [ci skip] 防递归触发）。
+  # 自动编译限流：时间戳存 GitHub Actions Cache（不再写入仓库文件/提交，避免每次自动编译
+  # 都产生一条 [ci skip] 噪音 commit）。cache key 带 run_id 保证每次唯一可写；
+  # restore 用 restore-keys 前缀匹配取最新一条。manual 直接放行；push 走"每小时一次"检查
+  # （build 成功后 save 新时间戳条目）。
   rate-check:
     runs-on: ubuntu-latest
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
     steps:
+      # 恢复上次自动编译时间戳（cache 命中即拿到最近一次 save 的值）
+      - name: Restore last auto build timestamp (Actions cache)
+        uses: actions/cache/restore@v4
+        with:
+          path: last_auto_build
+          key: last-auto-build-${{ github.ref_name }}
+          restore-keys: last-auto-build-${{ github.ref_name }}
       - name: Rate limit auto builds (once per hour)
         id: check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # 手动触发不参与限流
           if [ "${{ github.event_name }}" != "push" ]; then
@@ -40,7 +47,11 @@ jobs:
             exit 0
           fi
           NOW=$(date +%s)
-          LAST=$(gh api "repos/$GITHUB_REPOSITORY/contents/last_auto_build" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || echo 0)
+          if [ -f last_auto_build ]; then
+            LAST=$(cat last_auto_build)
+          else
+            LAST=0
+          fi
           LAST=${LAST:-0}
           if [ "$LAST" -gt 0 ] && [ "$((NOW - LAST))" -lt 3600 ]; then
             echo "allowed=false" >> "$GITHUB_OUTPUT"
@@ -187,6 +198,9 @@ jobs:
           fi
 
           # 多行 body 用 GitHub Actions 多行输出语法（delimiter 包裹）
+          # workflow_dispatch 的 note 输入框是单行 input（GitHub UI 限制，无法多行粘贴），
+          # 约定用字面 \n 表示换行，这里还原成真换行写进 release body
+          NOTE_FMT=$(printf '%s' "${{ inputs.note }}" | sed 's/\\n/\n/g')
           {
             echo "body<<GITEOF"
             echo "### 更新内容（${RANGE_DESC}）"
@@ -197,7 +211,7 @@ jobs:
             echo "- commit: \`${{ github.sha }}\`"
             echo "- versionCode: ${{ steps.gitee_version.outputs.version_code }}"
             echo "- versionName: \`${{ steps.gitee_version.outputs.version_name }}\`"
-            echo "- update note: ${{ inputs.note }}"
+            printf -- "- update note: %s\n" "$NOTE_FMT"
             echo "GITEOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -212,14 +226,18 @@ jobs:
           files: |
             dailyTask_release_*.7z
 
-      # 自动构建成功：把当前时间戳写入仓库文件 last_auto_build（rate-check 据此限流）。
-      # commit 带 [ci skip] 不会再次触发本 workflow，避免递归。
-      - name: Record last auto build timestamp
+      # 自动构建成功：把当前时间戳写入 GitHub Actions Cache（rate-check 据此限流）。
+      # 不用 git commit，避免每次自动编译都产生一条 [ci skip] 噪音提交污染仓库历史。
+      # 时间戳文件本身无需 git 跟踪（不入库）。
+      - name: Record last auto build timestamp (Actions cache)
         if: github.event_name == 'push'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           echo "$(date +%s)" > last_auto_build
-          git add last_auto_build
-          git commit -m "chore: record last auto build timestamp [ci skip]" || echo "时间戳无变化，跳过提交"
-          git push origin alpha
+
+      - name: Save last auto build timestamp to Actions cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: last_auto_build
+          # key 带 run_id 保证每次唯一（cache 条目不可覆盖）；restore 时用前缀匹配取最新一条
+          key: last-auto-build-${{ github.ref_name }}-${{ github.run_id }}
