@@ -386,10 +386,10 @@ class MqttAgentService : Service() {
         }
         registerNetworkCallback()
         // 息屏保活：持有 WiFi 锁阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock）。
-        // 心跳调度按自适应保活级别（TIMER=Timer 线程 / ALARM=闹钟 / CPU=息屏持锁）决定，
+        // 心跳调度按自适应保活级别（ALARM=闹钟驱动 / CPU=息屏持锁 Timer 线程）决定，
         // 由 MqttKeepAliveStrategy 根据掉线频率自动升级，省电优先。
         acquireWifiLock()
-        // 息屏保活：auto 模式每次启动重置为 TIMER（最省电起点）；指定模式保持固定级别。不做降级
+        // 息屏保活：auto 模式每次启动重置为 ALARM（起步即闹钟心跳）；指定模式保持固定级别。不做降级
         MqttKeepAliveStrategy.onServiceStart()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
@@ -485,11 +485,6 @@ class MqttAgentService : Service() {
                 )
                 Log.d(TAG, "保活级别 ALARM：闹钟驱动心跳")
             }
-            else -> {
-                // TIMER 最省电：Paho 默认 TimerPingSender（a9b1e1f 已验证行为）
-                mqttClient = MqttClient(BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence())
-                Log.d(TAG, "保活级别 TIMER：TimerPingSender（最省电）")
-            }
         }
         connectOptions = MqttConnectOptions().apply {
             // 使用全新会话：Doze 挂网产生半死僵尸会话后，重连若沿用旧会话（cleanSession=false）
@@ -503,8 +498,8 @@ class MqttAgentService : Service() {
             connectionTimeout = 10
             // 自动重连：网络切换（WiFi↔移动）或瞬时掉线后由 Paho 自带退避重连，无需我们持有 WakeLock
             isAutomaticReconnect = true
-            // 心跳间隔 4 分钟：TIMER 级别由 Paho Timer 线程调度、ALARM 级别由闹钟调度、
-            // CPU 级别持锁保证 Timer 线程运行。间隔长可减少心跳包与唤醒次数以省电。
+            // 心跳间隔 4 分钟（keepAlive=240s）：ALARM 级别由闹钟调度、CPU 级别持锁保证 Timer 线程运行。
+            // 间隔长可减少心跳包与唤醒次数以省电。
             keepAliveInterval = 240
             // LWT：断线后由 Broker 代为发布 retained offline，控制端据此感知掉线
             setWill(topicStatus(), "offline".toByteArray(), 1, true)
@@ -524,7 +519,7 @@ class MqttAgentService : Service() {
                 // 掉线瞬间网络状态诊断（降级 Log.d，logcat 保留；区分网络断 vs 保活失效）
                 Log.d(TAG, "连接丢失诊断 网络=${networkStateDesc()} cause=${cause?.message}")
                 onDisconnected()
-                // 自适应保活升级：30min 窗口内掉线 ≥2 次 → 升一级（TIMER→ALARM→CPU）。
+                // 自适应保活升级：30min 窗口内掉线 ≥2 次 → 升一级（ALARM→CPU）。
                 // 升级后重建连接（pingSender 在 client 构造时注入，级别切换必须重建）。
                 // isRebuilding 守卫防止 rebuild 过程中 disconnect 触发本回调造成循环。
                 if (!isRebuilding && MqttKeepAliveStrategy.recordDisconnect() != null) {

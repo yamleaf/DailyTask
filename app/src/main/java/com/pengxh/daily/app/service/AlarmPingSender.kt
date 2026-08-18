@@ -25,7 +25,7 @@ import org.eclipse.paho.client.mqttv3.internal.wire.MqttPingReq
 
 /**
  * MQTT 保活自适应第二级（ALARM）：以系统精确闹钟替代 Paho TimerPingSender 的 java.util.Timer
- * 线程调度心跳。由 MqttKeepAliveStrategy 在 TIMER 级别频繁掉线时启用。
+ * 线程调度心跳。由 MqttKeepAliveStrategy 在 ALARM 级别驱动。
  *
  * 背景：息屏且未持 CPU 锁时设备可进入深睡（s2idle），Paho 的 TimerPingSender 线程不被调度，
  * PINGREQ 停发 → broker 在 keepalive×1.5（本项目 240s×1.5=360s）后踢线失联。系统精确闹钟

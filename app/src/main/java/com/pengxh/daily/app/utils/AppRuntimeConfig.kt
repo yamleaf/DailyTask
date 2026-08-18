@@ -32,7 +32,7 @@ object AppRuntimeConfig {
 
     fun getScreenMode(): Int = _screenMode.value
 
-    /** 息屏保活模式：0=auto（启动重置 TIMER+按掉线升级）/ 1=固定 timer / 2=固定 alarm / 3=固定 cpu */
+    /** 息屏保活模式：0=auto（起步 ALARM，按掉线升级 ALARM→CPU）/ 1=固定 alarm / 2=固定 cpu */
     fun getKeepAliveMode(): Int = _keepAliveMode.value
 
     fun setPowerSaveMode(enabled: Boolean) {
