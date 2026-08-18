@@ -84,11 +84,22 @@ object Constant {
     /** 远程控制服务总开关：默认关闭；开启且账号配置有效才连接 MQTT，关闭则完全停止服务（断开连接、撤销前台通知、零耗电） */
     const val MQTT_ENABLED_KEY = "MQTT_ENABLED_KEY"
 
-    // ===== MQTT 保活自适应级别（0=TIMER 1=ALARM 2=CPU，省电优先自动升级）=====
-    /** 当前保活级别：TIMER=TimerPingSender(最省电) / ALARM=闹钟心跳 / CPU=息屏持锁(兜底) */
+    // ===== MQTT 保活模式与级别（息屏保活选项，0=auto 1=timer 2=alarm 3=cpu）=====
+    /** 息屏保活模式：AUTO=启动重置 TIMER+按掉线升级（不降级）；指定模式=固定级别（不升级不降级） */
+    const val MQTT_KEEPALIVE_MODE_KEY = "MQTT_KEEPALIVE_MODE_KEY"
+    const val KEEPALIVE_MODE_AUTO = 0
+    const val KEEPALIVE_MODE_TIMER = 1
+    const val KEEPALIVE_MODE_ALARM = 2
+    const val KEEPALIVE_MODE_CPU = 3
+    const val KEEPALIVE_MODE_DEFAULT = KEEPALIVE_MODE_AUTO
+    /** 当前保活级别：TIMER=TimerPingSender(最省电) / ALARM=闹钟心跳 / CPU=息屏持锁(兜底)；仅 auto 模式使用 */
     const val MQTT_KEEPALIVE_LEVEL_KEY = "MQTT_KEEPALIVE_LEVEL_KEY"
-    /** 保活最近一次掉线时间戳（ms），用于长时间稳定(>5h)后自动降级回更省电级别 */
+    /** 保活最近一次掉线时间戳（ms） */
     const val MQTT_KEEPALIVE_LAST_DISC_KEY = "MQTT_KEEPALIVE_LAST_DISC_KEY"
+    /** 当日掉线计数（所有保活模式统一统计；配合 MQTT_DISCONNECT_DATE_KEY 跨天自动重置） */
+    const val MQTT_DISCONNECT_COUNT_KEY = "MQTT_DISCONNECT_COUNT_KEY"
+    /** 掉线计数所属日期（yyyy-MM-dd），跨天时计数清零重计 */
+    const val MQTT_DISCONNECT_DATE_KEY = "MQTT_DISCONNECT_DATE_KEY"
     /** 保活级别最近一次切换时间戳（ms），用于控制端展示切换时间点 */
     const val MQTT_KEEPALIVE_CHANGED_KEY = "MQTT_KEEPALIVE_CHANGED_KEY"
     /** 保活级别最近一次切换描述（如 "TIMER→ALARM"），用于控制端展示切换方向 */

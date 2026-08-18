@@ -158,7 +158,9 @@ class ForegroundRunningService : Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    // Android 15+ 对 dataSync 类型 FGS 有 6h/24h 时间配额，常驻任务调度服务跑满即被系统
+                    // 停止且重启全部被拒（08-18 K20 Pro 夜间离线根因）。改 specialUse 不受时限，可无限常驻。
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
             } else {
                 startForeground(Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification)

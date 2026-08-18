@@ -126,6 +126,14 @@ object RemoteSnapshot {
             else "—"
         )
         o.addProperty("keepaliveLevelChangedDesc", MqttKeepAliveStrategy.lastChangedDesc())
+        // 掉线统计（所有保活模式统一计数，跨天重置）：当日掉线次数 + 最近掉线时间
+        o.addProperty("mqttDisconnectCount", MqttKeepAliveStrategy.disconnectCount())
+        val lastDiscAt = MqttKeepAliveStrategy.lastDisconnectAt()
+        o.addProperty(
+            "mqttLastDisconnectAt",
+            if (lastDiscAt > 0L) dtf.format(java.time.Instant.ofEpochMilli(lastDiscAt).atZone(ZoneId.systemDefault()).toLocalDateTime())
+            else "—"
+        )
         o.addProperty("powerSaveMode", AppRuntimeConfig.isPowerSaveMode())
         o.addProperty("forcePseudoMask", AppRuntimeConfig.isForcePseudoMask())
         o.addProperty("wifi", wifiStatus(context))
@@ -313,14 +321,11 @@ object RemoteSnapshot {
      */
     private suspend fun recentPunchText(today: LocalDate, successSet: Set<LocalDate>): String {
         val latest = successSet.maxOrNull() ?: return "—"
+        // 非今天：按日记录即可（仅显示日期，无时间）
         if (latest != today) return latest.toString()
+        // 今天：显示具体时间点
         return try {
-            val time = DatabaseWrapper.loadCurrentDayNotice()
-                .asSequence()
-                .filter { it.noticeMessage.contains("考勤打卡成功") }
-                .mapNotNull { it.postTime.takeIf { p -> p.startsWith("$today ") } }
-                .maxOrNull()
-            if (time != null) time else latest.toString()
+            DatabaseWrapper.loadLatestPunchTime(today) ?: latest.toString()
         } catch (_: Exception) {
             latest.toString()
         }

@@ -21,6 +21,9 @@ object AppRuntimeConfig {
     private val _screenMode = MutableStateFlow(Constant.SCREEN_MODE_DEFAULT)
     val screenMode = _screenMode.asStateFlow()
 
+    private val _keepAliveMode = MutableStateFlow(Constant.KEEPALIVE_MODE_DEFAULT)
+    val keepAliveMode = _keepAliveMode.asStateFlow()
+
     fun isPowerSaveMode(): Boolean = _powerSaveMode.value
 
     fun isForcePseudoMask(): Boolean = _forcePseudoMask.value
@@ -28,6 +31,9 @@ object AppRuntimeConfig {
     fun isDesktopPetEnabled(): Boolean = _desktopPetEnabled.value
 
     fun getScreenMode(): Int = _screenMode.value
+
+    /** 息屏保活模式：0=auto（启动重置 TIMER+按掉线升级）/ 1=固定 timer / 2=固定 alarm / 3=固定 cpu */
+    fun getKeepAliveMode(): Int = _keepAliveMode.value
 
     fun setPowerSaveMode(enabled: Boolean) {
         SaveKeyValues.saveBoolean(Constant.POWER_SAVE_MODE_KEY, enabled)
@@ -51,6 +57,12 @@ object AppRuntimeConfig {
         val v = mode.coerceIn(Constant.SCREEN_MODE_PSEUDO, Constant.SCREEN_MODE_KEEP_ON)
         SaveKeyValues.saveInt(Constant.SCREEN_MODE_KEY, v)
         _screenMode.value = v
+    }
+
+    fun setKeepAliveMode(mode: Int) {
+        val v = mode.coerceIn(Constant.KEEPALIVE_MODE_AUTO, Constant.KEEPALIVE_MODE_CPU)
+        SaveKeyValues.saveInt(Constant.MQTT_KEEPALIVE_MODE_KEY, v)
+        _keepAliveMode.value = v
     }
 
     /**
@@ -77,5 +89,9 @@ object AppRuntimeConfig {
             Constant.SCREEN_MODE_KEY,
             Constant.SCREEN_MODE_DEFAULT
         ).coerceIn(Constant.SCREEN_MODE_PSEUDO, Constant.SCREEN_MODE_KEEP_ON)
+        _keepAliveMode.value = SaveKeyValues.loadInt(
+            Constant.MQTT_KEEPALIVE_MODE_KEY,
+            Constant.KEEPALIVE_MODE_DEFAULT
+        ).coerceIn(Constant.KEEPALIVE_MODE_AUTO, Constant.KEEPALIVE_MODE_CPU)
     }
 }

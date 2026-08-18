@@ -11,12 +11,14 @@ import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.content.pm.ServiceInfo
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -247,21 +249,6 @@ class MqttAgentService : Service() {
         }
 
         /**
-         * 运行中保活级别降级检查：由 KeepAliveReceiver 心跳闹钟（15min）周期性驱动。
-         * 升级后若网络已稳定（距最后掉线 >5h），回退更省电级别并重建连接——覆盖「夜间待机不重启、
-         * 启动降级永远不触发」的场景：夜间某时段网络波动升级后，稳定 5h 即自动降级恢复省电。
-         * 服务未运行（instance 为 null）时只持久化降级，下次启动按降级后级别建连。
-         */
-        fun maybeDowngradeKeepAlive() {
-            val next = MqttKeepAliveStrategy.checkDowngrade() ?: return
-            val svc = instance
-            if (svc != null) {
-                LogFileManager.action("保活级别运行中降级为 ${next.name}，重建 MQTT 连接")
-                svc.rebuildMqttClient()
-            }
-        }
-
-        /**
          * 取消 MQTT 复活/救援闹钟（服务实例可能已销毁，仍按相同 PendingIntent 取消）。
          * 「暂停使用」路径必须调用，避免残留闹钟在暂停期间再次拉起服务。
          */
@@ -402,8 +389,8 @@ class MqttAgentService : Service() {
         // 心跳调度按自适应保活级别（TIMER=Timer 线程 / ALARM=闹钟 / CPU=息屏持锁）决定，
         // 由 MqttKeepAliveStrategy 根据掉线频率自动升级，省电优先。
         acquireWifiLock()
-        // 自适应保活降级检查：上次运行若因网络波动升到高耗电级别，且已稳定 >5h → 降级回省电级别
-        MqttKeepAliveStrategy.checkDowngrade()
+        // 息屏保活：auto 模式每次启动重置为 TIMER（最省电起点）；指定模式保持固定级别。不做降级
+        MqttKeepAliveStrategy.onServiceStart()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
         Thread { initMqtt() }.start()
@@ -431,7 +418,10 @@ class MqttAgentService : Service() {
             .setContentIntent(contentIntent)
             .setOngoing(true)
         return try {
-            startForeground(1001, notificationBuilder!!.build())
+            // Android 15+ 对 dataSync/unknown 类 FGS 有 6h/24h 时间配额：常驻服务跑满即被系统停止，
+            // 且重启 startForeground 全部被拒（08-18 K20 Pro 夜间离线根因：type unknown/dataSync 配额耗尽）。
+            // 显式传 specialUse（manifest 已声明 + FOREGROUND_SERVICE_SPECIAL_USE 权限 + property）不受时限。
+            startForeground(1001, notificationBuilder!!.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             updateNotification()
             true
         } catch (e: Exception) {
@@ -531,6 +521,8 @@ class MqttAgentService : Service() {
                 // 不再更新状态/排闹钟/触发重连，避免残留通知与无效复活闹钟
                 if (instance !== this@MqttAgentService) return
                 Log.w(TAG, "MQTT 连接丢失：${cause?.message}", cause)
+                // 掉线瞬间网络状态诊断（降级 Log.d，logcat 保留；区分网络断 vs 保活失效）
+                Log.d(TAG, "连接丢失诊断 网络=${networkStateDesc()} cause=${cause?.message}")
                 onDisconnected()
                 // 自适应保活升级：30min 窗口内掉线 ≥2 次 → 升一级（TIMER→ALARM→CPU）。
                 // 升级后重建连接（pingSender 在 client 构造时注入，级别切换必须重建）。
@@ -1203,6 +1195,16 @@ class MqttAgentService : Service() {
         stateListener?.invoke(false)
         updateNotification()
     }
+
+    /** 诊断（08-18）：采样当前网络可用性描述（activeNetwork + VALIDATED/INTERNET），掉线时落盘定位用 */
+    private fun networkStateDesc(): String = runCatching {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val network = cm?.activeNetwork
+        val caps = network?.let { cm.getNetworkCapabilities(it) }
+        val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        val internet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        "active=${network != null} validated=$validated internet=$internet"
+    }.getOrDefault("采样异常")
 
     /** 进程内重连任务（带去重）：多个触发源（3s 延迟 / 网络恢复 / 救援闹钟 / 手动按钮）并发时只保留一个在跑 */
     @Volatile
