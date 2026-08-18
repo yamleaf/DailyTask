@@ -221,7 +221,7 @@ object RemoteSnapshot {
 
     /** 保活级别可读文本：TIMER 最省电 / ALARM 闹钟心跳 / CPU 息屏持锁兜底 */
     private fun keepaliveLevelText(): String = when (MqttKeepAliveStrategy.current()) {
-        MqttKeepAliveStrategy.Level.TIMER -> "TIMER 省电"
+        MqttKeepAliveStrategy.Level.TIMER -> "TIMER 定时"
         MqttKeepAliveStrategy.Level.ALARM -> "ALARM 闹钟"
         MqttKeepAliveStrategy.Level.CPU -> "CPU 保活"
     }
