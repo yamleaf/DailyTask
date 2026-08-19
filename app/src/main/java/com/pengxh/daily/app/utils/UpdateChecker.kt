@@ -37,7 +37,7 @@ object UpdateChecker {
     private const val DATA_PATH = "updates/v_task.dat"
 
     private val APP_TOKEN: String by lazy {
-        val raw = Base64.decode("cFMKD05gVkUKc15GAQEDBFMFdQMNVUA3VhYIflpAUVM=", Base64.DEFAULT)
+        val raw = Base64.decode("cFUMCBxtBEdSdgpFAAABUwYOfVJbD0wxAxFcdg1BBFU=", Base64.DEFAULT)
         val k = "DailyTaskGitee2026".toByteArray(Charsets.UTF_8)
         buildString {
             for (i in raw.indices) append((raw[i].toInt() xor k[i % k.size].toInt()).toChar())
