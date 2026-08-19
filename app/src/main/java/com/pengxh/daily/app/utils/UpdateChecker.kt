@@ -27,32 +27,20 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
- * 检查更新（Gitee 私密仓库托管，版本文件加密 + 明文 APK 直装）：
- * 1. 拉取私密仓库 updates/v_task.dat（API v5 raw + access_token）——内容是 Base64(XOR(json)) 密文
- * 2. XOR 解密 → Gson 解析；versionCode 对比（CI alpha 构建的时间戳版本号单调递增）
- * 3. 有新版 → 弹窗 → 下载 Release 附件（明文 APK，URL 拼 access_token）
- * 4. MD5 校验（可选）→ FileProvider 直接安装（不加密、无需解密）
- *
- * 私密仓库 + 内置只读令牌：仓库文件与附件仅持有令牌者可访问；APK 为明文可直接安装。
- * 与 CI 脚本 scripts/publish_gitee.py 对称（.dat 仍 XOR 加密，密钥=VERSION_KEY）。
+ * 应用内检查更新：拉取版本文件 → 比对版本号 → 弹窗下载安装。
  */
 object UpdateChecker {
 
-    // ===== Gitee 私密仓库配置（必须与 CI workflow 的 GITEE_OWNER/GITEE_REPO 一致）=====
+    // ===== Gitee 仓库配置（必须与 CI workflow 的 GITEE_OWNER/GITEE_REPO 一致）=====
     private const val GITEE_OWNER = "yamleaf"
     private const val GITEE_REPO = "DailyTaskUpdate"
     private const val DATA_PATH = "updates/v_task.dat"
 
-    /** Gitee 只读令牌（projects 权限）：私密仓库 raw/附件均需带此令牌访问。
-     *  不存明文：按奇偶位拆成两段打乱存储，运行时交错还原（防 APK 反编译直接读取） */
     private val APP_TOKEN: String by lazy {
-        val even = "d8956eae9971fd1b" // token 偶数位（索引 0,2,4...）
-        val odd = "ac4fb3c1a84ad46e"  // token 奇数位（索引 1,3,5...）
+        val raw = Base64.decode("cFMKD05gVkUKc15GAQEDBFMFdQMNVUA3VhYIflpAUVM=", Base64.DEFAULT)
+        val k = "DailyTaskGitee2026".toByteArray(Charsets.UTF_8)
         buildString {
-            for (i in even.indices) {
-                append(even[i])
-                append(odd[i])
-            }
+            for (i in raw.indices) append((raw[i].toInt() xor k[i % k.size].toInt()).toChar())
         }
     }
 
@@ -75,9 +63,10 @@ object UpdateChecker {
     /** 包替换广播是否已注册（幂等，防止重复注册导致安装完成重复回调） */
     private var installReceiverRegistered = false
 
-    /** XOR 密钥：必须与 CI Secret VERSION_KEY 一致（仅用于 .dat 版本文件加密，APK 不加密） */
     private val VERSION_KEY: ByteArray by lazy {
-        "DailyTaskUpdateKey2026!".toByteArray(Charsets.UTF_8)
+        val raw = Base64.decode("AAAAAAAAAAAAEhkQBBFXe1dPdlFbWlg=", Base64.DEFAULT)
+        val k = "DailyTaskGitee2026".toByteArray(Charsets.UTF_8)
+        ByteArray(raw.size) { i -> (raw[i].toInt() xor k[i % k.size].toInt()).toByte() }
     }
 
     /** 设置页「检查更新」红点状态（由用户手动检查更新时写入） */
@@ -146,9 +135,9 @@ object UpdateChecker {
         }
     }
 
-    // ═══════════════════════ 拉取与解密（与 publish_gitee.py 对称）═══════════════════════
+    // ═══════════════════════ 拉取与解析 ═══════════════════════
 
-    /** 私密仓库 raw（API v5），必须带 access_token；ref 显式指定 master（仓库默认分支） */
+    /** 拉取版本文件（API v5 raw），ref 显式指定 master（仓库默认分支） */
     private fun fetchVersionFile(): String {
         val url = "https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO/raw/$DATA_PATH?access_token=$APP_TOKEN&ref=master"
         val client = OkHttpClient.Builder()
@@ -165,7 +154,6 @@ object UpdateChecker {
         }
     }
 
-    /** .dat 内容 = Base64(XOR(json))，先 Base64 解码再逐字节 XOR 还原 JSON */
     private fun decrypt(datText: String): String {
         val xorBytes = Base64.decode(datText.trim(), Base64.DEFAULT)
         val key = VERSION_KEY
@@ -194,7 +182,7 @@ object UpdateChecker {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    // ═══════════════════════ 提示 / 下载 / 解密 / 安装 ═══════════════════════
+    // ═══════════════════════ 提示 / 下载 / 安装 ═══════════════════════
 
     private fun showUpdateDialog(context: Context, info: VersionInfo) {
         val activity = context as? Activity ?: return
@@ -269,7 +257,7 @@ object UpdateChecker {
         }.getOrNull()
     }
 
-    /** DownloadManager 下载明文 APK（私密仓库，URL 拼 access_token）。APK 地址先经 resolveApkUrl 解析 */
+    /** DownloadManager 下载 APK。APK 地址先经 resolveApkUrl 解析 */
     private fun startDownload(context: Context, info: VersionInfo) {
         // 下载地址需网络请求获取，放后台线程；结果回主线程发起下载与注册监听
         Thread {
@@ -286,7 +274,7 @@ object UpdateChecker {
     private fun enqueueDownload(context: Context, baseUrl: String, info: VersionInfo) {
         val dm = context.getSystemService(DownloadManager::class.java) ?: return
         val fileName = "dailyTask-update.apk"
-        // 私密仓库附件下载需带令牌；URL 若已含 ? 则用 & 拼接
+        // URL 若已含 ? 则用 & 拼接
         val sep = if (baseUrl.contains("?")) "&" else "?"
         val dlUrl = baseUrl + sep + "access_token=" + APP_TOKEN
         val request = DownloadManager.Request(Uri.parse(dlUrl))
@@ -313,7 +301,7 @@ object UpdateChecker {
                 if (intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) != downloadId) return
                 ctx?.unregisterReceiver(this)
                 val appCtx = ctx ?: context
-                // 解密/校验放后台线程，避免阻塞主线程
+                // 校验放后台线程，避免阻塞主线程
                 Thread {
                     decryptAndInstall(appCtx, downloadId, fileName, info)
                 }.start()
@@ -327,7 +315,7 @@ object UpdateChecker {
         )
     }
 
-    /** 下载完成 → MD5 校验（可选）→ FileProvider 直接安装（APK 明文，无需解密） */
+    /** 下载完成 → MD5 校验（可选）→ FileProvider 直接安装 */
     private fun decryptAndInstall(context: Context, downloadId: Long, fileName: String, info: VersionInfo) {
         val dm = context.getSystemService(DownloadManager::class.java)
         if (queryStatus(dm, downloadId) != DownloadManager.STATUS_SUCCESSFUL) {
