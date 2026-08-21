@@ -157,11 +157,11 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
 
       # ===== 手动触发：dump APK 版本号，供 GitHub Release Draft 展示（版本信息发版在本地执行） =====
-      # 自定义包名构建（package_name 非空）视为测试包：跳过下方全部发版链路（版本提取/加密/
-      # Release Draft），避免定制包名 APK 进入 Gitee 更新通道——终端用户装不上（包名/签名不符）。
-      # 测试包仍通过上方 "Upload release APK" artifact 步骤下载。
+      # 自定义包名构建与默认包名同流程：同样走版本提取 → 7z 加密 → Release Draft（tag=dt-{versionCode}）。
+      # sync_release.py 按 tag/版本号同步 Gitee，对包名无感知——Gitee 更新通道始终跟随最新一次手动构建
+      # （注意：custom 包为最新版期间，默认包名用户会收到无法安装的更新提示，属预期行为）。
       - name: Extract version from APK (aapt)
-        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
+        if: github.event_name == 'workflow_dispatch'
         id: gitee_version
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
@@ -177,7 +177,7 @@ jobs:
       # ===== 手动触发：APK 加密为 7z（AES-256，密码=APK_ENCRYPT_PASSWORD）供 Gitee Go 拉取解压 =====
       # GitHub 仓库公开 → release 资产公开，加密防直接下载；Gitee 私有仓库存明文 APK。
       - name: Encrypt APK (7z AES-256)
-        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
+        if: github.event_name == 'workflow_dispatch'
         run: |
           pip install py7zr -q
           python3 - <<'EOF'
@@ -198,12 +198,22 @@ jobs:
       # ===== 手动触发：生成 GitHub Release Draft（标题 DailyTask Alpha yymmdd.HHmm，
       # body 总结自上次 release tag 以来的提交记录） =====
       - name: Prepare GitHub Release info (title date + body commits)
-        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
+        if: github.event_name == 'workflow_dispatch'
         id: gh_release_info
+        env:
+          # 经 env 传递再判空，避免 inputs 直接内插 shell 造成注入
+          CUSTOM_PACKAGE: ${{ inputs.package_name }}
         run: |
           # 标题日期时间（北京时间 yymmdd.HHmm，例 260816.1435 = 2026-08-16 14:35）
           TITLE_DATE=$(TZ='Asia/Shanghai' date +%y%m%d.%H%M)
           echo "title_date=$TITLE_DATE" >> "$GITHUB_OUTPUT"
+
+          # 包名标识：仅自定义包名构建标注「自定义包名」（不暴露具体包名），默认构建不加此行
+          if [ -n "$CUSTOM_PACKAGE" ]; then
+            PKG_LINE="- 包名: 自定义包名"
+          else
+            PKG_LINE=""
+          fi
 
           # 自上次 release tag（apk-*）起的提交记录；无 tag 时取最近 10 条
           LAST_TAG=$(git tag --list "apk-*" --sort=-version:refname 2>/dev/null | head -1)
@@ -229,12 +239,13 @@ jobs:
             echo "- commit: \`${{ github.sha }}\`"
             echo "- versionCode: ${{ steps.gitee_version.outputs.version_code }}"
             echo "- versionName: \`${{ steps.gitee_version.outputs.version_name }}\`"
+            if [ -n "$PKG_LINE" ]; then echo "$PKG_LINE"; fi
             printf -- "- update note:\n%s\n" "$NOTE_FMT"
             echo "GITEOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release (encrypted APK, for Gitee Go sync)
-        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
+        if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           # tag 用 versionCode，Gitee Go 据此解析版本号；body 含 versionName/note（Gitee Go 正则提取）
