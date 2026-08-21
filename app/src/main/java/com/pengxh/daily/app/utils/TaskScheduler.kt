@@ -25,6 +25,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -127,10 +128,12 @@ object TaskScheduler {
      * 时序：防重复 → 检查协程作用域 → 判断周末/节假日 → 构建排程 → 启动核心循环
      */
     fun startTask() {
-        val currentScope = scope
-        if (currentScope == null) {
-            LogFileManager.error("TaskScheduler scope 未初始化")
-            return
+        // 兜底自愈：scope 由 ForegroundRunningService onCreate 注入，若 FGS 尚未拉起
+        // （手动打开 App 前远程/闹钟先触发启动），自动创建临时作用域，避免静默失效；
+        // 后续 FGS attach 时会 cancel 此兜底作用域并换用服务作用域。
+        val currentScope = scope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default).also {
+            scope = it
+            LogFileManager.error("TaskScheduler scope 未初始化，已自动创建兜底作用域")
         }
 
         // 原子抢占运行权：startTask 可能被多个线程并发调用（FGS 启动/心跳复活/MQTT 命令/远程指令/用户点击），
@@ -229,7 +232,8 @@ object TaskScheduler {
                     task.displayIndex,
                     schedule.size,
                     task.actualTime,
-                    task.plannedTime
+                    task.plannedTime,
+                    task.task.name
                 )
             )
 

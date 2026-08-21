@@ -1,27 +1,134 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底部悬浮磨砂玻璃导航卡片：BlurView 模糊其下方内容（BlurTarget），
-     半透明圆角背景 + 细描边，children（BottomNavigationView）不被模糊 -->
-<eightbitlab.com.blurview.BlurView
+<!-- 底部悬浮磨砂玻璃导航（v1.3 层级重构：居中胶囊 + 中心凸起「任务」按钮，§3.12）
+     层级原则：
+     1. 凸起按钮绝不放进 BlurView 内部——BlurView 会把内容裁剪到圆角轮廓内，凸起上半截必被切掉；
+     2. 按钮与 BlurView 为 ConstraintLayout 平级子 View，XML 中 BlurView 先声明（先画背景），
+        按钮后声明（后画前景），叠加 elevation 保证按钮完整浮在毛玻璃之上；
+     3. 圆角分工：胶囊圆角由 bg_frosted_nav（ShapeDrawable）+ clipToOutline 切出，
+        按钮保持正圆渐变（bg_brand_gradient_circle），二者叠压形成悬浮凸起效果。 -->
+<androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_gravity="bottom"
-    android:layout_marginBottom="16dp"
-    android:background="@drawable/bg_frosted_nav"
-    android:clipToOutline="true"
-    android:elevation="2dp">
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/bottomNav"
-        android:layout_width="match_parent"
+    <!-- 磨砂胶囊卡片（底层） -->
+    <eightbitlab.com.blurview.BlurView
+        android:id="@+id/blurView"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@android:color/transparent"
-        android:elevation="0dp"
-        app:itemIconTint="@color/bottom_nav_color"
-        app:itemTextColor="@color/bottom_nav_color"
-        app:itemActiveIndicatorStyle="@style/Widget.Material3.BottomNavigationView.ActiveIndicator"
-        app:labelVisibilityMode="labeled"
-        app:menu="@menu/bottom_nav_main" />
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_frosted_nav"
+        android:clipToOutline="true"
+        android:outlineProvider="background"
+        android:elevation="@dimen/elev_floating_nav"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
-</eightbitlab.com.blurview.BlurView>
+        <LinearLayout
+            android:id="@+id/navRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="8dp"
+            android:paddingBottom="10dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp">
+
+            <LinearLayout
+                android:id="@+id/navRemote"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:paddingTop="4dp"
+                android:paddingBottom="2dp">
+
+                <ImageView
+                    android:id="@+id/iconRemote"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/daily_ic_cloud"
+                    android:contentDescription="远程" />
+
+                <TextView
+                    android:id="@+id/labelRemote"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="远程"
+                    android:textSize="11sp"
+                    android:textColor="@color/md_onSurfaceVariant" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="56dp"
+                android:layout_height="1dp" />
+
+            <LinearLayout
+                android:id="@+id/navSettings"
+                android:layout_width="72dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:paddingTop="4dp"
+                android:paddingBottom="2dp">
+
+                <ImageView
+                    android:id="@+id/iconSettings"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/daily_ic_settings"
+                    android:contentDescription="设置" />
+
+                <TextView
+                    android:id="@+id/labelSettings"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="设置"
+                    android:textSize="11sp"
+                    android:textColor="@color/md_onSurfaceVariant" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </eightbitlab.com.blurview.BlurView>
+
+    <!-- 凸起「任务」按钮（顶层）：顶部对齐胶囊上缘后 translationY 上移 14dp 露出半圆 -->
+    <FrameLayout
+        android:id="@+id/navTask"
+        android:layout_width="@dimen/nav_raised_button"
+        android:layout_height="@dimen/nav_raised_button"
+        android:translationY="-14dp"
+        android:background="@drawable/bg_brand_gradient_circle"
+        android:elevation="@dimen/elev_fab"
+        android:translationZ="4dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="任务"
+        app:layout_constraintTop_toTopOf="@id/blurView"
+        app:layout_constraintStart_toStartOf="@id/blurView"
+        app:layout_constraintEnd_toEndOf="@id/blurView">
+
+        <ImageView
+            android:id="@+id/iconTask"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_clock"
+            android:tint="@color/on_header"
+            android:contentDescription="@null" />
+    </FrameLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ShapeAppearance 圆角体系（方案 C1） -->
+    <!-- ShapeAppearance 圆角体系（收敛到 protocol 令牌阶梯） -->
     <style name="ShapeAppearance.DailyTask.Small" parent="ShapeAppearance.Material3.SmallComponent">
-        <item name="cornerSize">4dp</item>
+        <item name="cornerSize">@dimen/dp_4</item>
     </style>
     <style name="ShapeAppearance.DailyTask.Medium" parent="ShapeAppearance.Material3.MediumComponent">
-        <item name="cornerSize">8dp</item>
+        <item name="cornerSize">@dimen/radius_pill</item>
     </style>
     <style name="ShapeAppearance.DailyTask.Large" parent="ShapeAppearance.Material3.LargeComponent">
-        <item name="cornerSize">16dp</item>
+        <item name="cornerSize">@dimen/radius_dialog</item>
     </style>
     <style name="ShapeAppearance.DailyTask.XL" parent="ShapeAppearance.Material3.LargeComponent">
-        <item name="cornerSize">20dp</item>
+        <item name="cornerSize">@dimen/radius_nav_card</item>
     </style>
     <style name="ShapeAppearance.DailyTask.Full" parent="ShapeAppearance.Material3.LargeComponent">
-        <item name="cornerSize">28dp</item>
+        <item name="cornerSize">@dimen/radius_floating_nav</item>
     </style>
     <!-- 底部面板：仅顶部 24dp 圆角（统一规范） -->
     <style name="ShapeAppearance.DailyTask.BottomSheet" parent="ShapeAppearance.Material3.LargeComponent">
@@ -32,7 +32,7 @@
 
     <!-- 统一输入框样式（12dp 圆角，双端一致） -->
     <style name="ShapeAppearance.DailyTask.Input" parent="ShapeAppearance.Material3.LargeComponent">
-        <item name="cornerSize">12dp</item>
+        <item name="cornerSize">@dimen/radius_input</item>
     </style>
     <style name="Widget.DailyTask.TextInput.Outlined" parent="Widget.Material3.TextInputLayout.OutlinedBox">
         <item name="shapeAppearance">@style/ShapeAppearance.DailyTask.Input</item>
@@ -52,10 +52,16 @@
         <item name="colorOnSurfaceVariant">@color/md_onSurfaceVariant</item>
         <item name="colorOutline">@color/md_outline</item>
         <item name="colorOutlineVariant">@color/md_outlineVariant</item>
+        <!-- 波纹色（品牌蓝 8%）替代系统默认灰 -->
+        <item name="android:colorControlHighlight">@color/color_ripple</item>
+        <!-- 统一 Snackbar（§3.16） -->
+        <item name="snackbarStyle">@style/Widget.Daily.Snackbar</item>
+        <item name="snackbarTextViewStyle">@style/TextAppearance.Daily.Snackbar</item>
+        <item name="snackbarButtonStyle">@style/TextAppearance.Daily.Snackbar.Action</item>
         <item name="android:colorBackground">@color/md_background</item>
         <item name="android:windowBackground">@color/md_background</item>
-        <!-- 工具栏为紫色渐变/md_primary，状态栏统一浅色图标 -->
-        <item name="android:statusBarColor">@color/header_start</item>
+        <!-- 状态栏统一为 DC 策略：透明 + 渐变 AppBar 延伸到状态栏（v1.2 用户拍板） -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
         <!-- 导航栏跟随明暗：浅色模式深色图标，深色模式浅色图标 -->
         <item name="android:navigationBarColor">@color/md_surface</item>

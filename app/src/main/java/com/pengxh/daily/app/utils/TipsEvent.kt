@@ -13,7 +13,8 @@ sealed class TipsEvent {
         val index: Int,
         val total: Int,
         val actualTime: String,
-        val plannedTime: String
+        val plannedTime: String,
+        val name: String = ""
     ) : TipsEvent()
 
     /**

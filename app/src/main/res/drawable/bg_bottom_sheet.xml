@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底部动作弹层背景：与 bg_bottom_sheet 同款立体厚度——投影只在列表卡片上方露出 6dp -->
+<!-- 底部弹层背景：投影只在弹层上方露出 6dp，品牌蓝浅色调（非黑），增强悬浮层次 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 顶部投影层 -->
+    <!-- 顶部投影层：品牌蓝 30% -->
     <item>
         <shape android:shape="rectangle">
             <solid android:color="@color/dialog_shadow" />
             <corners
-                android:topLeftRadius="@dimen/lib_dp_10"
-                android:topRightRadius="@dimen/lib_dp_10" />
+                android:topLeftRadius="24dp"
+                android:topRightRadius="24dp" />
         </shape>
     </item>
 
@@ -17,8 +17,8 @@
         <shape android:shape="rectangle">
             <solid android:color="@color/md_surface" />
             <corners
-                android:topLeftRadius="@dimen/lib_dp_10"
-                android:topRightRadius="@dimen/lib_dp_10" />
+                android:topLeftRadius="24dp"
+                android:topRightRadius="24dp" />
         </shape>
     </item>
 

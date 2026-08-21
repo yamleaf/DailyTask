@@ -33,6 +33,217 @@ public class ExportDataModel {
     private String emailAuthEncrypted;
     private List<DailyTaskBean> tasks; // 任务列表
 
+    // ── v2 扩展字段：包装类型，旧配置文件缺失时为 null，导入时跳过以保留本机值 ──
+    private Integer resultSource; // 结果来源：0通知监听 1截屏反馈 2无障碍
+    private Integer accessibilityFeedbackMode; // 无障碍反馈方式：0截屏 1文本
+    private String punchResultKeywords; // 打卡结果关键词（空=默认）
+    private Boolean notificationTransfer; // 通知转移开关
+    private Integer screenMode; // 屏幕模式：0伪息屏 1息屏 2亮屏
+    private Boolean keepAliveEnabled; // 息屏保活开关
+    private Integer keepAliveMode; // 保活方式：0自动 1闹钟 2CPU
+    private Boolean forcePseudoMask; // 伪息屏开关
+    private Integer idlePseudoMaskTimeout; // 伪息屏无操作超时秒数
+    private Boolean pseudoMaskNoClock; // 伪息屏隐藏时钟
+    private Integer lowBatteryThreshold; // 低电量提醒阈值(%)
+    private Boolean batterySmartAlertEnabled; // 电量智能提醒开关
+    private Boolean desktopPetEnabled; // 桌宠开关
+    private Boolean logEnabled; // 运行日志开关
+    private Integer themeMode; // 主题外观：0跟随系统 1浅色 2深色
+
+    // ── v3 扩展字段：远程页连接信息；密码/AppSecret 以 AES 加密写入文件 ──
+    private String mqttBroker; // MQTT 服务器
+    private String mqttUser; // 被控端用户名
+    private String mqttPassEncrypted; // 被控端密码（AES 密文）
+    private String deviceId; // 8 位设备 ID
+    private String ctlUser; // 控制端用户名
+    private String apiUrl; // Serverless API 地址
+    private String apiAppId; // Serverless API AppID
+    private String apiAppSecretEncrypted; // Serverless API AppSecret（AES 密文）
+
+    public Integer getResultSource() {
+        return resultSource;
+    }
+
+    public void setResultSource(Integer resultSource) {
+        this.resultSource = resultSource;
+    }
+
+    public Integer getAccessibilityFeedbackMode() {
+        return accessibilityFeedbackMode;
+    }
+
+    public void setAccessibilityFeedbackMode(Integer accessibilityFeedbackMode) {
+        this.accessibilityFeedbackMode = accessibilityFeedbackMode;
+    }
+
+    public String getPunchResultKeywords() {
+        return punchResultKeywords;
+    }
+
+    public void setPunchResultKeywords(String punchResultKeywords) {
+        this.punchResultKeywords = punchResultKeywords;
+    }
+
+    public Boolean getNotificationTransfer() {
+        return notificationTransfer;
+    }
+
+    public void setNotificationTransfer(Boolean notificationTransfer) {
+        this.notificationTransfer = notificationTransfer;
+    }
+
+    public Integer getScreenMode() {
+        return screenMode;
+    }
+
+    public void setScreenMode(Integer screenMode) {
+        this.screenMode = screenMode;
+    }
+
+    public Boolean getKeepAliveEnabled() {
+        return keepAliveEnabled;
+    }
+
+    public void setKeepAliveEnabled(Boolean keepAliveEnabled) {
+        this.keepAliveEnabled = keepAliveEnabled;
+    }
+
+    public Integer getKeepAliveMode() {
+        return keepAliveMode;
+    }
+
+    public void setKeepAliveMode(Integer keepAliveMode) {
+        this.keepAliveMode = keepAliveMode;
+    }
+
+    public Boolean getForcePseudoMask() {
+        return forcePseudoMask;
+    }
+
+    public void setForcePseudoMask(Boolean forcePseudoMask) {
+        this.forcePseudoMask = forcePseudoMask;
+    }
+
+    public Integer getIdlePseudoMaskTimeout() {
+        return idlePseudoMaskTimeout;
+    }
+
+    public void setIdlePseudoMaskTimeout(Integer idlePseudoMaskTimeout) {
+        this.idlePseudoMaskTimeout = idlePseudoMaskTimeout;
+    }
+
+    public Boolean getPseudoMaskNoClock() {
+        return pseudoMaskNoClock;
+    }
+
+    public void setPseudoMaskNoClock(Boolean pseudoMaskNoClock) {
+        this.pseudoMaskNoClock = pseudoMaskNoClock;
+    }
+
+    public Integer getLowBatteryThreshold() {
+        return lowBatteryThreshold;
+    }
+
+    public void setLowBatteryThreshold(Integer lowBatteryThreshold) {
+        this.lowBatteryThreshold = lowBatteryThreshold;
+    }
+
+    public Boolean getBatterySmartAlertEnabled() {
+        return batterySmartAlertEnabled;
+    }
+
+    public void setBatterySmartAlertEnabled(Boolean batterySmartAlertEnabled) {
+        this.batterySmartAlertEnabled = batterySmartAlertEnabled;
+    }
+
+    public Boolean getDesktopPetEnabled() {
+        return desktopPetEnabled;
+    }
+
+    public void setDesktopPetEnabled(Boolean desktopPetEnabled) {
+        this.desktopPetEnabled = desktopPetEnabled;
+    }
+
+    public Boolean getLogEnabled() {
+        return logEnabled;
+    }
+
+    public void setLogEnabled(Boolean logEnabled) {
+        this.logEnabled = logEnabled;
+    }
+
+    public Integer getThemeMode() {
+        return themeMode;
+    }
+
+    public void setThemeMode(Integer themeMode) {
+        this.themeMode = themeMode;
+    }
+
+    public String getMqttBroker() {
+        return mqttBroker;
+    }
+
+    public void setMqttBroker(String mqttBroker) {
+        this.mqttBroker = mqttBroker;
+    }
+
+    public String getMqttUser() {
+        return mqttUser;
+    }
+
+    public void setMqttUser(String mqttUser) {
+        this.mqttUser = mqttUser;
+    }
+
+    public String getMqttPassEncrypted() {
+        return mqttPassEncrypted;
+    }
+
+    public void setMqttPassEncrypted(String mqttPassEncrypted) {
+        this.mqttPassEncrypted = mqttPassEncrypted;
+    }
+
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    public void setDeviceId(String deviceId) {
+        this.deviceId = deviceId;
+    }
+
+    public String getCtlUser() {
+        return ctlUser;
+    }
+
+    public void setCtlUser(String ctlUser) {
+        this.ctlUser = ctlUser;
+    }
+
+    public String getApiUrl() {
+        return apiUrl;
+    }
+
+    public void setApiUrl(String apiUrl) {
+        this.apiUrl = apiUrl;
+    }
+
+    public String getApiAppId() {
+        return apiAppId;
+    }
+
+    public void setApiAppId(String apiAppId) {
+        this.apiAppId = apiAppId;
+    }
+
+    public String getApiAppSecretEncrypted() {
+        return apiAppSecretEncrypted;
+    }
+
+    public void setApiAppSecretEncrypted(String apiAppSecretEncrypted) {
+        this.apiAppSecretEncrypted = apiAppSecretEncrypted;
+    }
+
     public int getResetTime() {
         return resetTime;
     }

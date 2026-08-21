@@ -3,7 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:paddingHorizontal="20dp"
+    android:paddingTop="12dp">
 
     <com.google.android.material.textview.MaterialTextView
         android:layout_width="match_parent"
@@ -20,27 +22,4 @@
         android:layout_weight="1"
         android:minHeight="@dimen/dialog_min_height" />
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/dp_16"
-        android:orientation="vertical">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPickFromInstalled"
-            style="@style/Widget.Material3.Button"
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/dp_48"
-            android:text="@string/settings_custom_app_pick"
-            android:textSize="@dimen/sp_16" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnManualInput"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/dp_48"
-            android:layout_marginTop="@dimen/dp_12"
-            android:text="@string/settings_custom_app_manual"
-            android:textSize="@dimen/sp_16" />
-    </LinearLayout>
 </LinearLayout>

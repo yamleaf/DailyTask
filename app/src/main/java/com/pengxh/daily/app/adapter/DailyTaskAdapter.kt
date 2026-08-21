@@ -1,6 +1,5 @@
 package com.pengxh.daily.app.adapter
 
-import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -101,8 +100,8 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
             holder.itemView.isSelected = true
             val context = holder.itemView.context
             holder.setText(R.id.actualTimeView, actualTime)
-                .setTextColor(R.id.actualTimeView, R.color.theme_color.convertColor(context))
-                .setTextColor(R.id.taskTimeView, R.color.text_hint_color.convertColor(context))
+                .setTextColor(R.id.actualTimeView, R.color.md_primary.convertColor(context))
+                .setTextColor(R.id.taskTimeView, R.color.md_onSurfaceVariant.convertColor(context))
             arrowView.animate().rotation(90f).setDuration(350).start()
             if (!actualTimeCardView.isVisible) {
                 actualTimeCardView.expand()
@@ -110,7 +109,10 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
         } else {
             holder.itemView.isSelected = false
             holder.setText(R.id.actualTimeView, "--:--:--")
-                .setTextColor(R.id.taskTimeView, Color.BLACK)
+                .setTextColor(
+                    R.id.taskTimeView,
+                    R.color.md_onSurface.convertColor(holder.itemView.context)
+                )
             arrowView.animate().rotation(0f).setDuration(350).start()
             if (actualTimeCardView.isVisible) {
                 actualTimeCardView.collapse()

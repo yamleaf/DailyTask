@@ -3,6 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:clipChildren="false"
+    android:clipToPadding="false"
     android:background="@color/md_background">
 
     <!-- 磨砂玻璃模糊目标：包裹全部 Tab 内容（FragmentContainerView），
@@ -19,12 +21,14 @@
             android:layout_height="match_parent" />
     </FrameLayout>
 
-    <!-- 悬浮导航：左右 Space 占位 weight=1:4:1 → 导航精确占屏幕 2/3 宽度并居中 -->
+    <!-- 悬浮导航：左右 Space 占位 weight=1:4:1 → 导航精确占屏幕 2/3 宽度并居中
+         clipChildren=false：放行凸起按钮上移 14dp 露出本容器顶边 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:clipChildren="false">
 
         <Space
             android:layout_width="0dp"

@@ -1,12 +1,19 @@
 package com.pengxh.daily.app.ui
 
+import com.pengxh.daily.app.UiInsets
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -94,11 +101,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         FragmentTaskBinding.inflate(inflater, container, false)
 
     override fun setupTopBarLayout() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.toolbar) { view, insets ->
-            val statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            view.setPadding(0, statusBarHeight, 0, 0)
-            insets
-        }
+        UiInsets.applyStatusBarPadding(requireActivity(), binding.toolbar)
         mainHandler.post(timeUpdateRunnable)
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -110,7 +113,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                         BottomActionSheet.Builder()
                             .setContext(ctx)
                             .setActionItemTitle(arrayListOf("添加任务", "导入任务"))
-                            .setItemTextColor(R.color.theme_color.convertColor(ctx))
+                            .setItemTextColor(R.color.md_primary.convertColor(ctx))
                             .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
                                 override fun onActionItemClick(position: Int) {
                                     if (position == 0) createTask() else importTask()
@@ -137,55 +140,79 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         )
 
         // 每日重置后的重复周期提示（repeatTimeView）
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             com.pengxh.daily.app.service.ForegroundRunningService.Companion.resetTickTime.collect {
                 binding.repeatTimeView.text = it
             }
         }
         // 任务运行状态 → 启动/停止按钮与提示；实际时间小字仅调度中展示
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             TaskScheduler.isRunning.collectLatest { running ->
                 if (!running) {
                     dailyTaskAdapter.updateCurrentTaskState(-1)
                     dailyTaskAdapter.setActualHintState(false, emptyMap())
-                    binding.tipsView.text = ""
-                    binding.executeTaskButton.setIconResource(R.mipmap.ic_start)
-                    binding.executeTaskButton.setIconTintResource(R.color.ios_green)
+                    binding.tipsView.text = "点击按钮后开始执行任务"
+                    binding.execDetailView.visibility = View.GONE
+                    binding.executeTaskButton.setIconResource(R.drawable.ic_start)
+                    binding.executeTaskButton.setIconTintResource(R.color.md_success)
                     binding.executeTaskButton.text = "启动"
                 } else {
-                    binding.executeTaskButton.setIconResource(R.mipmap.ic_stop)
-                    binding.executeTaskButton.setIconTintResource(R.color.red)
+                    binding.executeTaskButton.setIconResource(R.drawable.ic_stop)
+                    binding.executeTaskButton.setIconTintResource(R.color.md_error)
                     binding.executeTaskButton.text = "停止"
                     refreshActualHintsFromSchedule()
                 }
             }
         }
         // 任务执行提示事件（跳过/执行中/完成）
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             TaskScheduler.tipsEvent.collectLatest { event ->
                 when (event) {
                     is com.pengxh.daily.app.utils.TipsEvent.Skip -> {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
                         binding.tipsView.text = "本次任务已跳过，等待下一次"
+                        binding.execDetailView.visibility = View.GONE
                         refreshActualHintsFromSchedule()
                     }
 
                     is com.pengxh.daily.app.utils.TipsEvent.Executing -> {
                         binding.tipsView.text =
-                            "正在执行第 ${event.index}/${event.total} 个任务（${event.actualTime}）"
+                            "正在执行${event.index}/${event.total}个任务"
+                        val detail = if (event.name.isBlank()) {
+                            event.actualTime
+                        } else {
+                            "${event.actualTime}  ${event.name}"
+                        }
+                        // 执行时间加粗 + 品牌主色，备注保持常规灰
+                        val span = SpannableString(detail)
+                        span.setSpan(
+                            StyleSpan(Typeface.BOLD),
+                            0, event.actualTime.length,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                        span.setSpan(
+                            ForegroundColorSpan(
+                                ContextCompat.getColor(requireContext(), R.color.md_primary)
+                            ),
+                            0, event.actualTime.length,
+                            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                        binding.execDetailView.text = span
+                        binding.execDetailView.visibility = View.VISIBLE
                         refreshActualHintsFromSchedule()
                     }
 
                     is com.pengxh.daily.app.utils.TipsEvent.Completed -> {
                         dailyTaskAdapter.updateCurrentTaskState(-1)
                         binding.tipsView.text = "今日任务已全部执行完毕，等待下次任务"
+                        binding.execDetailView.visibility = View.GONE
                         dailyTaskAdapter.setActualHintState(true, emptyMap())
                     }
                 }
             }
         }
         // 省电模式 → 刷新时钟频率
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             com.pengxh.daily.app.utils.AppRuntimeConfig.powerSaveMode.collect {
                 mainHandler.removeCallbacks(timeUpdateRunnable)
                 mainHandler.post(timeUpdateRunnable)
@@ -208,7 +235,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             if (TaskScheduler.isRunning()) {
                 (activity as? MainActivity)?.doStopTask()
             } else {
-                lifecycleScope.launch {
+                viewLifecycleOwner.lifecycleScope.launch {
                     TaskScheduler.startTask()
                 }
             }
@@ -229,7 +256,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             )
             val name = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.nameEditText)
                 .text?.toString()?.trim().orEmpty()
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 // IO：查重 → 不重复则插入 → 重载列表
                 val exists = withContext(Dispatchers.IO) { DatabaseWrapper.isTaskTimeExist(time) }
                 if (exists) {
@@ -276,7 +303,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             )
             val name = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.nameEditText)
                 .text?.toString()?.trim().orEmpty()
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 // 用新 Bean 实例写库，避免原地改 item（适配器当前列表持有同一对象）导致
                 // 后续 submitList 的 DiffUtil 比对时新旧 time 相同 → 判定无变化 → UI 不刷新
                 val updated = DailyTaskBean().apply {
@@ -314,7 +341,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             positiveText = "确定",
             danger = true,
             onConfirm = {
-                lifecycleScope.launch {
+                viewLifecycleOwner.lifecycleScope.launch {
                     try {
                         withContext(Dispatchers.IO) {
                             DatabaseWrapper.deleteTask(item)
@@ -351,7 +378,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                     "输入错误，请检查！".show(ctx)
                     false
                 } else {
-                    lifecycleScope.launch {
+                    viewLifecycleOwner.lifecycleScope.launch {
                         // 解析导入文本并写入数据库（每行一个时间 HH:mm:ss）
                         val times = value.split("\n").map { it.trim() }.filter {
                             it.matches(Regex("\\d{1,2}:\\d{2}:\\d{2}"))
@@ -375,7 +402,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     /** 从数据库加载任务列表并刷新 UI */
     fun refreshTaskListFromDb() {
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             val rows = withContext(Dispatchers.IO) { DatabaseWrapper.loadAllTask() }
             taskBeans.clear()
             taskBeans.addAll(rows)
@@ -397,7 +424,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             dailyTaskAdapter.setActualHintState(false, emptyMap())
             return
         }
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             val plans = withContext(Dispatchers.IO) {
                 TaskScheduler.loadTodayTaskPlans(usePersisted = true)
             }

@@ -1,8 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical">
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="4dp"
+        app:cardBackgroundColor="@color/md_surface"
+        app:cardCornerRadius="@dimen/radius_input"
+        app:cardElevation="1dp"
+        app:contentPadding="0dp"
+        app:strokeWidth="0dp">
+
+        <EditText
+            android:id="@+id/etSearch"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:background="@null"
+            android:drawableStart="@drawable/ic_search"
+            android:drawablePadding="12dp"
+            android:hint="搜索应用"
+            android:inputType="text"
+            android:paddingHorizontal="16dp"
+            android:singleLine="true"
+            android:textColor="@color/md_onSurface"
+            android:textColorHint="@color/md_onSurfaceVariant"
+            android:textSize="14sp" />
+    </com.google.android.material.card.MaterialCardView>
 
     <ListView
         android:id="@+id/appListView"
@@ -10,6 +39,8 @@
         android:layout_height="wrap_content"
         android:divider="@null"
         android:dividerHeight="0dp"
-        android:maxHeight="@dimen/dialog_max_height"
+        android:maxHeight="320dp"
+        android:paddingHorizontal="8dp"
         android:scrollbars="none" />
+
 </LinearLayout>

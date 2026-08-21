@@ -1,8 +1,11 @@
 package com.pengxh.daily.app.ui
 
+import com.pengxh.daily.app.UiInsets
+import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Context
+import android.content.IntentFilter
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -112,11 +115,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         FragmentRemoteControlBinding.inflate(inflater, container, false)
 
     override fun setupTopBarLayout() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.toolbar) { view, insets ->
-            val statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            view.setPadding(0, statusBarHeight, 0, 0)
-            insets
-        }
+        UiInsets.applyStatusBarPadding(requireActivity(), binding.toolbar)
         binding.toolbar.setNavigationOnClickListener {
             (activity as? MainActivity)?.switchToTaskTab()
         }
@@ -164,13 +163,28 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     override fun initEvent() {
     }
 
+    /** 配置导入/远程配置变更 → 刷新远程页连接参数展示（broker/user/pass/deviceId 等） */
+    private val remoteConfigReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED) {
+                reloadSettingsUI()
+            }
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         if (!isHidden) refreshUi()
+        ContextCompat.registerReceiver(
+            ctx, remoteConfigReceiver,
+            IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onPause() {
         super.onPause()
+        runCatching { ctx.unregisterReceiver(remoteConfigReceiver) }
         binding.root.removeCallbacks(retryRunnable)
         if (MqttAgentService.isRunning()) {
             MqttAgentService.stateListener = null
@@ -808,13 +822,13 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         row.addView(TextView(ctx).apply {
             text = label
-            setTextColor(resources.getColor(R.color.text_default_color, theme))
+            setTextColor(resources.getColor(R.color.md_onSurface, theme))
             textSize = 14f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
         row.addView(TextView(ctx).apply {
             text = value
-            setTextColor(resources.getColor(R.color.text_hint_color, theme))
+            setTextColor(resources.getColor(R.color.md_onSurfaceVariant, theme))
             textSize = 14f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.MIDDLE
@@ -828,11 +842,11 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 resources.getDimensionPixelSize(R.dimen.dividerLine)
             ).apply { topMargin = resources.getDimensionPixelSize(R.dimen.dp_8) }
-            setBackgroundColor(resources.getColor(R.color.outline_variant, theme))
+            setBackgroundColor(resources.getColor(R.color.md_outlineVariant, theme))
         })
         binding.quotaDetailsLayout.addView(TextView(ctx).apply {
             text = title
-            setTextColor(resources.getColor(R.color.text_default_color, theme))
+            setTextColor(resources.getColor(R.color.md_onSurface, theme))
             textSize = 14f
             setTypeface(typeface, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(
@@ -1183,7 +1197,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val dot = View(ctx).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(if (client.connected) Color.GREEN else Color.GRAY)
+                setColor(if (client.connected) ContextCompat.getColor(ctx, R.color.md_success) else ContextCompat.getColor(ctx, R.color.md_outline))
             }
             layoutParams = LinearLayout.LayoutParams(dip(8), dip(8))
         }
@@ -1195,7 +1209,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         mid.addView(TextView(ctx).apply {
             text = client.clientId
-            setTextColor(resources.getColor(R.color.text_default_color, theme))
+            setTextColor(resources.getColor(R.color.md_onSurface, theme))
             textSize = 13f
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.MIDDLE
@@ -1218,7 +1232,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         row.setOnClickListener { showClientDetail(baseUrl, auth, client, container) }
         row.addView(TextView(ctx).apply {
             text = "下线"
-            setTextColor(R.color.red.convertColor(ctx))
+            setTextColor(R.color.md_error.convertColor(ctx))
             textSize = 13f
             setTypeface(null, Typeface.BOLD)
             setPadding(dip(16), 0, 0, 0)
@@ -1376,7 +1390,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 }
                 row.addView(TextView(ctx).apply {
                     text = "$topic（QoS$qos）"
-                    setTextColor(resources.getColor(R.color.text_default_color, theme))
+                    setTextColor(resources.getColor(R.color.md_onSurface, theme))
                     textSize = 13f
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.MIDDLE
@@ -1384,7 +1398,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 })
                 row.addView(TextView(ctx).apply {
                     text = "退订"
-                    setTextColor(R.color.red.convertColor(ctx))
+                    setTextColor(R.color.md_error.convertColor(ctx))
                     textSize = 13f
                     setTypeface(null, Typeface.BOLD)
                     setPadding(dip(16), 0, 0, 0)
@@ -1467,12 +1481,12 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val cSurface = ContextCompat.getColor(ctx, R.color.md_surface)      // #FBF8FF
         val cOutline = ContextCompat.getColor(ctx, R.color.md_outlineVariant)
         val cPrimary = ContextCompat.getColor(ctx, R.color.md_primary)       // #5B5BD6
-        val cWarnBg = Color.parseColor("#FFF8E6")
-        val cWarnBorder = Color.parseColor("#FFE082")
-        val cWarnText = Color.parseColor("#B07D00")
-        val cSuccessBg = Color.parseColor("#F0FDF4")
-        val cSuccessBorder = Color.parseColor("#BBF7D0")
-        val cSuccessText = Color.parseColor("#166534")
+        val cWarnBg = ContextCompat.getColor(ctx, R.color.md_warningContainer)
+        val cWarnBorder = ContextCompat.getColor(ctx, R.color.md_warning)
+        val cWarnText = ContextCompat.getColor(ctx, R.color.md_onWarningContainer)
+        val cSuccessBg = ContextCompat.getColor(ctx, R.color.md_successContainer)
+        val cSuccessBorder = ContextCompat.getColor(ctx, R.color.md_success)
+        val cSuccessText = ContextCompat.getColor(ctx, R.color.md_onSuccessContainer)
 
         fun cardBg(color: Int, strokeColor: Int = color) = android.graphics.drawable.GradientDrawable().apply {
             setColor(color); cornerRadius = dip(14).toFloat(); setStroke(dip(1), strokeColor)
@@ -1547,13 +1561,13 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val cPrimary = ContextCompat.getColor(ctx, R.color.md_primary)       // #5B5BD6
         val cSurface = ContextCompat.getColor(ctx, R.color.md_surface)
         val cOutline = ContextCompat.getColor(ctx, R.color.md_outlineVariant)
-        val cCodeBg = Color.parseColor("#EEF1F4")
-        val cCodeInk = Color.parseColor("#C0264A")
-        val cConceptBg = Color.parseColor("#F8F6FF")
-        val cConceptBorder = Color.parseColor("#DDD6FE")
-        val cTipBg = Color.parseColor("#EFF6FF")
-        val cTipBorder = Color.parseColor("#BFDBFE")
-        val cTipAccent = Color.parseColor("#3D5AFE")
+        val cCodeBg = ContextCompat.getColor(ctx, R.color.md_surfaceContainer)
+        val cCodeInk = ContextCompat.getColor(ctx, R.color.md_error)
+        val cConceptBg = ContextCompat.getColor(ctx, R.color.brand_purple_container)
+        val cConceptBorder = androidx.core.graphics.ColorUtils.setAlphaComponent(ContextCompat.getColor(ctx, R.color.brand_purple), 77)
+        val cTipBg = ContextCompat.getColor(ctx, R.color.md_primaryContainer)
+        val cTipBorder = androidx.core.graphics.ColorUtils.setAlphaComponent(ContextCompat.getColor(ctx, R.color.md_primary), 110)
+        val cTipAccent = ContextCompat.getColor(ctx, R.color.md_primary)
 
         fun card(color: Int, stroke: Int = cOutline, r: Int = 14): android.graphics.drawable.GradientDrawable =
             android.graphics.drawable.GradientDrawable().apply {
@@ -1562,11 +1576,11 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         fun codeLabel(content: String): TextView = TextView(ctx).apply {
             text = content; textSize = 11.5f; setTypeface(Typeface.MONOSPACE)
             setTextColor(cCodeInk); background = GradientDrawable().apply {
-                setColor(cCodeBg); cornerRadius = dip(5).toFloat(); setStroke(dip(1), Color.parseColor("#DDE3E8"))
+                setColor(cCodeBg); cornerRadius = dip(5).toFloat(); setStroke(dip(1), ContextCompat.getColor(ctx, R.color.md_outline))
             }
             setPadding(dip(5), dip(1), dip(5), dip(1))
         }
-        fun tagLabel(content: String, bgColor: Int = Color.parseColor("#EDE9FE"), textColor: Int = cPrimary): TextView =
+        fun tagLabel(content: String, bgColor: Int = ContextCompat.getColor(ctx, R.color.brand_purple_container), textColor: Int = cPrimary): TextView =
             TextView(ctx).apply {
                 text = content; textSize = 11.5f; setTypeface(null, Typeface.BOLD)
                 setTextColor(textColor); background = GradientDrawable().apply {
@@ -1580,7 +1594,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         fun stepBadge(content: String): TextView = TextView(ctx).apply {
             text = content; textSize = 13f; setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.WHITE); background = GradientDrawable().apply {
+            setTextColor(ContextCompat.getColor(ctx, R.color.md_onPrimary)); background = GradientDrawable().apply {
                 setColor(cPrimary); cornerRadius = 999f
             }
             setPadding(dip(11), dip(2), dip(11), dip(2))
@@ -1676,7 +1690,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         val aclHeader = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = GradientDrawable().apply { setColor(Color.parseColor("#EEF2F7")); cornerRadius = dip(8).toFloat() }
+            background = GradientDrawable().apply { setColor(ContextCompat.getColor(ctx, R.color.md_surfaceContainer)); cornerRadius = dip(8).toFloat() }
             setPadding(dip(10), dip(6), dip(10), dip(6))
         }
         listOf("主题" to 2.5f, "动作" to 1f, "是否允许" to 1.2f).forEach { (title, w) ->
@@ -1694,13 +1708,13 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         val aclRow1 = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = GradientDrawable().apply { setColor(Color.parseColor("#F1F5F9")); cornerRadius = dip(8).toFloat() }
+            background = GradientDrawable().apply { setColor(ContextCompat.getColor(ctx, R.color.md_surfaceContainerLow)); cornerRadius = dip(8).toFloat() }
             setPadding(dip(10), dip(6), dip(10), dip(6)); gravity = android.view.Gravity.CENTER_VERTICAL
         }
         listOf(
             codeLabel("dt/d7da9d15/#") to 2.5f,
             codeLabel("发布&订阅") to 1f,
-            (TextView(ctx).apply { text = " 允许"; textSize = 12.5f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor("#15803D")) }) to 1.2f
+            (TextView(ctx).apply { text = " 允许"; textSize = 12.5f; setTypeface(null, Typeface.BOLD); setTextColor(ContextCompat.getColor(ctx, R.color.md_success)) }) to 1.2f
         ).forEach { (v, w) ->
             val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, w)
             v.layoutParams = lp
@@ -1714,13 +1728,13 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         val aclRow2 = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = GradientDrawable().apply { setColor(Color.parseColor("#F1F5F9")); cornerRadius = dip(8).toFloat() }
+            background = GradientDrawable().apply { setColor(ContextCompat.getColor(ctx, R.color.md_surfaceContainerLow)); cornerRadius = dip(8).toFloat() }
             setPadding(dip(10), dip(6), dip(10), dip(6)); gravity = android.view.Gravity.CENTER_VERTICAL
         }
         listOf(
             codeLabel("dt/d7da9d15/#") to 2.5f,
             codeLabel("发布&订阅") to 1f,
-            (TextView(ctx).apply { text = " 允许"; textSize = 12.5f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor("#15803D")) }) to 1.2f
+            (TextView(ctx).apply { text = " 允许"; textSize = 12.5f; setTypeface(null, Typeface.BOLD); setTextColor(ContextCompat.getColor(ctx, R.color.md_success)) }) to 1.2f
         ).forEach { (v, w) ->
             val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, w)
             v.layoutParams = lp
@@ -1731,12 +1745,12 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         step3.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dip(8)) })
         val tipBox = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            background = card(Color.parseColor("#FFF7ED"), Color.parseColor("#FED7AA"))
+            background = card(ContextCompat.getColor(ctx, R.color.md_warningContainer), ContextCompat.getColor(ctx, R.color.md_warning))
             setPadding(dip(10), dip(8), dip(10), dip(8))
         }
         tipBox.addView(TextView(ctx).apply {
             text = "💡 建议：增加白名单限制，确保只有上述新建账户允许访问 EMQX"
-            textSize = 12f; setTextColor(Color.parseColor("#B45309")); setTypeface(null, Typeface.BOLD)
+            textSize = 12f; setTextColor(ContextCompat.getColor(ctx, R.color.md_onWarningContainer)); setTypeface(null, Typeface.BOLD)
         })
         tipBox.addView(TextView(ctx).apply {
             text = "访问控制 → 客户端授权 → 全部用户，添加："
@@ -1744,13 +1758,13 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         })
         val denyRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = GradientDrawable().apply { setColor(Color.parseColor("#FEF2F2")); cornerRadius = dip(6).toFloat() }
+            background = GradientDrawable().apply { setColor(ContextCompat.getColor(ctx, R.color.md_errorContainer)); cornerRadius = dip(6).toFloat() }
             setPadding(dip(8), dip(4), dip(8), dip(4)); gravity = android.view.Gravity.CENTER_VERTICAL
         }
         listOf(
             codeLabel("#") to 1f,
             codeLabel("发布&订阅") to 1f,
-            (TextView(ctx).apply { text = " 不允许"; textSize = 12.5f; setTypeface(null, Typeface.BOLD); setTextColor(Color.parseColor("#B91C1C")) }) to 1f
+            (TextView(ctx).apply { text = " 不允许"; textSize = 12.5f; setTypeface(null, Typeface.BOLD); setTextColor(ContextCompat.getColor(ctx, R.color.md_error)) }) to 1f
         ).forEach { (v, w) ->
             val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, w)
             v.layoutParams = lp

@@ -94,7 +94,7 @@ object DialogCardBuilder {
 
     /** 绿色建议行（可点击跳转） */
     private fun suggestRow(ctx: Context, text: String, onClick: (() -> Unit)?): View {
-        val success = ContextCompat.getColor(ctx, R.color.md_tertiary)
+        val success = ContextCompat.getColor(ctx, R.color.md_success)
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             if (onClick != null) {

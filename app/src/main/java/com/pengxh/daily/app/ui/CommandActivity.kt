@@ -1,5 +1,6 @@
 package com.pengxh.daily.app.ui
 
+import com.pengxh.daily.app.UiInsets
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
@@ -32,11 +33,7 @@ class CommandActivity : KotlinBaseActivity<ActivityCommandBinding>() {
     }
 
     override fun setupTopBarLayout() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.toolbar) { view, insets ->
-            val statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            view.setPadding(0, statusBarHeight, 0, 0)
-            insets
-        }
+        UiInsets.applyStatusBarPadding(this, binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
     }
 
@@ -53,7 +50,7 @@ class CommandActivity : KotlinBaseActivity<ActivityCommandBinding>() {
 
                 val cardView = viewHolder.getView<MaterialCardView>(R.id.cardView)
                 if (item.third) {
-                    cardView.setCardBackgroundColor(R.color.ios_green.convertColor(context))
+                    cardView.setCardBackgroundColor(R.color.md_tertiary.convertColor(context))
                 } else {
                     cardView.setCardBackgroundColor(R.color.orange.convertColor(context))
                 }

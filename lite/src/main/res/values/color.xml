@@ -14,4 +14,7 @@
     <color name="md_primary">#5B5BD6</color>
     <color name="md_onSurface">#1B1B23</color>
     <color name="md_outline">#767680</color>
+    <color name="md_surface">#FFFFFF</color>
+    <color name="md_surfaceContainerHighest">#E4E8F2</color>
+    <color name="dialog_shadow">#C4CBD6</color>
 </resources>

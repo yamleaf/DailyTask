@@ -1,5 +1,6 @@
 package com.pengxh.daily.app.ui
 
+import com.pengxh.daily.app.UiInsets
 import android.app.Activity
 import android.app.AppOpsManager
 import android.app.Dialog
@@ -56,6 +57,7 @@ import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
+import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.AppRuntimeConfig
@@ -78,7 +80,23 @@ import com.pengxh.kt.lite.extensions.convertColor
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import com.pengxh.kt.lite.extensions.toJson
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
+import android.os.Environment
+import java.io.File
+import java.util.Date
+import com.pengxh.daily.app.extensions.format
+import com.pengxh.daily.app.model.EmailConfigData
+import com.pengxh.daily.app.model.ExportDataModel
+import com.pengxh.daily.app.sqlite.DatabaseWrapper
+import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
+import com.pengxh.daily.app.utils.ConfigCipher
+import com.pengxh.daily.app.utils.ConfigStore
+import com.pengxh.daily.app.utils.CustomWorkdayManager
+import com.pengxh.daily.app.utils.EmailSecureConfig
+import com.pengxh.daily.app.utils.MqttSecureConfig
+import com.pengxh.daily.app.utils.ServerlessApiSecureConfig
+import com.pengxh.daily.app.utils.TaskDataManager
 import com.yample.mqttprotocol.ThemeManager
 import com.pengxh.daily.app.utils.DialogCardBuilder
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
@@ -138,6 +156,203 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 ctx.startService(Intent(ctx, FloatingWindowService::class.java))
             }
         }
+
+    /** 配置导入：系统文件选择器（SAF）选取导出的 .json 配置文件 */
+    private val pickConfigLauncher =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch(Dispatchers.IO) {
+                val json = runCatching {
+                    ctx.contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { it.readText() }
+                }.getOrNull().orEmpty()
+                if (json.isBlank()) {
+                    withContext(Dispatchers.Main) { "读取配置文件失败".show(ctx) }
+                    return@launch
+                }
+                // 身份字段预检：配置文件携带与本地不同的设备ID/控制端凭证时，
+                // 覆盖会导致现有绑定关系失效（sessionSecret 不随配置迁移），需二次确认
+                val obj = runCatching { JsonParser.parseString(json).asJsonObject }.getOrNull()
+                val incomingId = obj?.get("deviceId")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+                val incomingCtl = obj?.get("ctlUser")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+                val localId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "")
+                val localCtl = SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "")
+                val identityConflict =
+                    (incomingId.isNotBlank() && localId.isNotBlank() && incomingId != localId) ||
+                        (incomingCtl.isNotBlank() && localCtl.isNotBlank() && incomingCtl != localCtl)
+                if (identityConflict) {
+                    withContext(Dispatchers.Main) {
+                        UnifiedDialogKit.showConfirm(
+                            ctx,
+                            "将覆盖设备身份",
+                            "配置文件包含与本机不同的设备ID/控制端凭证，导入后当前绑定关系将失效，需要重新扫码配对。",
+                            confirmText = "继续导入",
+                            cancelText = "取消",
+                            danger = true,
+                            icon = UnifiedDialogKit.IconType.WARNING,
+                            onConfirm = {
+                                lifecycleScope.launch(Dispatchers.IO) { importConfigJson(json) }
+                            }
+                        )
+                    }
+                } else {
+                    importConfigJson(json)
+                }
+            }
+        }
+
+    /** 执行导入并按结果提示；成功后设置页即时刷新，任务/远程页由广播联动刷新 */
+    private fun importConfigJson(json: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            when (val result = TaskDataManager().importTasks(json, ctx)) {
+                is TaskDataManager.ImportResult.Success -> {
+                    withContext(Dispatchers.Main) {
+                        syncSettingsUiFromStore()
+                        applyTargetAppIcon()
+                        "配置导入成功".show(ctx)
+                    }
+                }
+                is TaskDataManager.ImportResult.Error -> {
+                    withContext(Dispatchers.Main) { result.message.show(ctx) }
+                }
+            }
+        }
+    }
+
+    /** 配置导出：远程/任务/设置三页全量配置序列化为 JSON，经系统分享面板导出 */
+    private fun exportConfig() {
+        val exportData = ExportDataModel()
+
+        // Int
+        exportData.resetTime =
+            SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
+        exportData.overtime =
+            SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME)
+        exportData.timeRange =
+            SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
+        exportData.msgChannel =
+            SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, Constant.DEFAULT_INDEX)
+        exportData.targetApp = SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0)
+        exportData.targetAppPackage = Constant.getTargetApp()
+
+        // String
+        exportData.remoteCommand = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
+        exportData.msgTitle =
+            SaveKeyValues.loadString(Constant.MESSAGE_TITLE_KEY, "打卡结果通知")
+        exportData.wxKey = SaveKeyValues.loadString(Constant.WX_WEB_HOOK_KEY, "")
+        exportData.customWorkdays = CustomWorkdayManager.serializeWorkdays(
+            CustomWorkdayManager.loadWorkdays()
+        )
+
+        // Boolean
+        exportData.isDetectGesture =
+            SaveKeyValues.loadBoolean(Constant.GESTURE_DETECTOR_KEY, true)
+        exportData.isBackToHome = SaveKeyValues.loadBoolean(Constant.BACK_TO_HOME_KEY, Constant.BACK_TO_HOME_DEFAULT)
+        exportData.isAutoRecycle =
+            SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+        exportData.isRandomTime = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
+        exportData.isSkipHoliday = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
+        exportData.isSavePower =
+            SaveKeyValues.loadBoolean(Constant.POWER_SAVE_MODE_KEY, false)
+
+        // v2 扩展：设置页/任务页全量配置（旧版本导入时自动忽略缺失字段）
+        exportData.resultSource = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, 0)
+        exportData.accessibilityFeedbackMode =
+            SaveKeyValues.loadInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0)
+        exportData.punchResultKeywords =
+            SaveKeyValues.loadString(Constant.PUNCH_RESULT_KEYWORDS_KEY, "")
+        exportData.notificationTransfer =
+            SaveKeyValues.loadBoolean(Constant.NOTIFICATION_TRANSFER_KEY, false)
+        exportData.screenMode = AppRuntimeConfig.getScreenMode()
+        exportData.keepAliveEnabled =
+            SaveKeyValues.loadBoolean(Constant.KEEP_ALIVE_ENABLED_KEY, true)
+        exportData.keepAliveMode = AppRuntimeConfig.getKeepAliveMode()
+        exportData.forcePseudoMask = AppRuntimeConfig.isForcePseudoMask()
+        exportData.idlePseudoMaskTimeout =
+            SaveKeyValues.loadInt(Constant.IDLE_PSEUDO_MASK_TIMEOUT_KEY, 60)
+        exportData.pseudoMaskNoClock =
+            SaveKeyValues.loadBoolean(Constant.PSEUDO_MASK_NO_CLOCK_KEY, false)
+        exportData.lowBatteryThreshold = SaveKeyValues.loadInt(
+            Constant.LOW_BATTERY_THRESHOLD_KEY,
+            Constant.DEFAULT_LOW_BATTERY_THRESHOLD
+        )
+        exportData.batterySmartAlertEnabled =
+            SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false)
+        exportData.desktopPetEnabled = AppRuntimeConfig.isDesktopPetEnabled()
+        exportData.logEnabled = SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true)
+        exportData.themeMode = ThemeManager.getMode(ctx)
+
+        // v3 扩展：远程页连接信息（密码/AppSecret 以 AES 加密写入文件，导入时自动解密填充）
+        exportData.mqttBroker = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "")
+        exportData.mqttUser = SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")
+        val mqttPass = MqttSecureConfig.loadPass()
+        exportData.mqttPassEncrypted =
+            if (mqttPass.isNotBlank()) ConfigCipher.encrypt(mqttPass) else ""
+        exportData.deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "")
+        exportData.ctlUser = SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "")
+        exportData.apiUrl = SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_URL_KEY, "")
+        exportData.apiAppId =
+            SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_APP_ID_KEY, "")
+        val apiSecret = ServerlessApiSecureConfig.loadSecret()
+        exportData.apiAppSecretEncrypted =
+            if (apiSecret.isNotBlank()) ConfigCipher.encrypt(apiSecret) else ""
+
+        // 邮箱：收发箱照常导出；授权码以 AES 加密形式写入文件，导入时自动解密填充（避免明文/脱敏泄露）
+        val obj = ConfigStore.get().load(Constant.EMAIL_CONFIG_KEY)
+        if (!obj.isEmpty) {
+            val outbox = if (obj.has("outbox")) obj.get("outbox").asString else ""
+            val inbox = if (obj.has("inbox")) obj.get("inbox").asString else ""
+            if (outbox.isNotBlank() && inbox.isNotBlank()) {
+                val rawAuth = EmailSecureConfig.loadAuthCode()
+                exportData.emailConfig = EmailConfigData().apply {
+                    first = outbox
+                    second = ""
+                    third = inbox
+                }
+                exportData.emailAuthEncrypted =
+                    if (rawAuth.isNotBlank()) ConfigCipher.encrypt(rawAuth) else ""
+            }
+        }
+
+        // TaskBeans
+        lifecycleScope.launch {
+            val taskBeans = withContext(Dispatchers.IO) {
+                DatabaseWrapper.loadAllTask()
+            }
+            exportData.tasks = if (taskBeans.isNotEmpty()) taskBeans else ArrayList<DailyTaskBean>()
+
+            val json = exportData.toJson()
+            Log.d(javaClass.simpleName, "导出配置长度=${json.length}")
+
+            // 写入文件（getExternalFilesDir/Documents，无需存储权限）
+            val dir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+            if (dir == null) {
+                "导出失败：外部存储不可用".show(ctx)
+                return@launch
+            }
+            val timeStamp = Date().format("yyyyMMdd_HHmmss")
+            val file = File(dir, "dailytask_config_$timeStamp.json")
+            runCatching { file.writeText(json) }.onFailure {
+                "导出失败：${it.message}".show(ctx)
+                return@launch
+            }
+
+            // 通过系统分享面板导出文件（FileProvider 授权临时读取）
+            val authority = BuildConfig.APPLICATION_ID + ".fileprovider"
+            val uri = FileProvider.getUriForFile(ctx, authority, file)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivity(Intent.createChooser(shareIntent, "导出配置"))
+                "配置已导出为文件：${file.name}".show(ctx)
+            } catch (e: Exception) {
+                "导出失败：${e.message}".show(ctx)
+            }
+        }
+    }
     private val notificationSettingLauncher =
         registerForActivityResult(notificationContract) {
             if (ctx.notificationEnable()) turnOnNotificationMonitorService()
@@ -175,11 +390,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         FragmentSettingsBinding.inflate(inflater, container, false)
 
     override fun setupTopBarLayout() {
-        ViewCompat.setOnApplyWindowInsetsListener(binding.toolbar) { view, insets ->
-            val statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
-            view.setPadding(0, statusBarHeight, 0, 0)
-            insets
-        }
+        UiInsets.applyStatusBarPadding(requireActivity(), binding.toolbar)
         binding.toolbar.setNavigationOnClickListener {
             (activity as? MainActivity)?.switchToTaskTab()
         }
@@ -259,7 +470,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             BottomActionSheet.Builder()
                 .setContext(ctx)
                 .setActionItemTitle(targetAppLabels())
-                .setItemTextColor(R.color.theme_color.convertColor(ctx))
+                .setItemTextColor(R.color.md_primary.convertColor(ctx))
                 .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
                     override fun onActionItemClick(position: Int) {
                         val builtInCount = Constant.getBuiltInTargets().size
@@ -306,7 +517,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             BottomActionSheet.Builder()
                 .setContext(ctx)
                 .setActionItemTitle(resultSources)
-                .setItemTextColor(R.color.theme_color.convertColor(ctx))
+                .setItemTextColor(R.color.md_primary.convertColor(ctx))
                 .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
                     override fun onActionItemClick(position: Int) {
                         when (position) {
@@ -357,7 +568,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                 BottomActionSheet.Builder()
                     .setContext(ctx)
                     .setActionItemTitle(feedbackModes)
-                    .setItemTextColor(R.color.theme_color.convertColor(ctx))
+                    .setItemTextColor(R.color.md_primary.convertColor(ctx))
                     .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
                         override fun onActionItemClick(position: Int) {
                             SaveKeyValues.saveInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, position)
@@ -425,6 +636,12 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
         binding.commandLayout.setOnClickListener {
             ctx.startActivity(Intent(ctx, CommandActivity::class.java))
+        }
+        binding.exportLayout.setOnClickListener {
+            exportConfig()
+        }
+        binding.importLayout.setOnClickListener {
+            pickConfigLauncher.launch("application/json")
         }
         binding.downloadRow.setOnClickListener {
             val fallbackUrl = BuildConfig.CTRL_DOWNLOAD_URL.trim()
@@ -871,10 +1088,10 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         val channel = SaveKeyValues.loadInt(Constant.MSG_CHANNEL_KEY, -1)
         if (channel < 0 || channel > channels.lastIndex) {
             binding.channelView.text = "未配置"
-            binding.channelView.setTextColor(R.color.red.convertColor(ctx))
+            binding.channelView.setTextColor(R.color.md_error.convertColor(ctx))
         } else {
             binding.channelView.text = channels[channel]
-            binding.channelView.setTextColor(R.color.theme_color.convertColor(ctx))
+            binding.channelView.setTextColor(R.color.md_primary.convertColor(ctx))
         }
         if (ConfigImportSignal.pendingSettingsRefresh) {
             ConfigImportSignal.pendingSettingsRefresh = false
@@ -888,7 +1105,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             binding.noticeTipsView.visibility = View.VISIBLE
         } else {
             binding.noticeTipsView.text = "服务状态查询中，请稍后..."
-            binding.noticeTipsView.setTextColor(R.color.theme_color.convertColor(ctx))
+            binding.noticeTipsView.setTextColor(R.color.md_primary.convertColor(ctx))
             lifecycleScope.launch {
                 delay(500)
                 if (ctx.notificationEnable()) {
@@ -958,7 +1175,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
             else -> {
                 statusView.text = "基本正常"
-                statusView.setTextColor(R.color.md_tertiary.convertColor(ctx))
+                statusView.setTextColor(R.color.md_success.convertColor(ctx))
             }
         }
     }
@@ -1017,13 +1234,13 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             else -> "通知"
         }
         binding.resultSourceView.text = label
-        binding.resultSourceView.setTextColor(R.color.theme_color.convertColor(ctx))
+        binding.resultSourceView.setTextColor(R.color.md_primary.convertColor(ctx))
     }
 
     private fun updateAccessibilityFeedbackView() {
         val label = if (SaveKeyValues.loadInt(Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0) == 1) "文本反馈" else "截屏反馈"
         binding.accessibilityFeedbackView.text = label
-        binding.accessibilityFeedbackView.setTextColor(R.color.theme_color.convertColor(ctx))
+        binding.accessibilityFeedbackView.setTextColor(R.color.md_primary.convertColor(ctx))
     }
 
     // ═══════════════════════ 权限自检 ═══════════════════════
@@ -1812,15 +2029,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     private fun isValidPackageName(name: String): Boolean =
         Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+$").matches(name)
 
-    /** 解析多行/逗号/分号分隔的包名列表 */
-    private fun parsePackageList(raw: String): List<String> =
-        raw.split(Regex("[\n,\uff0c;\uff1b\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
-
-    /** 新增自定义应用（从已安装应用选择） */
+    /** 新增自定义应用（从已安装应用选择）：单应用模型，直接选中 */
     private fun addCustomApp(pkg: String) {
-        val list = Constant.getCustomTargetApps().toMutableList()
-        if (!list.contains(pkg)) list.add(pkg)
-        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, list.joinToString(","))
+        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, pkg)
         SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, Constant.CUSTOM_TARGET_INDEX)
         SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, pkg)
         applyTargetAppIcon()
@@ -1828,56 +2039,24 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         getString(R.string.settings_pick_app_added, resolveAppLabel(pkg)).show(ctx)
     }
 
-    /** 移除自定义应用 */
-    private fun removeCustomApp(pkg: String) {
-        val list = Constant.getCustomTargetApps().toMutableList()
-        list.remove(pkg)
-        SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, list.joinToString(","))
-        if (SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0) == Constant.CUSTOM_TARGET_INDEX &&
-            SaveKeyValues.loadString(Constant.CUSTOM_TARGET_SELECTED_KEY, "") == pkg
-        ) {
-            SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, 0)
-            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
-        }
-        applyTargetAppIcon()
-        ConfigImportSignal.notifyRemoteChanged(ctx)
-        customAppDialog?.dismiss()
-        showCustomAppManagerDialog()
-    }
-
-    /** 自定义应用管理对话框 */
+    /**
+     * 自定义应用管理对话框：内容区仅展示当前选中的应用（历史添加记录不再罗列），
+     * 底部双按钮即两个入口——左「输入包名」手动填写，右「应用选择」从已安装列表挑选。
+     */
     private fun showCustomAppManagerDialog() {
         val view = LayoutInflater.from(ctx).inflate(R.layout.dialog_custom_app_manager, null)
         val contentContainer = view.findViewById<FrameLayout>(R.id.contentContainer)
-        val btnPickFromInstalled = view.findViewById<TextView>(R.id.btnPickFromInstalled)
-        val btnManualInput = view.findViewById<TextView>(R.id.btnManualInput)
-        val customApps = Constant.getCustomTargetApps()
-        if (customApps.isNotEmpty()) {
-            val list = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
+        val selectedPkg = SaveKeyValues.loadString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
+        if (selectedPkg.isNotBlank()) {
+            val item = LayoutInflater.from(ctx).inflate(R.layout.dialog_custom_app_item, contentContainer, false)
+            val icon = loadAppIcon(selectedPkg)
+            item.findViewById<ImageView>(R.id.appIcon).apply {
+                if (icon == null) setImageResource(R.drawable.ic_custom_app) else setImageDrawable(icon)
             }
-            customApps.forEachIndexed { index, pkg ->
-                if (index > 0) {
-                    list.addView(View(ctx).apply {
-                        layoutParams = LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            resources.getDimensionPixelSize(R.dimen.dividerLine)
-                        )
-                        setBackgroundColor(ctx.getColor(R.color.md_outlineVariant))
-                    })
-                }
-                val item = LayoutInflater.from(ctx).inflate(R.layout.dialog_custom_app_item, list, false)
-                val icon = loadAppIcon(pkg)
-                item.findViewById<ImageView>(R.id.appIcon).apply {
-                    if (icon == null) setImageResource(R.drawable.ic_custom_app) else setImageDrawable(icon)
-                }
-                item.findViewById<TextView>(R.id.appName).text = resolveAppLabel(pkg)
-                item.findViewById<TextView>(R.id.appPkg).text = pkg
-                item.findViewById<TextView>(R.id.btnRemove).setOnClickListener { removeCustomApp(pkg) }
-                list.addView(item)
-            }
-            contentContainer.addView(list)
+            item.findViewById<TextView>(R.id.appName).text = resolveAppLabel(selectedPkg)
+            item.findViewById<TextView>(R.id.appPkg).text = selectedPkg
+            item.findViewById<View>(R.id.btnRemove).visibility = View.GONE
+            contentContainer.addView(item)
         } else {
             contentContainer.addView(TextView(ctx).apply {
                 text = getString(R.string.settings_custom_app_empty)
@@ -1894,17 +2073,19 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx,
             view,
             title = getString(R.string.settings_custom_target_app),
-            positiveText = "完成",
-            negativeText = null
+            positiveText = "应用选择",
+            negativeText = "输入包名",
+            onConfirm = { dlg ->
+                dlg.dismiss()
+                showAppPickerDialog()
+                true
+            },
+            onCancel = { dlg ->
+                dlg.dismiss()
+                showCustomAppTextDialog()
+                true
+            }
         )
-        btnPickFromInstalled.setOnClickListener {
-            customAppDialog?.dismiss()
-            showAppPickerDialog()
-        }
-        btnManualInput.setOnClickListener {
-            customAppDialog?.dismiss()
-            showCustomAppTextDialog()
-        }
     }
 
     /** 从已安装应用中选择（应用列表弹窗） */
@@ -1941,24 +2122,21 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         val dialog = UnifiedDialogKit.showForm(
             ctx,
             view,
-            title = getString(R.string.settings_pick_app_title),
-            positiveText = getString(android.R.string.cancel),
-            negativeText = null
+            title = getString(R.string.settings_pick_app_title)
         )
         listView.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
+            val pkg = allApps[position].activityInfo.packageName
             dialog.dismiss()
-            addCustomApp(allApps[position].activityInfo.packageName)
+            addCustomApp(pkg)
         }
     }
 
-    /** 手动输入自定义应用包名 */
+    /** 手动输入自定义应用包名（单应用模型：目标打卡 App 只有一个，留空=清除并回退内置） */
     private fun showCustomAppTextDialog() {
         val editText = EditText(ctx).apply {
-            setText(Constant.getCustomTargetApps().joinToString("\n"))
-            hint = "每行一个包名，例如：\ncom.example.punchapp"
-            isSingleLine = false
-            minLines = 3
-            gravity = Gravity.START or Gravity.TOP
+            setText(SaveKeyValues.loadString(Constant.CUSTOM_TARGET_SELECTED_KEY, ""))
+            hint = "例如：com.example.punchapp"
+            isSingleLine = true
             setPadding(
                 resources.getDimensionPixelSize(R.dimen.dp_16),
                 resources.getDimensionPixelSize(R.dimen.dp_12),
@@ -1973,23 +2151,25 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             positiveText = getString(android.R.string.ok),
             negativeText = getString(android.R.string.cancel)
         ) { dialog ->
-            val packages = parsePackageList(editText.text.toString())
-            val invalid = packages.filter { !isValidPackageName(it) }
-            if (invalid.isEmpty()) {
-                SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, packages.joinToString(","))
-                val selected = SaveKeyValues.loadString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
-                if (SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0) == Constant.CUSTOM_TARGET_INDEX && !packages.contains(selected)) {
-                    SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, 0)
-                    SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, "")
-                }
-                applyTargetAppIcon()
-                ConfigImportSignal.notifyRemoteChanged(ctx)
-                "已保存自定义打卡应用".show(ctx)
-                true
-            } else {
-                "无效的包名格式：${invalid.joinToString()}".show(ctx)
-                false
+            val pkg = editText.text.toString().trim()
+            if (pkg.isNotEmpty() && !isValidPackageName(pkg)) {
+                "无效的包名格式：$pkg".show(ctx)
+                return@showForm false
             }
+            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_APPS_KEY, pkg)
+            SaveKeyValues.saveString(Constant.CUSTOM_TARGET_SELECTED_KEY, pkg)
+            if (pkg.isEmpty()) {
+                if (SaveKeyValues.loadInt(Constant.TARGET_APP_KEY, 0) == Constant.CUSTOM_TARGET_INDEX) {
+                    SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, 0)
+                }
+                "已清除自定义打卡应用".show(ctx)
+            } else {
+                SaveKeyValues.saveInt(Constant.TARGET_APP_KEY, Constant.CUSTOM_TARGET_INDEX)
+                "已保存自定义打卡应用".show(ctx)
+            }
+            applyTargetAppIcon()
+            ConfigImportSignal.notifyRemoteChanged(ctx)
+            true
         }
     }
 
@@ -1999,7 +2179,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx,
             getString(R.string.settings_capture_enable_warning_title),
             DialogCardBuilder.CardSpec(
-                notice = getString(R.string.settings_capture_enable_warning_msg) to DialogCardBuilder.NoticeKind.WARN
+                paragraphs = listOf(getString(R.string.settings_capture_enable_warning_msg)),
+                notice = getString(R.string.settings_capture_enable_warning_notice) to DialogCardBuilder.NoticeKind.WARN
             ),
             positiveText = "继续开启",
             cancelable = false,
@@ -2013,7 +2194,8 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             ctx,
             getString(R.string.settings_accessibility_enable_warning_title),
             DialogCardBuilder.CardSpec(
-                notice = getString(R.string.settings_accessibility_enable_warning_msg) to DialogCardBuilder.NoticeKind.WARN
+                paragraphs = listOf(getString(R.string.settings_accessibility_enable_warning_msg)),
+                notice = getString(R.string.settings_accessibility_enable_warning_notice) to DialogCardBuilder.NoticeKind.WARN
             ),
             positiveText = "前往开启",
             cancelable = false,
@@ -2166,24 +2348,94 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         return best
     }
 
-    /** 状态报告：统一弹窗 + 可滚动纯文本（不再用 WebView/HTML） */
+    /** 状态报告：解析纯文本为分节卡片（键值行 + 明细行），替代整块等宽文本 */
     private fun showStatusReportDialog(report: String) {
         val density = resources.displayMetrics.density
-        val padH = (8 * density).toInt()
-        val textView = TextView(ctx).apply {
-            text = report
-            textSize = 13f
-            setTextIsSelectable(true)
-            setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
-            setLineSpacing(2 * density, 1f)
-            setPadding(padH, 0, padH, 0)
-            typeface = android.graphics.Typeface.MONOSPACE
+        fun dip(v: Int) = (v * density).toInt()
+
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dip(10), dip(4), dip(10), 0)
         }
+        var card: LinearLayout? = null
+
+        fun addRow(key: String?, value: String) {
+            val c = card ?: return
+            val row = if (key == null) {
+                TextView(ctx).apply {
+                    text = value
+                    textSize = 13f
+                    setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
+                    setLineSpacing(0f, 1.25f)
+                }
+            } else {
+                LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.TOP
+                    addView(TextView(ctx).apply {
+                        text = key
+                        textSize = 13f
+                        setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.32f))
+                    addView(TextView(ctx).apply {
+                        text = value
+                        textSize = 13f
+                        setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
+                        setLineSpacing(0f, 1.25f)
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.68f))
+                }
+            }
+            c.addView(row, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dip(7) })
+        }
+
+        fun newSection(title: String) {
+            card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dip(14), dip(12), dip(14), dip(12))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(ContextCompat.getColor(ctx, R.color.md_surfaceVariant))
+                    cornerRadius = 12 * density
+                }
+                addView(TextView(ctx).apply {
+                    text = title
+                    textSize = 13f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setTextColor(ContextCompat.getColor(ctx, R.color.md_primary))
+                })
+            }
+            container.addView(card, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dip(10) })
+        }
+
+        // 远程指令速查是等宽表格，卡片布局下展示效果差，弹窗内不渲染
+        var skipSection = false
+        report.lines().forEach { raw ->
+            val t = raw.trim()
+            when {
+                t.isEmpty() || t.startsWith("====") || t == "状态查询通知" -> Unit
+                t.startsWith("【") && t.endsWith("】") -> {
+                    skipSection = t == "【远程指令速查】"
+                    if (!skipSection) newSection(t.substring(1, t.length - 1))
+                }
+                skipSection -> Unit
+                t.startsWith("·") -> {
+                    val body = t.removePrefix("·").trim()
+                    val idx = body.indexOf("：")
+                    if (idx > 0) addRow(body.substring(0, idx), body.substring(idx + 1))
+                    else addRow(null, body)
+                }
+                else -> addRow(null, t)
+            }
+        }
+
         val scroll = ScrollView(ctx).apply {
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
             isFillViewport = true
             addView(
-                textView,
+                container,
                 ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT

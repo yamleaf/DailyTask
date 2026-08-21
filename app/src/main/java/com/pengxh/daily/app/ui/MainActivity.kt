@@ -20,6 +20,8 @@ import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.TextView
+import android.widget.ImageView
+import android.content.res.ColorStateList
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -129,8 +131,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
     private lateinit var settingsFragment: SettingsFragment
     private val allFragments: List<Fragment>
         get() = listOf(taskFragment, remoteControlFragment, settingsFragment)
-    private var currentTab = R.id.nav_task
-    private var ignoreNavSelection = false
+    private var currentTabTag = TAG_TASK
 
     /** 远程控制端修改设置/任务后，前台主界面即时刷新任务列表（无需二次进入） */
     private val remoteConfigReceiver = object : BroadcastReceiver() {
@@ -157,6 +158,18 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 前台亮灭屏策略：伪息屏开 / 屏幕模式 0·2 → 常亮；屏幕模式 1 → 允许系统自然灭屏
         applyForegroundScreenFlags()
 
+        // 手动打开 App 时确保前台服务存活：FGS onCreate 会向 TaskScheduler 注入协程作用域，
+        // 缺席时任务页「启动」按钮会因 scope 未初始化而静默失效（不受「暂停使用」开关限制）
+        if (!ForegroundRunningService.isRunning) {
+            startForegroundService(Intent(this, ForegroundRunningService::class.java))
+        }
+
+        // 悬浮窗服务：已授权且非「暂停使用」时随 App 打卡拉起（与原工程行为一致；
+        // 未授权时由 onResume 的权限门禁跳转系统授权页，授权返回后经 launcher 回调拉起）
+        if (!KeepAliveReceiver.isPaused()) {
+            KeepAliveReceiver.ensureFloatingWindow(this)
+        }
+
         // 悬浮蒙层上滑解除时，同步卸掉 Activity 内蒙层（一次上滑同时出控制界面）
         MaskOverlayHelper.activityMaskHider = {
             if (maskViewController.isMaskVisible()) {
@@ -168,12 +181,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
 
         // 磨砂玻璃悬浮导航：模糊其下方的全部 Tab 内容
-        binding.bottomNavBar.root.setupWith(binding.rootView)
-            .setBlurRadius(24f)
-            .setOverlayColor(android.graphics.Color.TRANSPARENT)
-
-        // 先同步 BottomNavigationView 选中状态（默认任务页），再设置监听器，避免递归
-        binding.bottomNavBar.bottomNav.selectedItemId = R.id.nav_task
+        try {
+            binding.bottomNavBar.blurView.setupWith(binding.rootView)
+                .setBlurRadius(24f)
+                .setOverlayColor(android.graphics.Color.TRANSPARENT)
+        } catch (e: Exception) {
+            LogFileManager.error("BlurView 初始化失败: ${e.message}")
+        }
 
         // 一次性添加三个 Tab（隐藏非默认 Tab），后续切换只做 hide/show。
         // 重建（recreate，如切换主题）时 FragmentManager 已恢复旧实例，必须按 tag 复用，
@@ -191,87 +205,13 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         } else {
             // 重建：FragmentManager 已恢复各实例隐藏/显示状态，无需再 hide；
             // 重新同步当前 tab，与恢复后的 BottomNavigationView 高亮保持一致
-            currentTab = savedInstanceState.getInt(KEY_CURRENT_TAB, R.id.nav_task)
+currentTabTag = savedInstanceState.getString(KEY_CURRENT_TAB, TAG_TASK) ?: TAG_TASK
         }
-        ft.commitNow()
-
-        // 「暂停使用」开启时：重新打开 App 也不会恢复任何服务（前台/悬浮窗均跳过），
-        // 必须关闭暂停开关后功能才恢复正常。
-        if (!KeepAliveReceiver.isPaused()) {
-            if (Settings.canDrawOverlays(this)) {
-                Intent(this, FloatingWindowService::class.java).apply { startService(this) }
-            } else {
-                // 悬浮窗权限并显示悬浮窗
-                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                overlayPermissionLauncher.launch(intent)
-            }
-        }
-
-        // 前台服务（保活 + 托管 TaskScheduler 协程作用域 + 每日重置）
-        // 「暂停使用」开启时跳过：用户暂停状态下打开 App 只是查看/恢复，不重启任何后台服务
-        if (!KeepAliveReceiver.isPaused()) {
-            Intent(this, ForegroundRunningService::class.java).apply { startForegroundService(this) }
-        }
-
-        // 订阅通知监听事件（远程指令；单条异常不得取消整个订阅）
-        lifecycleScope.launch(CoroutineExceptionHandler { _, e ->
-            Log.e(kTag, "通知事件订阅协程异常", e)
-            LogFileManager.error("通知事件订阅协程异常: ${e.message}")
-        }) {
-            NotificationMonitorService.events
-                .collect { event ->
-                    try {
-                        handleMonitorEvent(event)
-                    } catch (e: Exception) {
-                        Log.e(kTag, "处理通知事件失败，已跳过: $event", e)
-                        LogFileManager.error("处理通知事件失败: ${e.message}")
-                    }
-                }
-        }
-
-        // 订阅打卡结束信号：导航已由 TaskScheduler.returnAfterPunch 完成（开机无 Activity 时也能回跳），
-        // 此处仅切到任务 Tab，避免重复 Home/拉起。
-        lifecycleScope.launch {
-            TaskScheduler.returnToApp.collectLatest {
-                switchToTaskTab()
-            }
-        }
-
-        // 伪息屏开关 / 屏幕模式变更：热更新 KEEP_SCREEN_ON 与前台无操作计时
-        lifecycleScope.launch {
-            AppRuntimeConfig.forcePseudoMask.collectLatest {
-                applyForegroundScreenPolicy()
-            }
-        }
-        lifecycleScope.launch {
-            AppRuntimeConfig.screenMode.collectLatest {
-                applyForegroundScreenPolicy()
-            }
-        }
-
-        // 省电模式热更新：由 TaskFragment 调整任务页时钟刷新频率
-
-        // 兜底检查是否有错过的每日重置
-        checkMissedReset()
-        // 开机自动调度兜底：若开机广播路径未成功 startTask，打开 App 时再补一次
-        ensureBootAutoScheduleIfNeeded()
-
-        // 首次启动（含覆盖安装/清除数据/卸载重装）弹出使用须知
-        binding.rootView.post { maybeShowUsageNotice() }
-
-        // 处理外部拉起指定 Tab（如 MQTT 通知点击进入「远程」）
-        applyTabFromIntent(intent)
-        // 首次创建默认任务页；重建（如主题切换）由 onRestoreInstanceState 恢复原 tab，
-        // 此处不再强制任务页，避免内容与 BottomNavigationView 高亮脱节
-        if (savedInstanceState == null) {
-            ignoreNavSelection = true
-            binding.bottomNavBar.bottomNav.selectedItemId = R.id.nav_task
-            ignoreNavSelection = false
-        }
+ft.commitNow()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putInt(KEY_CURRENT_TAB, currentTab)
+        outState.putString(KEY_CURRENT_TAB, currentTabTag)
         super.onSaveInstanceState(outState)
     }
 
@@ -279,37 +219,31 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         setupBottomNav()
     }
 
-    private fun setupBottomNav() {
-        binding.bottomNavBar.bottomNav.setOnItemSelectedListener { item ->
-            if (!ignoreNavSelection) switchTab(item.itemId)
-            true
+private fun setupBottomNav() {
+        try {
+            binding.bottomNavBar.navRemote.setOnClickListener { switchTab(TAG_REMOTE) }
+            binding.bottomNavBar.navTask.setOnClickListener { switchTab(TAG_TASK) }
+            binding.bottomNavBar.navSettings.setOnClickListener { switchTab(TAG_SETTINGS) }
+            updateNavSelection(currentTabTag)
+        } catch (e: Exception) {
+            LogFileManager.error("导航加载失败: ${e.message}")
         }
     }
 
-    /**
-     * 单 Activity 内 Fragment 切换：hide/show + MaterialFadeThrough 交叉淡入（与控制端一致）。
-     */
-    private fun switchTab(itemId: Int) {
-        if (itemId == currentTab) return
-        val target = when (itemId) {
-            R.id.nav_task -> taskFragment
-            R.id.nav_remote -> remoteControlFragment
-            R.id.nav_settings -> settingsFragment
+    private fun switchTab(tag: String) {
+        if (tag == currentTabTag) return
+        val target = when (tag) {
+            TAG_TASK -> taskFragment
+            TAG_REMOTE -> remoteControlFragment
+            TAG_SETTINGS -> settingsFragment
             else -> return
         }
-        // 打卡结束回桌面等场景：returnAfterPunch 先 startActivity(Home) 让本 Activity 走 onStop/
-        // onSaveInstanceState，随后 _returnToApp 触发的切 Tab 若仍 commitNow，会抛
-        // "Can not perform this action after onSaveInstanceState" 崩溃（曾致进程 died、
-        // 真息屏不保亮黑蒙层未盖上）。状态已保存时 Activity 不可见，切换无意义，
-        // 回前台由 onNewIntent/onResume 恢复，此处直接跳过。
         if (supportFragmentManager.isStateSaved) {
-            LogFileManager.writeLog("Activity 状态已保存，跳过 Tab 切换（itemId=$itemId）")
+            LogFileManager.writeLog("Activity 状态已保存，跳过 Tab 切换（tag=$tag）")
             return
         }
-        currentTab = itemId
-        ignoreNavSelection = true
-        binding.bottomNavBar.bottomNav.selectedItemId = itemId
-        ignoreNavSelection = false
+        currentTabTag = tag
+        updateNavSelection(tag)
         val ft = supportFragmentManager.beginTransaction()
         allFragments.forEach { ft.hide(it) }
         ft.show(target)
@@ -327,18 +261,39 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         }
     }
 
-    /** 供 Fragment 回切到「任务」Tab（如远程页工具栏返回按钮） */
-    fun switchToTaskTab() {
-        switchTab(R.id.nav_task)
+fun switchToTaskTab() {
+        switchTab(TAG_TASK)
     }
 
-    private fun applyTabFromIntent(intent: Intent?) {
+    /** 更新导航选中态：两侧 Tab 图标/文字蓝色 vs 灰色，中心凸起按钮两态 */
+    private fun updateNavSelection(activeTag: String) {
+        val activeColor = ContextCompat.getColor(this, R.color.md_primary)
+        val inactiveColor = ContextCompat.getColor(this, R.color.md_onSurfaceVariant)
+
+        fun setSideState(icon: ImageView, label: TextView, isActive: Boolean) {
+            val c = if (isActive) activeColor else inactiveColor
+            icon.imageTintList = ColorStateList.valueOf(c)
+            label.setTextColor(c)
+        }
+
+        setSideState(binding.bottomNavBar.iconRemote, binding.bottomNavBar.labelRemote, activeTag == TAG_REMOTE)
+        setSideState(binding.bottomNavBar.iconSettings, binding.bottomNavBar.labelSettings, activeTag == TAG_SETTINGS)
+
+        val taskActive = activeTag == TAG_TASK
+        binding.bottomNavBar.navTask.setBackgroundResource(
+            if (taskActive) R.drawable.bg_brand_gradient_circle else R.drawable.bg_nav_raised_silent)
+        binding.bottomNavBar.iconTask.imageTintList = ColorStateList.valueOf(
+            ContextCompat.getColor(this,
+                if (taskActive) R.color.on_header else R.color.brand_purple))
+    }
+
+private fun applyTabFromIntent(intent: Intent?) {
         val tab = intent?.getStringExtra(EXTRA_TAB) ?: return
         intent.removeExtra(EXTRA_TAB)
         when (tab) {
-            TAB_REMOTE -> switchTab(R.id.nav_remote)
-            TAB_SETTINGS -> switchTab(R.id.nav_settings)
-            else -> switchTab(R.id.nav_task)
+            TAB_REMOTE -> switchTab(TAG_REMOTE)
+            TAB_SETTINGS -> switchTab(TAG_SETTINGS)
+            else -> switchTab(TAG_TASK)
         }
     }
 
@@ -371,6 +326,17 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             resetIdleMaskTimer()
         }
         if (!Settings.canDrawOverlays(this)) {
+            // 悬浮窗权限门禁：未授权直接跳系统授权页；返回仍未授权会在下次前台再次拉起，
+            // 不授权不允许进入主界面。「暂停使用」状态下不强制。
+            if (!KeepAliveReceiver.isPaused()) {
+                overlayPermissionLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                return
+            }
             "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
         }
         runStartupSelfCheck()
@@ -692,6 +658,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             "通知监听未开启，无法接收远程指令，请到设置页开启".show(this)
         }
         // 1) Android 13+ 通知权限（POST_NOTIFICATIONS）：冷启动引导授权，保证结果通知可正常弹出
+        // （悬浮窗权限为硬门禁，已在 onResume 单独拦截，不进入本串行链）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             !notificationPermissionPrompted &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -819,6 +786,8 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
                 startService(this)
             }
         }
+        // 授权返回后继续串行引导链（自启动/电池优化）
+        runStartupSelfCheck()
     }
 
     /** Android 13+ 通知权限（POST_NOTIFICATIONS）运行时请求 */

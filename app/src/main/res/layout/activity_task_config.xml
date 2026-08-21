@@ -11,7 +11,7 @@
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/md_primary"
+        android:background="@drawable/bg_header_gradient"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="任务配置"
         app:titleTextColor="@color/on_header" />
@@ -341,58 +341,6 @@
                 android:layout_height="@dimen/dividerLine"
                 android:layout_marginHorizontal="@dimen/dp_16"
                 android:background="@color/md_outlineVariant" />
-
-            <RelativeLayout
-                android:id="@+id/exportLayout"
-                android:layout_width="match_parent"
-                android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@android:color/transparent"
-                android:paddingHorizontal="@dimen/dp_16">
-
-                <com.google.android.material.textview.MaterialTextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_centerVertical="true"
-                    android:gravity="center_vertical"
-                    android:text="导出配置"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
-
-                <ImageView 
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_alignParentEnd="true"
-                    android:layout_centerVertical="true"
-                    android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
-            </RelativeLayout>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="@dimen/dividerLine"
-                android:layout_marginHorizontal="@dimen/dp_16"
-                android:background="@color/md_outlineVariant" />
-
-            <RelativeLayout
-                android:id="@+id/importLayout"
-                android:layout_width="match_parent"
-                android:layout_height="@dimen/itemLayoutHeight"
-                android:background="@android:color/transparent"
-                android:paddingHorizontal="@dimen/dp_16">
-
-                <com.google.android.material.textview.MaterialTextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_centerVertical="true"
-                    android:gravity="center_vertical"
-                    android:text="导入配置"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
-
-                <ImageView 
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_alignParentEnd="true"
-                    android:layout_centerVertical="true"
-                    android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
-            </RelativeLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
     </androidx.core.widget.NestedScrollView>

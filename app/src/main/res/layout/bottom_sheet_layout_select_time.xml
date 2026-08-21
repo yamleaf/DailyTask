@@ -3,7 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_bottom_sheet">
 
     <!-- 顶部手柄 -->
     <com.google.android.material.card.MaterialCardView
@@ -12,31 +13,51 @@
         android:layout_height="4dp"
         android:layout_marginTop="@dimen/dp_12"
         android:layout_marginBottom="@dimen/dp_16"
-        app:cardBackgroundColor="?attr/colorOutline"
+        app:cardBackgroundColor="@color/md_outline"
         app:cardCornerRadius="2dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
         app:strokeWidth="0dp" />
 
-    <com.google.android.material.textview.MaterialTextView
-        android:id="@+id/titleView"
+    <!-- 标题行 -->
+    <LinearLayout
+        android:id="@+id/titleRow"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:fontFamily="sans-serif-medium"
-        android:gravity="center"
-        android:paddingVertical="@dimen/dp_16"
-        android:textColor="?attr/colorOnSurface"
-        android:textSize="@dimen/sp_18"
-        android:textStyle="bold"
-        app:layout_constraintTop_toBottomOf="@id/handleView"
-        tools:text="修改任务时间" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="16dp"
+        app:layout_constraintTop_toBottomOf="@id/handleView">
+
+        <TextView
+            android:id="@+id/titleView"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="sans-serif-medium"
+            android:textColor="@color/md_onSurface"
+            android:textSize="@dimen/sp_18"
+            android:textStyle="bold"
+            tools:text="修改任务时间" />
+
+        <ImageView
+            android:id="@+id/btnClose"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:padding="6dp"
+            android:background="@drawable/bg_circle_56"
+            android:src="@drawable/ic_close"
+            android:contentDescription="关闭" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        app:layout_constraintTop_toBottomOf="@id/titleView">
+        android:layout_marginTop="8dp"
+        app:layout_constraintTop_toBottomOf="@id/titleRow">
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/nameInputLayout"
@@ -58,6 +79,7 @@
             android:id="@+id/timePicker"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             app:wheel_hourLabel="时"
             app:wheel_itemTextBoldSelected="true"
             app:wheel_itemTextColorSelected="@color/md_primary"
@@ -65,11 +87,39 @@
             app:wheel_secondLabel="秒"
             app:wheel_timeMode="hour_24_has_second" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/saveButton"
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="8dp"
+            android:background="@color/md_outlineVariant" />
+
+        <!-- 对称按钮栏 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="@dimen/dp_16"
-            android:text="确定" />
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="20dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/cancelButton"
+                style="@style/Widget.Daily.Dialog.Button.Negative"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/dialog_button_height"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="取消" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/saveButton"
+                style="@style/Widget.Daily.Dialog.Button.Positive"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/dialog_button_height"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="保存" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

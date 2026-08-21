@@ -52,7 +52,7 @@
                 android:layout_marginEnd="10dp"
                 android:importantForAccessibility="no"
                 android:src="@drawable/ic_clock"
-                app:tint="#E8C07A" />
+                app:tint="@color/float_accent" />
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -64,7 +64,7 @@
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.06"
                     android:text="打卡倒计时"
-                    android:textColor="#A8B0C0"
+                    android:textColor="@color/float_label"
                     android:textSize="10sp" />
 
                 <com.google.android.material.textview.MaterialTextView
@@ -74,7 +74,7 @@
                     android:fontFamily="sans-serif-medium"
                     android:includeFontPadding="false"
                     android:text="30s"
-                    android:textColor="#FFF6ED"
+                    android:textColor="@color/float_time"
                     android:textSize="24sp"
                     android:textStyle="bold" />
             </LinearLayout>
@@ -83,7 +83,7 @@
                 android:layout_width="1dp"
                 android:layout_height="28dp"
                 android:layout_marginHorizontal="10dp"
-                android:background="#33FFFFFF" />
+                android:background="@color/dash_progress_bg" />
 
             <com.pengxh.daily.app.widget.WaveProgressView
                 android:id="@+id/waveProgressView"

@@ -11,7 +11,7 @@
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/md_primary"
+        android:background="@drawable/bg_header_gradient"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="@string/settings_title"
         app:titleTextColor="@color/on_header" />
@@ -1855,7 +1855,67 @@
                         android:layout_marginHorizontal="@dimen/dp_16"
                         android:background="@color/md_outlineVariant" />
 
+                    <LinearLayout
+                        android:id="@+id/exportLayout"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16">
 
+                        <ImageView
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_binder" android:contentDescription="@null" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:text="@string/settings_export_config"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/dividerLine"
+                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:background="@color/md_outlineVariant" />
+
+                    <LinearLayout
+                        android:id="@+id/importLayout"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="@dimen/dp_16">
+
+                        <ImageView
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_update" android:contentDescription="@null" />
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:layout_weight="1"
+                            android:text="@string/settings_import_config"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                            android:textColor="@color/md_onSurface" />
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:src="@drawable/ic_arrow_right" android:contentDescription="@null" />
+                    </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"

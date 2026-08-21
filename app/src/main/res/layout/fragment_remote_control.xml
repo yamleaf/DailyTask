@@ -11,7 +11,7 @@
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/md_primary"
+        android:background="@drawable/bg_header_gradient"
         app:navigationIcon="@drawable/ic_title_left"
         app:title="远程控制"
         app:titleTextColor="@color/on_header" />
@@ -38,8 +38,8 @@
                 android:layout_marginBottom="@dimen/dp_12"
                 android:visibility="gone"
                 app:cardBackgroundColor="@color/md_errorContainer"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="2dp"
+                app:cardCornerRadius="@dimen/radius_card"
+                app:cardElevation="@dimen/elev_card"
                 app:strokeWidth="0dp">
 
                 <LinearLayout
@@ -80,8 +80,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/dp_12"
                 app:cardBackgroundColor="@color/md_surface"
-                app:cardCornerRadius="@dimen/radius_xl"
-                app:cardElevation="3dp"
+                app:cardCornerRadius="@dimen/radius_card"
+                app:cardElevation="@dimen/elev_card"
                 app:strokeColor="@color/md_outlineVariant"
                 app:strokeWidth="1dp">
 

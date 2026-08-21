@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark-mode tokens (mirror :protocol values-night/tokens.xml; only entries referenced by lite) -->
+    <color name="md_surface">#161826</color>
+    <color name="md_surfaceContainerHighest">#242636</color>
+    <color name="dialog_shadow">#2B2F45</color>
+</resources>
