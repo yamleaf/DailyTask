@@ -207,7 +207,51 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
             // 重新同步当前 tab，与恢复后的 BottomNavigationView 高亮保持一致
 currentTabTag = savedInstanceState.getString(KEY_CURRENT_TAB, TAG_TASK) ?: TAG_TASK
         }
-ft.commitNow()
+        ft.commitNow()
+
+        // 订阅通知监听事件（远程指令：执行/停止任务、息屏/亮屏、截屏；单条异常不得取消整个订阅）
+        lifecycleScope.launch(CoroutineExceptionHandler { _, e ->
+            Log.e(kTag, "通知事件订阅协程异常", e)
+            LogFileManager.error("通知事件订阅协程异常: ${e.message}")
+        }) {
+            NotificationMonitorService.events
+                .collect { event ->
+                    try {
+                        handleMonitorEvent(event)
+                    } catch (e: Exception) {
+                        Log.e(kTag, "处理通知事件失败，已跳过: $event", e)
+                        LogFileManager.error("处理通知事件失败: ${e.message}")
+                    }
+                }
+        }
+
+        // 订阅打卡结束信号：导航已由 TaskScheduler.returnAfterPunch 完成（开机无 Activity 时也能回跳），
+        // 此处仅切到任务 Tab，避免重复 Home/拉起。
+        lifecycleScope.launch {
+            TaskScheduler.returnToApp.collectLatest {
+                switchToTaskTab()
+            }
+        }
+
+        // 伪息屏开关 / 屏幕模式变更：热更新 KEEP_SCREEN_ON 与前台无操作计时
+        lifecycleScope.launch {
+            AppRuntimeConfig.forcePseudoMask.collectLatest {
+                applyForegroundScreenPolicy()
+            }
+        }
+        lifecycleScope.launch {
+            AppRuntimeConfig.screenMode.collectLatest {
+                applyForegroundScreenPolicy()
+            }
+        }
+
+        // 兜底检查是否有错过的每日重置
+        checkMissedReset()
+        // 开机自动调度兜底：若开机广播路径未成功 startTask，打开 App 时再补一次
+        ensureBootAutoScheduleIfNeeded()
+
+        // 首次启动（含覆盖安装/清除数据/卸载重装）弹出使用须知
+        binding.rootView.post { maybeShowUsageNotice() }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
