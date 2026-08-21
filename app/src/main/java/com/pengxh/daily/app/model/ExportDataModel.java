@@ -56,6 +56,7 @@ public class ExportDataModel {
     private String mqttPassEncrypted; // 被控端密码（AES 密文）
     private String deviceId; // 8 位设备 ID
     private String ctlUser; // 控制端用户名
+    private String mqttCtlPassEncrypted; // 控制端密码（AES 密文）
     private String apiUrl; // Serverless API 地址
     private String apiAppId; // Serverless API AppID
     private String apiAppSecretEncrypted; // Serverless API AppSecret（AES 密文）
@@ -218,6 +219,14 @@ public class ExportDataModel {
 
     public void setCtlUser(String ctlUser) {
         this.ctlUser = ctlUser;
+    }
+
+    public String getMqttCtlPassEncrypted() {
+        return mqttCtlPassEncrypted;
+    }
+
+    public void setMqttCtlPassEncrypted(String mqttCtlPassEncrypted) {
+        this.mqttCtlPassEncrypted = mqttCtlPassEncrypted;
     }
 
     public String getApiUrl() {

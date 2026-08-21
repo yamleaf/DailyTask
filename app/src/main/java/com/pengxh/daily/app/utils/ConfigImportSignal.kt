@@ -22,6 +22,8 @@ object ConfigImportSignal {
     fun notifyRemoteChanged(context: Context) {
         pendingMainActivityRefresh = true
         pendingSettingsRefresh = true
-        context.sendBroadcast(Intent(ACTION_REMOTE_CONFIG_CHANGED))
+        // 必须显式指定本包名：各页接收器以 RECEIVER_NOT_EXPORTED 注册，
+        // Android 13+ 上隐式广播（不带包名）不会送达非导出接收器，导致页面不刷新
+        context.sendBroadcast(Intent(ACTION_REMOTE_CONFIG_CHANGED).setPackage(context.packageName))
     }
 }

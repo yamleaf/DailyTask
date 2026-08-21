@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.utils
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 
 import com.google.gson.Gson
@@ -8,6 +9,8 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
 import com.pengxh.daily.app.model.ExportDataModel
+import com.pengxh.daily.app.service.KeepAliveReceiver
+import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.kt.lite.utils.SaveKeyValues
@@ -27,7 +30,7 @@ class TaskDataManager() {
             val type = object : TypeToken<ExportDataModel>() {}.type
             val config = gson.fromJson<ExportDataModel>(json, type)
 
-            saveConfiguration(config, context)
+            val connectionChanged = saveConfiguration(config, context)
 
             // 解密并自动填充邮箱授权码（导出时以 AES 加密写入文件，避免明文/脱敏泄露）
             val encryptedAuth = config.emailAuthEncrypted
@@ -54,6 +57,21 @@ class TaskDataManager() {
             // 广播通知前台各页即时刷新（任务列表/设置/远程），并置位标记
             // 兜底：页面未注册接收器时由各自 onResume 消费一次
             ConfigImportSignal.notifyRemoteChanged(context)
+
+            // 连接参数（broker/账号/密码/设备ID）有变：重启代理服务按新配置重建连接。
+            // 运行中的 Paho client 持有旧 ConnectOptions，reconnect() 不会重读新值，
+            // 不重启则远程页要等杀进程后才能连上新服务器（与远程页 restartMqttService 同模式）
+            if (connectionChanged) {
+                context.stopService(Intent(context, MqttAgentService::class.java))
+                if (!KeepAliveReceiver.isPaused() &&
+                    SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false) &&
+                    SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "").isNotBlank() &&
+                    SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "").isNotBlank() &&
+                    MqttSecureConfig.loadPass().isNotBlank()
+                ) {
+                    context.startForegroundService(Intent(context, MqttAgentService::class.java))
+                }
+            }
             ImportResult.Success(importedTasks.size)
         } catch (e: JsonSyntaxException) {
             Log.e(javaClass.simpleName, "导入任务异常", e)
@@ -64,7 +82,12 @@ class TaskDataManager() {
         }
     }
 
-    private suspend fun saveConfiguration(config: ExportDataModel, context: Context) {
+    /** @return 连接参数（broker/账号/密码/设备ID）是否发生变化（变化后需重启 MQTT 服务） */
+    private suspend fun saveConfiguration(
+        config: ExportDataModel,
+        context: Context
+    ): Boolean {
+        var connectionChanged = false
         SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, config.resetTime.coerceIn(0, 23))
         SaveKeyValues.saveInt(
             Constant.STAY_OVERTIME_KEY,
@@ -172,19 +195,30 @@ class TaskDataManager() {
         // 密码/AppSecret 为 AES 密文，解密后写入 Keystore 加密存储）
         config.mqttBroker?.takeIf { it.isNotBlank() }?.let {
             SaveKeyValues.saveString(Constant.MQTT_BROKER_KEY, it)
+            connectionChanged = true
         }
         config.mqttUser?.takeIf { it.isNotBlank() }?.let {
             SaveKeyValues.saveString(Constant.MQTT_USER_KEY, it)
+            connectionChanged = true
         }
         config.mqttPassEncrypted?.takeIf { it.isNotBlank() }?.let {
             val pass = ConfigCipher.decrypt(it)
-            if (pass.isNotBlank()) MqttSecureConfig.savePass(pass)
+            if (pass.isNotBlank()) {
+                MqttSecureConfig.savePass(pass)
+                connectionChanged = true
+            }
         }
         config.deviceId?.takeIf { it.isNotBlank() }?.let {
             SaveKeyValues.saveString(Constant.DEVICE_ID_KEY, it)
+            connectionChanged = true
         }
         config.ctlUser?.takeIf { it.isNotBlank() }?.let {
             SaveKeyValues.saveString(Constant.MQTT_CTL_USER_KEY, it)
+        }
+        // 控制端密码：控制端连接 MQTT 用的凭证（不影响本机自身会话，无需触发重启）
+        config.mqttCtlPassEncrypted?.takeIf { it.isNotBlank() }?.let {
+            val pass = ConfigCipher.decrypt(it)
+            if (pass.isNotBlank()) SaveKeyValues.saveString(Constant.MQTT_CTL_PASS_KEY, pass)
         }
         config.apiUrl?.takeIf { it.isNotBlank() }?.let {
             SaveKeyValues.saveString(Constant.MQTT_SERVERLESS_API_URL_KEY, it)
@@ -215,6 +249,7 @@ class TaskDataManager() {
                 EmailSecureConfig.saveAuthCode(authCode)
             }
         }
+        return connectionChanged
     }
 
     private fun isValidTaskTime(time: String?): Boolean {

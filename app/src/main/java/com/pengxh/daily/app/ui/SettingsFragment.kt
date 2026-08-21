@@ -290,6 +290,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             if (mqttPass.isNotBlank()) ConfigCipher.encrypt(mqttPass) else ""
         exportData.deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "")
         exportData.ctlUser = SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "")
+        val ctlPass = SaveKeyValues.loadString(Constant.MQTT_CTL_PASS_KEY, "")
+        exportData.mqttCtlPassEncrypted =
+            if (ctlPass.isNotBlank()) ConfigCipher.encrypt(ctlPass) else ""
         exportData.apiUrl = SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_URL_KEY, "")
         exportData.apiAppId =
             SaveKeyValues.loadString(Constant.MQTT_SERVERLESS_API_APP_ID_KEY, "")
