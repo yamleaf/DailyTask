@@ -13,6 +13,10 @@ on:
         description: '强制更新（true 时 App 必须更新）'
         required: false
         default: 'false'
+      package_name:
+        description: '自定义包名（留空用默认 com.pengxh.daily.app；至少两段如 com.example.daily，产物文件名带 _custom）'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -133,7 +137,18 @@ jobs:
           ./gradlew --version
 
       - name: Build release APK (alpha)
-        run: ./gradlew assembleRelease --no-daemon
+        env:
+          # 经 env 传递再判空，避免 inputs 直接内插 shell 造成注入
+          CUSTOM_PACKAGE: ${{ inputs.package_name }}
+        run: |
+          # 手动触发可传自定义包名（inputs 仅 workflow_dispatch 有值，push 触发为空走默认包名）；
+          # 格式校验在 build.gradle 内做，非法包名直接构建失败
+          if [ -n "$CUSTOM_PACKAGE" ]; then
+            echo "使用自定义包名: $CUSTOM_PACKAGE"
+            ./gradlew assembleRelease --no-daemon -PappPackageId="$CUSTOM_PACKAGE"
+          else
+            ./gradlew assembleRelease --no-daemon
+          fi
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
@@ -142,8 +157,11 @@ jobs:
           path: app/build/outputs/apk/release/*.apk
 
       # ===== 手动触发：dump APK 版本号，供 GitHub Release Draft 展示（版本信息发版在本地执行） =====
+      # 自定义包名构建（package_name 非空）视为测试包：跳过下方全部发版链路（版本提取/加密/
+      # Release Draft），避免定制包名 APK 进入 Gitee 更新通道——终端用户装不上（包名/签名不符）。
+      # 测试包仍通过上方 "Upload release APK" artifact 步骤下载。
       - name: Extract version from APK (aapt)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
         id: gitee_version
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
@@ -159,7 +177,7 @@ jobs:
       # ===== 手动触发：APK 加密为 7z（AES-256，密码=APK_ENCRYPT_PASSWORD）供 Gitee Go 拉取解压 =====
       # GitHub 仓库公开 → release 资产公开，加密防直接下载；Gitee 私有仓库存明文 APK。
       - name: Encrypt APK (7z AES-256)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
         run: |
           pip install py7zr -q
           python3 - <<'EOF'
@@ -180,7 +198,7 @@ jobs:
       # ===== 手动触发：生成 GitHub Release Draft（标题 DailyTask Alpha yymmdd.HHmm，
       # body 总结自上次 release tag 以来的提交记录） =====
       - name: Prepare GitHub Release info (title date + body commits)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
         id: gh_release_info
         run: |
           # 标题日期时间（北京时间 yymmdd.HHmm，例 260816.1435 = 2026-08-16 14:35）
@@ -216,7 +234,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release (encrypted APK, for Gitee Go sync)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.package_name
         uses: softprops/action-gh-release@v2
         with:
           # tag 用 versionCode，Gitee Go 据此解析版本号；body 含 versionName/note（Gitee Go 正则提取）

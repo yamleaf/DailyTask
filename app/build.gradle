@@ -34,6 +34,22 @@ def buildSource = System.getenv('BUILD_SOURCE') ?:
 // 产物标识：<构建来源>-<git短哈希>，如 local-9a76231 / ci-abcdef1
 def buildTag = "${buildSource}-${gitShort}"
 
+// 自定义包名：CI 手动触发（workflow_dispatch 输入 package_name）或本机
+// ./gradlew assembleRelease -PappPackageId=<包名> 传入后覆盖默认 applicationId，
+// 用于打出可与正式包并存安装的定制包名版本。留空/未传时用默认包名；
+// 与默认包名相同视为未传；格式非法直接失败，避免产出带病包。
+// 注意：仅改 applicationId，代码 namespace 不变；FileProvider authority 等均动态取
+// BuildConfig.APPLICATION_ID/${applicationId}，无需额外适配。
+def customPackageId = {
+    def v = project.findProperty('appPackageId')?.toString()?.trim()
+    if (!v || v == 'com.pengxh.daily.app') return null
+    if (!(v ==~ /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/)) {
+        throw new GradleException("自定义包名格式非法: '${v}'（需至少两段、每段字母开头，如 com.example.daily）")
+    }
+    println "> app 自定义包名已启用: ${v}"
+    return v
+}()
+
 // 构建时间（分钟精度，与 versionCode 的 2 分钟粒度相称，避免秒级变动导致无谓重编）
 def cnTz = TimeZone.getTimeZone('Asia/Shanghai')
 def cnFormat = { String pattern, Date date ->
@@ -53,7 +69,7 @@ android {
     }
 
     defaultConfig {
-        applicationId 'com.pengxh.daily.app'
+        applicationId (customPackageId ?: 'com.pengxh.daily.app')
         minSdk 26
         targetSdk 36
 
@@ -179,13 +195,14 @@ android {
         viewBinding true
     }
 
-    // 产物命名：dailyTask_<构建来源>-<git短哈希>_<构建类型>.apk
-    // 如 dailyTask_local-9a76231_release.apk / dailyTask_ci-abcdef1_release.apk。
+    // 产物命名：dailyTask_<构建来源>-<git短哈希>[_custom]_<构建类型>.apk
+    // 如 dailyTask_local-9a76231_release.apk / dailyTask_ci-abcdef1_release.apk；
+    // 自定义包名构建追加 _custom 后缀，一眼区分定制包名产物。
     // 刻意不带版本号：版本号已在 App 内「版本信息」页与 versionName 中可查，
     // 文件名只承担「这个包从哪来、对应哪次提交」的溯源职责。
     applicationVariants.configureEach { variant ->
         variant.outputs.configureEach {
-            outputFileName = "dailyTask_${buildTag}_${variant.buildType.name}.apk"
+            outputFileName = "dailyTask_${buildTag}${customPackageId ? '_custom' : ''}_${variant.buildType.name}.apk"
         }
     }
 }
