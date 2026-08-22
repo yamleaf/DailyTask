@@ -1406,22 +1406,22 @@ class MqttAgentService : Service() {
     }
 
     /**
-     * 息屏保活：获取 WifiLock(WIFI_MODE_FULL_HIGH_PERF)。
+     * 息屏保活：获取 WifiLock(WIFI_MODE_FULL)。
      *
      * 真机定位结论：息屏后系统会把 WiFi 驱动置入 suspend 挂起（wpa_supplicant SETSUSPENDMODE 0），
      * 期间 TCP 心跳/数据完全无法收发 → Paho 心跳 32s 无 PINGRESP 判死（connectionLost「等待来自服务器的
      * 响应时超时 32000」）→ broker 发 LWT offline → 控制端显示离线、远控失败。
      * 注意：app 在 Doze 白名单也无效——WiFi suspend 是独立于 Doze 的省电机制，白名单不豁免。
-     * 唯一有效手段是持有锁阻止挂起；选 WifiLock 而非 PARTIAL_WAKE_LOCK：只保 WiFi 全速、CPU 仍可睡眠，
+     * 唯一有效手段是持有锁阻止挂起；选 WifiLock 而非 PARTIAL_WAKE_LOCK：只保 WiFi 常驻（阻止 suspend）、不强制射频全速、CPU 仍可睡眠，
      * 更省电，契合「被控端常驻」场景。仅 MQTT 开关开启时由 onCreate 获取、onDestroy 释放，
      * 维持「关闭零耗电」承诺。WAKE_LOCK 权限 manifest 已声明。
      */
-    @Suppress("DEPRECATION") // WIFI_MODE_FULL_HIGH_PERF 在 API 30 弃用；保活场景仍适用（WifiLock 整体弃用前无等价替代）
+    @Suppress("DEPRECATION") // WIFI_MODE_FULL 在 API 30 弃用；FULL 已足够阻止 WiFi suspend，无需 HIGH_PERF 强制全速（WifiLock 整体弃用前无等价替代）
     private fun acquireWifiLock() {
         runCatching {
             val wm = getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
             if (wifiLock == null) {
-                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "daily_task_mqtt_wifilock").apply {
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL, "daily_task_mqtt_wifilock").apply {
                     setReferenceCounted(false)
                 }
             }
