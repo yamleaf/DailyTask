@@ -158,15 +158,16 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
         // 前台亮灭屏策略：伪息屏开 / 屏幕模式 0·2 → 常亮；屏幕模式 1 → 允许系统自然灭屏
         applyForegroundScreenFlags()
 
-        // 手动打开 App 时确保前台服务存活：FGS onCreate 会向 TaskScheduler 注入协程作用域，
-        // 缺席时任务页「启动」按钮会因 scope 未初始化而静默失效（不受「暂停使用」开关限制）
-        if (!ForegroundRunningService.isRunning) {
-            startForegroundService(Intent(this, ForegroundRunningService::class.java))
-        }
-
-        // 悬浮窗服务：已授权且非「暂停使用」时随 App 打卡拉起（与原工程行为一致；
-        // 未授权时由 onResume 的权限门禁跳转系统授权页，授权返回后经 launcher 回调拉起）
+        // 「暂停使用」时不拉起任何后台服务：保活（FGS）与悬浮窗保持停止。
+        // TaskScheduler.startTask 自带 scope 兜底自愈，暂停期间手动点「启动」不受影响
         if (!KeepAliveReceiver.isPaused()) {
+            // 手动打开 App 时确保前台服务存活：FGS onCreate 会向 TaskScheduler 注入协程作用域
+            if (!ForegroundRunningService.isRunning) {
+                startForegroundService(Intent(this, ForegroundRunningService::class.java))
+            }
+
+            // 悬浮窗服务：已授权时随 App 打卡拉起（与原工程行为一致；
+            // 未授权时由 onResume 的权限门禁跳转系统授权页，授权返回后经 launcher 回调拉起）
             KeepAliveReceiver.ensureFloatingWindow(this)
         }
 
