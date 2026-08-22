@@ -385,10 +385,12 @@ class MqttAgentService : Service() {
             return
         }
         registerNetworkCallback()
-        // 息屏保活：持有 WiFi 锁阻止息屏后 WiFi suspend 挂起导致 MQTT 心跳失联（详见 acquireWifiLock）。
-        // 心跳调度按自适应保活级别（ALARM=闹钟驱动 / CPU=息屏持锁 Timer 线程）决定，
-        // 由 MqttKeepAliveStrategy 根据掉线频率自动升级，省电优先。
-        acquireWifiLock()
+        // 息屏保活 WiFi 锁改「PING 窗口持有」（方案 A，省电优先，详见 acquireWifiLock 注释）：
+        // - ALARM 模式（默认）：由 AlarmPingSender 在每次发 PINGREQ 的窗口内短时持有 WifiLock，
+        //   息屏间隙 WiFi 可 suspend 挂起，比全程常驻明显省电；连接靠 80s 内活动保活不断连。
+        // - CPU 模式（兜底）：由 acquireScreenWakeLock 在息屏时持续持有 WifiLock（与 PARTIAL_WAKE_LOCK 绑定），
+        //   保证极不可靠设备连接稳定（行为同旧版常驻）。
+        // 故 onCreate 不再常驻获取，改由各模式按需持有。
         // 息屏保活：auto 模式每次启动重置为 ALARM（起步即闹钟心跳）；指定模式保持固定级别。不做降级
         MqttKeepAliveStrategy.onServiceStart()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
@@ -1413,8 +1415,16 @@ class MqttAgentService : Service() {
      * 响应时超时 32000」）→ broker 发 LWT offline → 控制端显示离线、远控失败。
      * 注意：app 在 Doze 白名单也无效——WiFi suspend 是独立于 Doze 的省电机制，白名单不豁免。
      * 唯一有效手段是持有锁阻止挂起；选 WifiLock 而非 PARTIAL_WAKE_LOCK：只保 WiFi 常驻（阻止 suspend）、不强制射频全速、CPU 仍可睡眠，
-     * 更省电，契合「被控端常驻」场景。仅 MQTT 开关开启时由 onCreate 获取、onDestroy 释放，
-     * 维持「关闭零耗电」承诺。WAKE_LOCK 权限 manifest 已声明。
+     * 更省电，契合「被控端常驻」场景。
+     *
+     * 方案 A（省电优化，当前版本）：WifiLock 不再全程常驻，改为按需持有——
+     * - ALARM 模式（默认，绝大多数设备）：不在此处获取；改由 AlarmPingSender 在每次发 PINGREQ 的窗口内
+     *   短时持有（acquire(timeout)），息屏间隙 WiFi 可 suspend 挂起，比常驻明显省电；
+     *   连接靠 80s 内必有 PINGREQ 活动保活，NAT/会话不断连。
+     * - CPU 模式（兜底，仅掉线频繁设备）：由 acquireScreenWakeLock 在息屏时持续获取、releaseScreenWakeLock
+     *   在亮屏时释放（与 PARTIAL_WAKE_LOCK 同生命周期），保证极不可靠设备连接稳定（行为同旧版常驻）。
+     *
+     * WAKE_LOCK 权限 manifest 已声明；「关闭零耗电」由开关守卫（onCreate/onStartCommand 早退）维持。
      */
     @Suppress("DEPRECATION") // WIFI_MODE_FULL 在 API 30 弃用；FULL 已足够阻止 WiFi suspend，无需 HIGH_PERF 强制全速（WifiLock 整体弃用前无等价替代）
     private fun acquireWifiLock() {
@@ -1513,7 +1523,11 @@ class MqttAgentService : Service() {
         releaseScreenWakeLock()
     }
 
-    /** 持有 PARTIAL_WAKE_LOCK：保 CPU 调度。幂等 */
+    /**
+     * 息屏保活（CPU 模式）：持有 PARTIAL_WAKE_LOCK 保 CPU 调度，并同步持续持有 WifiLock 阻止 WiFi suspend。
+     * WifiLock 在 CPU 兜底模式保持息屏常驻（与 screenWakeLock 同生命周期），保证极不可靠设备连接稳定。
+     * ALARM 模式不调用本方法，改由 AlarmPingSender 在 PING 窗口短时持有 WifiLock（方案 A）。幂等。
+     */
     private fun acquireScreenWakeLock() {
         runCatching {
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
@@ -1524,16 +1538,20 @@ class MqttAgentService : Service() {
             }
             if (screenWakeLock?.isHeld != true) screenWakeLock?.acquire()
             Log.d(TAG, "已获取 PARTIAL_WAKE_LOCK（CPU 保活）")
+            // CPU 兜底模式：息屏常驻 WifiLock（与 screenWakeLock 同生命周期），阻止 WiFi suspend 断心跳
+            acquireWifiLock()
         }.onFailure { e ->
             Log.w(TAG, "获取 PARTIAL_WAKE_LOCK 失败（心跳可能停发，由重连机制兜底）: ${e.message}")
         }
     }
 
-    /** 释放 PARTIAL_WAKE_LOCK（亮屏省电）。幂等 */
+    /** 释放 PARTIAL_WAKE_LOCK 与常驻 WifiLock（亮屏省电）。幂等 */
     private fun releaseScreenWakeLock() {
         runCatching {
             if (screenWakeLock?.isHeld == true) screenWakeLock?.release()
             Log.d(TAG, "已释放 PARTIAL_WAKE_LOCK")
+            // 同步释放 CPU 模式常驻 WifiLock（ALARM 模式的 PING 窗口锁由 AlarmPingSender 自行管理）
+            releaseWifiLock()
         }.onFailure { e ->
             Log.w(TAG, "释放 PARTIAL_WAKE_LOCK 异常: ${e.message}")
         }

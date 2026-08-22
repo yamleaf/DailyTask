@@ -9,6 +9,8 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
@@ -49,6 +51,12 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     private val appContext = context.applicationContext
     private var comms: ClientComms? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    /** WifiLock(WIFI_MODE_FULL)：方案 A —— 仅 PING 窗口持有，息屏间隙 WiFi 可 suspend 省电 */
+    private var wifiLock: WifiManager.WifiLock? = null
+    /** 主线程 Handler：WifiLock 无 acquire(timeout) 重载，用 postDelayed 模拟超时释放 */
+    private val mainHandler = Handler(Looper.getMainLooper())
+    /** PING 窗口超时释放 WifiLock 的回调（stop() 与超时均安全调用，幂等） */
+    private val wifiLockReleaseRunnable = Runnable { releaseWifiLockNow() }
 
     @Volatile
     private var receiverRegistered = false
@@ -65,6 +73,8 @@ class AlarmPingSender(context: Context) : MqttPingSender {
             if (intent?.action != ACTION_PING) return
             Log.d(TAG, "PING 闹钟到点：唤醒 CPU 发心跳")
             acquireWakeLock()
+            // 方案 A：PING 窗口获取 WifiLock，阻止本窗口内 WiFi suspend（息屏间隙仍允许 suspend 省电）
+            acquireWifiLock()
             // PING 诊断（降级 Log.d，logcat 保留；诊断结论已定，不再落盘刷日志）：
             // 采样唤醒间隔 + 网络状态，用于核对闹钟节奏与网络可用性
             val wakeAtElapsed = SystemClock.elapsedRealtime()
@@ -163,6 +173,7 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         cancelAlarm()
         unregisterReceiver()
         releaseWakeLock()
+        releaseWifiLock()
     }
 
     /** Paho 每次 checkForActivity 后按剩余 keepalive 时间调用；同 PendingIntent 多次 set 自动覆盖旧闹钟 */
@@ -250,6 +261,45 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         }.onFailure { _ -> }
     }
 
+    /**
+     * 方案 A（省电）：WifiLock 仅 PING 窗口持有。
+     * 闹钟唤醒 CPU 后、发 PINGREQ 前获取 WifiLock(WIFI_MODE_FULL) 阻止 WiFi suspend，
+     * 超时自动释放（WIFI_LOCK_TIMEOUT_MS 足够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule），
+     * 之后息屏间隙 WiFi 可 suspend 挂起 → 比全程常驻明显省电。
+     * 连接靠 80s 内必有 PINGREQ 活动保活，NAT/会话不断连；获取失败不崩溃（由 Paho 重连 + 保活闹钟兜底）。
+     */
+    @Suppress("DEPRECATION")
+    private fun acquireWifiLock() {
+        runCatching {
+            val wm = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+            if (wifiLock == null) {
+                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL, "daily_task_mqtt_wifilock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wifiLock?.isHeld != true) wifiLock?.acquire()
+            Log.d(TAG, "PING 窗口已获取 WifiLock")
+            // WifiLock 无 acquire(timeout) 重载（仅 WakeLock 有），用主线程 Handler 模拟超时释放：
+            // 5s 足够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule，之后息屏间隙 WiFi 可 suspend 省电。
+            mainHandler.removeCallbacks(wifiLockReleaseRunnable)
+            mainHandler.postDelayed(wifiLockReleaseRunnable, WIFI_LOCK_TIMEOUT_MS)
+        }.onFailure { e ->
+            Log.w(TAG, "PING 窗口获取 WifiLock 失败（由重连机制兜底）: ${e.message}")
+        }
+    }
+
+    /** 取消待释放回调并立即释放（stop() 与超时回调均可安全调用，幂等） */
+    private fun releaseWifiLock() {
+        mainHandler.removeCallbacks(wifiLockReleaseRunnable)
+        releaseWifiLockNow()
+    }
+
+    private fun releaseWifiLockNow() {
+        runCatching {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        }.onFailure { _ -> }
+    }
+
     companion object {
         private const val TAG = "AlarmPingSender"
         private const val ACTION_PING = "com.pengxh.daily.action.MQTT_PING"
@@ -259,6 +309,9 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         private const val DEFAULT_KEEPALIVE_MS = 240_000L
         /** ALARM 心跳间隔压缩系数（08-18）：keepAlive 240s → 实际排程 80s，对抗 App Standby 对精确闹钟的 ~60s 延迟 */
         private const val ALARM_PING_COMPRESS_DIVISOR = 3
+        /** 方案 A：PING 窗口 WifiLock 超时（ms）。够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule；
+         * 超时自释放后息屏间隙 WiFi 可 suspend 省电；占 80s 周期极小比例 */
+        private const val WIFI_LOCK_TIMEOUT_MS = 5_000L
     }
 }
 
