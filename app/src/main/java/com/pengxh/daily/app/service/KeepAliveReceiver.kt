@@ -314,9 +314,12 @@ class KeepAliveReceiver : BroadcastReceiver() {
          *
          * 开关关闭时无需启动（MqttAgentService 的 onCreate / onStartCommand 自带开关守卫，会自行停止并撤通知）。
          * 用 isRunning() 防重复拉起（同一进程内 instance 判空）。
+         * 设备ID冲突停服期间（MQTT_ID_CONFLICT_KEY）一律拒绝拉起：冲突未由用户手动处理前，
+         * 复活/保活/开机链路反复拉起只会反复撞车刷通知；onCreate/onStartCommand 内亦有同款守卫兜底。
          */
         fun startMqttAgentIfEnabled(context: Context) {
             if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
+            if (SaveKeyValues.loadBoolean(Constant.MQTT_ID_CONFLICT_KEY, false)) return
             if (MqttAgentService.isRunning()) return
             try {
                 context.startForegroundService(Intent(context, MqttAgentService::class.java))

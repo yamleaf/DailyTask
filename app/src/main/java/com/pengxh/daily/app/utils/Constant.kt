@@ -119,6 +119,20 @@ object Constant {
     const val MQTT_PAIRING_TOKEN_KEY = "MQTT_PAIRING_TOKEN_KEY"   // 配对令牌（单次 / 60s），进二维码
     const val MQTT_PAIRING_EXPIRY_KEY = "MQTT_PAIRING_EXPIRY_KEY" // 配对令牌过期时间戳(ms)
 
+    // ===== 设备ID占用仲裁（presence，见 PresenceGuard）=====
+    /** 设备ID冲突标志：true=因同账号同 deviceId 冲突已停服；仅用户手动开启开关/修改设备ID时清除 */
+    const val MQTT_ID_CONFLICT_KEY = "MQTT_ID_CONFLICT_KEY"
+    /** 冲突原因码：PresenceGuard.ConflictReason 枚举名，UI/通知按原因显示不同文案 */
+    const val MQTT_ID_CONFLICT_REASON_KEY = "MQTT_ID_CONFLICT_REASON_KEY"
+    const val MQTT_ID_CONFLICT_FOREIGN_TS_KEY = "MQTT_ID_CONFLICT_FOREIGN_TS_KEY"
+    /** 本机 presence 会话标识：持久化，跨进程死亡认领自己的旧占位牌（卸载重装后重新生成） */
+    const val MQTT_PRESENCE_SID_KEY = "MQTT_PRESENCE_SID_KEY"
+    /** 近期告警环形缓冲（JSON 数组）：供控制端 AQ 查询回放，防控制端离线期间漏收告警 */
+    const val ALERT_RECENT_BUFFER_KEY = "ALERT_RECENT_BUFFER_KEY"
+    /** 异常接入黄条提醒（JSON {ts, challenger}）：在位者检测到同 ID 设备敲门时写入，
+     *  远程页置顶黄色横幅展示；用户点关闭时清除。空串/超期不展示 */
+    const val REMOTE_ID_ALERT_BANNER_KEY = "REMOTE_ID_ALERT_BANNER_KEY"
+
 
     // Intent extra：远程息屏/亮屏（1=息屏，0=亮屏）
     const val EXTRA_MASK_COMMAND = "EXTRA_MASK_COMMAND"

@@ -51,6 +51,14 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     private val appContext = context.applicationContext
     private var comms: ClientComms? = null
     private var wakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * 占位牌心跳钩子（MqttAgentService 注入）：蹭 PING 闹钟唤醒窗口补发 presence HB，
+     * 不新增闹钟/WakeLock；连接态与节流由实现方判断，异常隔离不影响 PING 链路。
+     */
+    @Volatile
+    var onPingHook: (() -> Unit)? = null
+
     /** WifiLock(WIFI_MODE_FULL)：方案 A —— 仅 PING 窗口持有，息屏间隙 WiFi 可 suspend 省电 */
     private var wifiLock: WifiManager.WifiLock? = null
     /** 主线程 Handler：WifiLock 无 acquire(timeout) 重载，用 postDelayed 模拟超时释放 */
@@ -100,6 +108,8 @@ class AlarmPingSender(context: Context) : MqttPingSender {
                     commsRef.sendNoWait(MqttPingReq(), MqttToken(commsRef.getClient().clientId))
                     Log.d(TAG, "PING 强制发送 PINGREQ")
                     commsRef.checkForActivity()
+                    // 蹭本次唤醒窗口补发占位牌（连接态与节流由钩子实现方判断），异常隔离
+                    runCatching { onPingHook?.invoke() }
                 } else {
                     // 未连接（掉线重连中）：Paho 重连机制兜底，本帧跳过
                     Log.d(TAG, "PING 未连接，跳过强制发送")

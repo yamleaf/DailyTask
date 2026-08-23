@@ -30,6 +30,90 @@
             android:orientation="vertical"
             android:paddingBottom="@dimen/nav_content_inset">
 
+            <!-- 设备ID冲突停服（挑战者）：置顶红色告警，标志未清除期间常驻展示 -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/conflictBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/dp_12"
+                android:visibility="gone"
+                app:cardBackgroundColor="@color/md_errorContainer"
+                app:cardCornerRadius="@dimen/radius_card"
+                app:cardElevation="@dimen/elev_card"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="@dimen/dp_12">
+
+                    <ImageView
+                        android:layout_width="@dimen/size_28"
+                        android:layout_height="@dimen/size_28"
+                        android:src="@drawable/daily_ic_cancel_circle" android:contentDescription="@null" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/conflictBannerText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/dp_12"
+                        android:layout_weight="1"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="@color/md_onErrorContainer" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- 异常接入提醒（在位者）：置顶黄色告警，右侧关闭按钮，用户确认后消失 -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/idAlertBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/dp_12"
+                android:visibility="gone"
+                app:cardBackgroundColor="#FFF3C1"
+                app:cardCornerRadius="@dimen/radius_card"
+                app:cardElevation="@dimen/elev_card"
+                app:strokeWidth="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="@dimen/dp_12">
+
+                    <ImageView
+                        android:layout_width="@dimen/size_28"
+                        android:layout_height="@dimen/size_28"
+                        android:src="@drawable/daily_ic_cancel_circle"
+                        app:tint="#8A6D00" android:contentDescription="@null" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/idAlertBannerText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/dp_12"
+                        android:layout_weight="1"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                        android:textColor="#5B4A00" />
+
+                    <TextView
+                        android:id="@+id/idAlertBannerClose"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:paddingStart="@dimen/dp_12"
+                        android:paddingTop="@dimen/dp_4"
+                        android:paddingEnd="@dimen/dp_4"
+                        android:paddingBottom="@dimen/dp_4"
+                        android:text="✕"
+                        android:textColor="#5B4A00"
+                        android:textSize="18sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- C2：需重新扫码常驻提示条（未绑定 / 设备ID变更时显示） -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/rescanBanner"

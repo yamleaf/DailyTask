@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.IntentFilter
 import android.content.Intent
 import android.graphics.Bitmap
+import com.pengxh.daily.app.utils.LogFileManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
@@ -111,6 +112,9 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
     }
 
+    /** 冲突倒计时进行中标记：FRESH_HB 冲突且剩余时间 >0 时为 true，驱动 Hero 区每秒刷新 */
+    private var conflictCounting = false
+
     override fun initViewBinding(inflater: LayoutInflater, container: ViewGroup?): FragmentRemoteControlBinding =
         FragmentRemoteControlBinding.inflate(inflater, container, false)
 
@@ -142,6 +146,12 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         binding.unbindRow.setOnClickListener { forceUnbind() }
         binding.btnGoQr.setOnClickListener { generateAndShowQR() }
         binding.btnRetryNow.setOnClickListener { MqttAgentService.reconnectNow() }
+        // 异常接入黄条横幅的关闭按钮：清除持久化状态并立即隐藏
+        binding.idAlertBannerClose.setOnClickListener {
+            SaveKeyValues.saveString(Constant.REMOTE_ID_ALERT_BANNER_KEY, "")
+            binding.idAlertBanner.visibility = View.GONE
+            LogFileManager.action("异常接入提醒已手动关闭")
+        }
         binding.heroPowerBtn.setOnClickListener {
             onRemoteServiceChanged(!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false))
         }
@@ -189,6 +199,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         if (MqttAgentService.isRunning()) {
             MqttAgentService.stateListener = null
             MqttAgentService.bindingStateListener = null
+            MqttAgentService.idAlertListener = null
+            MqttAgentService.conflictListener = null
         }
     }
 
@@ -217,7 +229,49 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                 updateBindingUI(bound)
             }
         }
+        MqttAgentService.idAlertListener = {
+            activity?.runOnUiThread {
+                updateIdConflictBanners()
+                updateHeroUI()
+            }
+        }
+        MqttAgentService.conflictListener = {
+            activity?.runOnUiThread {
+                updateIdConflictBanners()
+                updateHeroUI()
+            }
+        }
         MqttAgentService.notifyState()
+    }
+
+    /** 黄条横幅有效期：超过该时长自动不再展示 */
+    private val ID_ALERT_BANNER_VALID_MS = 24 * 3600_000L
+
+    /** 置顶横幅：红色 conflictBanner（冲突停服，常驻）/ 黄色 idAlertBanner（异常接入，✕ 关闭或超时失效） */
+    private fun updateIdConflictBanners() {
+        if (MqttAgentService.isIdConflictBlocked()) {
+            binding.conflictBannerText.text = MqttAgentService.conflictReasonText()
+            binding.conflictBanner.visibility = View.VISIBLE
+        } else {
+            binding.conflictBanner.visibility = View.GONE
+        }
+        var showYellow = false
+        val raw = SaveKeyValues.loadString(Constant.REMOTE_ID_ALERT_BANNER_KEY, "")
+        if (raw.isNotBlank()) {
+            runCatching {
+                val o = org.json.JSONObject(raw)
+                val ts = o.optLong("ts", 0L)
+                val challenger = o.optString("challenger", "")
+                if (System.currentTimeMillis() - ts < ID_ALERT_BANNER_VALID_MS && challenger.isNotBlank()) {
+                    binding.idAlertBannerText.text =
+                        "检测到另一台设备（${challenger}…）正以相同设备ID尝试上线，已拒绝其接入"
+                    showYellow = true
+                }
+            }.onFailure {
+                SaveKeyValues.saveString(Constant.REMOTE_ID_ALERT_BANNER_KEY, "")
+            }
+        }
+        binding.idAlertBanner.visibility = if (showYellow) View.VISIBLE else View.GONE
     }
 
     private fun refreshUi() {
@@ -228,6 +282,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         updateRescanBanner()
         updateHeroUI()
         updateQuotaUI()
+        updateIdConflictBanners()
         MqttAgentService.measureRtt { rtt ->
             lastRttMs = rtt
             activity?.runOnUiThread { updateQuotaUI() }
@@ -287,35 +342,64 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         // （listener 已置 null）或被丢弃，heroConnStatus 会永久停留在旧值，直到切 Tab 才纠正
         updateStatusUI(connected)
         binding.root.removeCallbacks(retryRunnable)
-        val retrying = enabled && !connected
+        conflictCounting = false
+        val conflictBlocked = MqttAgentService.isIdConflictBlocked()
+        val retrying = enabled && !connected && !conflictBlocked
         val nextReconnectIn = ((MqttAgentService.nextReconnectAtMs - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
 
-        if (enabled) {
-            if (!connected) {
-                binding.heroIcon.setImageResource(R.drawable.daily_ic_cancel_circle)
-                binding.heroSubtitle.text = if (nextReconnectIn <= 0) "连接中…" else "连接中 · ${nextReconnectIn}s"
-                applyHeroPowerBg(R.drawable.bg_hero_power_on)
-                binding.heroDesc.text = "正在尝试建立连接，请稍候…"
+        // 冲突停服态必须最先判定：handlePresenceConflict 会把总开关写回 false，
+        // 若先判 !enabled 会显示「已关闭」而掩盖冲突与倒计时
+        if (conflictBlocked) {
+            // 冲突停服态：如实显示而非永远「连接中…」
+            binding.heroIcon.setImageResource(R.drawable.daily_ic_cancel_circle)
+            binding.heroSubtitle.text = "已停止"
+            applyHeroPowerBg(R.drawable.bg_hero_power_off)
+            // 实时倒计时仅对 FRESH_HB（对方已离线、仅残留新鲜 HB）有意义；
+            // LIVE_REPLY/RACE_LOST/CONTESTED 对方实时在线，倒计时是错误引导
+            val reasonName = SaveKeyValues.loadString(Constant.MQTT_ID_CONFLICT_REASON_KEY, "")
+            val foreignTs = MqttAgentService.foreignTs()
+            val remainMs = 15 * 60_000L - (System.currentTimeMillis() - foreignTs)
+            if (reasonName == "FRESH_HB" && foreignTs > 0 && remainMs > 0) {
+                val totalSec = (remainMs / 1000L).toInt()
+                val mm = totalSec / 60
+                val ss = totalSec % 60
+                binding.heroDesc.text = "设备ID冲突：该ID最近被其他设备使用且暂未应答，为避免干扰已暂停本机服务。\n约 %02d:%02d 后可重新尝试开启，或修改设备ID立即使用。".format(mm, ss)
+                conflictCounting = true
             } else {
-                binding.heroIcon.setImageResource(R.drawable.daily_ic_check_circle)
-                binding.heroSubtitle.text = "正在运行"
-                applyHeroPowerBg(R.drawable.bg_hero_power_on)
-                binding.heroDesc.text = "远程控制服务运行中，控制端可随时查看与操作本机。"
+                val expired = reasonName == "FRESH_HB" && foreignTs > 0
+                binding.heroDesc.text = if (expired) {
+                    "设备ID冲突：该ID的占用记录已过期，可关闭后重新开启服务尝试恢复；若仍冲突请修改本机设备ID。"
+                } else {
+                    "设备ID冲突：该ID已被同账号下其他设备占用，远程服务已停止。修改设备ID或重新开启后自动重新检测。"
+                }
+                conflictCounting = false
             }
-        } else {
+        } else if (!enabled) {
             binding.heroIcon.setImageResource(R.drawable.daily_ic_cancel_circle)
             binding.heroSubtitle.text = "已关闭"
             applyHeroPowerBg(R.drawable.bg_hero_power_off)
             binding.heroDesc.text = "开启后启动远控服务功能，控制端可远程查看与操作本机。关闭则完全停止本机远控相关服务。"
+        } else if (!connected) {
+            binding.heroIcon.setImageResource(R.drawable.daily_ic_cancel_circle)
+            binding.heroSubtitle.text = if (nextReconnectIn <= 0) "连接中…" else "连接中 · ${nextReconnectIn}s"
+            applyHeroPowerBg(R.drawable.bg_hero_power_on)
+            binding.heroDesc.text = "正在尝试建立连接，请稍候…"
+        } else {
+            binding.heroIcon.setImageResource(R.drawable.daily_ic_check_circle)
+            binding.heroSubtitle.text = "正在运行"
+            applyHeroPowerBg(R.drawable.bg_hero_power_on)
+            binding.heroDesc.text = "远程控制服务运行中，控制端可随时查看与操作本机。"
         }
         binding.heroVersion.text = BuildConfig.GIT_SHA
 
-        if (retrying) {
+        if (retrying || conflictCounting) {
             binding.retryHint.text = if (nextReconnectIn <= 0) "正在尝试重连…" else "断线，约 $nextReconnectIn 秒后自动重连"
             binding.root.postDelayed(retryRunnable, 1000)
         }
         binding.retryRow.visibility = if (retrying) View.VISIBLE else View.GONE
         applyRemoteDisabled(enabled)
+        updateIdConflictBanners()
+        updateRescanBanner()
     }
 
     private fun applyRemoteDisabled(enabled: Boolean) {
@@ -468,6 +552,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
                     false
                 } else {
                     SaveKeyValues.saveString(Constant.DEVICE_ID_KEY, deviceId)
+                    // 换新设备ID → 旧冲突解除，下次开启按新 ID 重新仲裁
+                    MqttAgentService.clearIdConflictFlag(ctx)
                     // 主题前缀与控制端账户同步
                     if (SaveKeyValues.loadString(Constant.MQTT_CTL_USER_KEY, "").startsWith("ctl-")) {
                         SaveKeyValues.saveString(Constant.MQTT_CTL_USER_KEY, "ctl-$deviceId")
@@ -570,6 +656,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
 
     private fun startMqttService() {
         if (KeepAliveReceiver.isPaused()) return
+        // 冲突停服中不自动拉起
+        if (MqttAgentService.isIdConflictBlocked()) return
         if (SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false) &&
             isMqttConfigValid() && !MqttAgentService.isRunning()
         ) {
@@ -596,6 +684,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             updateHeroUI()
         } else {
             if (isMqttConfigValid()) {
+                // 手动开启：清旧标志重新仲裁；占用仍在会再次停服并提示
+                MqttAgentService.clearIdConflictFlag(ctx)
                 ctx.startForegroundService(Intent(ctx, MqttAgentService::class.java))
                 updateHeroUI()
             } else {
@@ -778,9 +868,34 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             setPadding(dip(20), dip(8), dip(20), dip(8))
         }
 
+        // 底部「分享到控制端」：跨应用走系统分享面板，规避 Android 10+ 剪贴板限制
+        val btnRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(dip(20), 0, dip(20), dip(16))
+        }
+        val shareBtn = com.google.android.material.button.MaterialButton(ctx, null, android.R.attr.borderlessButtonStyle).apply {
+            text = "分享到控制端"
+            setTextColor(resources.getColor(R.color.md_primary, theme))
+            setOnClickListener {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, payloadJson)
+                    putExtra(Intent.EXTRA_SUBJECT, "DailyTask 配对信息")
+                }
+                startActivity(Intent.createChooser(shareIntent, "分享到控制端"))
+            }
+        }
+        btnRow.addView(shareBtn)
+        val wrap = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll)
+            addView(btnRow)
+        }
+
         UnifiedDialogKit.showForm(
             ctx,
-            scroll,
+            wrap,
             title = "扫描绑定设备",
             positiveText = "复制配对码",
             negativeText = "关闭",
@@ -1831,6 +1946,11 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
 
     /** 二维码生成后更新重扫提示横幅 */
     private fun updateRescanBanner() {
+        // 冲突停服中由红色 conflictBanner 置顶，隐藏重扫提示
+        if (MqttAgentService.isIdConflictBlocked()) {
+            binding.rescanBanner.visibility = View.GONE
+            return
+        }
         val connected = MqttAgentService.isConnected()
         val bound = MqttAgentService.isBound()
         val pending = SaveKeyValues.loadBoolean("pending_rescan", false)

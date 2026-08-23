@@ -23,6 +23,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.gson.GsonBuilder
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.ui.MainActivity
@@ -36,6 +38,7 @@ import com.pengxh.daily.app.utils.RuntimeStateApplier
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.TaskScheduler
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.yample.mqttprotocol.BrokerUtils
 import com.yample.mqttprotocol.Hkdf
@@ -43,6 +46,8 @@ import com.yample.mqttprotocol.MqttPacket
 import com.yample.mqttprotocol.MqttSigner
 import com.yample.mqttprotocol.PacketValue
 import com.yample.mqttprotocol.PacketValueAdapter
+import com.yample.mqttprotocol.PresenceArbitration
+import com.yample.mqttprotocol.PresenceGuard
 import com.yample.mqttprotocol.Protocol
 import com.yample.mqttprotocol.SecretBox
 import com.pengxh.kt.lite.utils.SaveKeyValues
@@ -209,11 +214,12 @@ class MqttAgentService : Service() {
         }
 
         /**
-         * 低电量分段告警 / 开始充电通知 → 经 MQTT 推送给控制端。
-         * 守卫在 publishAlertInternal 内（未连接 / 未配对不推送）。
+         * 告警推送给控制端，并写入本地环形缓冲供 AQ 回放（连接与否不影响留存）。
+         * 缓冲 aid 与发布 rid 同源：实时送达与事后回放按同一 rid 幂等去重。
          */
         fun publishAlert(json: String) {
-            instance?.publishAlertInternal(json)
+            val aid = recordAlertToBuffer(json)
+            instance?.publishAlertInternal(json, ridOverride = aid)
         }
 
         /** 被控端主动强制解绑：仅清绑定态，保留 MQTT 配置 */
@@ -272,6 +278,101 @@ class MqttAgentService : Service() {
                 )
             }
             alarmManager.cancel(pi)
+        }
+
+        // ═══════ 设备ID占用仲裁：冲突标志与告警（详见 PresenceGuard） ═══════
+
+        /** 是否处于「设备ID冲突已停服」状态：所有自动拉起路径据此拦截，仅手动开启时清除 */
+        fun isIdConflictBlocked(): Boolean =
+            SaveKeyValues.loadBoolean(Constant.MQTT_ID_CONFLICT_KEY, false)
+
+        /** 返回上次冲突的外来 HB 时间戳（毫秒），若无则返回 0L */
+        fun foreignTs(): Long =
+            SaveKeyValues.loadLong(Constant.MQTT_ID_CONFLICT_FOREIGN_TS_KEY, 0L)
+
+        /** 按持久化的原因码生成用户文案；原因码缺失/非法时退化为通用文案 */
+        fun conflictReasonText(): String {
+            val deviceId = SaveKeyValues.loadString(Constant.DEVICE_ID_KEY, "")
+            val reason = PresenceGuard.ConflictReason.fromName(
+                SaveKeyValues.loadString(Constant.MQTT_ID_CONFLICT_REASON_KEY, "")
+            )
+            val foreignTs = SaveKeyValues.loadLong(Constant.MQTT_ID_CONFLICT_FOREIGN_TS_KEY, 0L)
+            return reason?.userMessage(deviceId, foreignTs)
+                ?: "设备ID $deviceId 存在同账号占用冲突，远程服务已暂停。请修改设备ID后重新开启。"
+        }
+
+        /** 异常接入黄条横幅实时回调（监听方自行切主线程） */
+        @Volatile var idAlertListener: (() -> Unit)? = null
+
+        /** 设备ID冲突停服实时回调：UI 收到后立即刷新 hero 状态与冲突横幅 */
+        @Volatile var conflictListener: (() -> Unit)? = null
+
+        /** 清除冲突标志：仅限用户手动动作（开启开关/修改设备ID）调用，自动拉起路径一律不清 */
+        fun clearIdConflictFlag(context: Context) {
+            if (!isIdConflictBlocked()) return
+            SaveKeyValues.saveBoolean(Constant.MQTT_ID_CONFLICT_KEY, false)
+            LogFileManager.action("设备ID冲突标志已手动清除")
+        }
+
+        // ═══════ 近期告警环形缓冲（供 AQ 回放） ═══════
+
+        private const val ALERT_BUFFER_MAX = 20
+        /** 回放保留窗口：只回放 48h 内的告警，更旧的视为过期 */
+        private const val ALERT_REPLAY_MAX_AGE_MS = 48L * 3600_000L
+
+        /**
+         * 告警写入本地缓冲 [{aid, ts, body}]，最新在前，超限裁剪最旧。
+         * 返回本次 aid，由调用方作为报文 rid 发布——实时/回放共用同一去重键。
+         */
+        private fun recordAlertToBuffer(json: String): String {
+            val aid = UUID.randomUUID().toString()
+            try {
+                val body = JsonParser.parseString(json).asJsonObject ?: return aid
+                val entry = JsonObject().apply {
+                    addProperty("aid", aid)
+                    addProperty("ts", System.currentTimeMillis())
+                    add("body", body)
+                }
+                // 最新在前：头插后拼接旧内容（JsonArray 无位置插入 API）
+                val out = com.google.gson.JsonArray()
+                out.add(entry)
+                loadAlertBuffer().forEach { out.add(it) }
+                if (out.size() > ALERT_BUFFER_MAX) {
+                    val fixed = com.google.gson.JsonArray()
+                    for (i in 0 until ALERT_BUFFER_MAX) fixed.add(out.get(i))
+                    SaveKeyValues.saveString(Constant.ALERT_RECENT_BUFFER_KEY, fixed.toString())
+                } else {
+                    SaveKeyValues.saveString(Constant.ALERT_RECENT_BUFFER_KEY, out.toString())
+                }
+            } catch (_: Exception) {
+                // 缓冲失败不影响告警主链路
+            }
+            return aid
+        }
+
+        private fun loadAlertBuffer(): com.google.gson.JsonArray = try {
+            val raw = SaveKeyValues.loadString(Constant.ALERT_RECENT_BUFFER_KEY, "")
+            if (raw.isBlank()) com.google.gson.JsonArray()
+            else JsonParser.parseString(raw).asJsonArray
+        } catch (_: Exception) {
+            com.google.gson.JsonArray()
+        }
+
+        /** 构建 AQ 回放载荷：过滤超过保留窗口的旧告警 */
+        private fun buildAlertReplayPayload(): String {
+            val cutoff = System.currentTimeMillis() - ALERT_REPLAY_MAX_AGE_MS
+            val out = com.google.gson.JsonArray()
+            for (e in loadAlertBuffer()) {
+                val obj = e.asJsonObject ?: continue
+                val ts = obj.get("ts")?.asLong ?: 0L
+                if (ts in 1..cutoff) continue
+                val item = JsonObject()
+                item.addProperty("aid", obj.get("aid")?.asString ?: "")
+                item.addProperty("occurredAt", ts)
+                item.add("alert", obj.get("body") ?: JsonObject())
+                out.add(item)
+            }
+            return out.toString()
         }
     }
 
@@ -349,6 +450,31 @@ class MqttAgentService : Service() {
         .registerTypeAdapter(PacketValue::class.java, PacketValueAdapter)
         .create()
 
+    // ═══════ 设备ID占用仲裁（presence，详见 PresenceGuard） ═══════
+    /** 本机会话标识：持久化（MQTT_PRESENCE_SID_KEY），跨进程死亡认领自己的旧占位牌 */
+    private var presenceSid: String = ""
+    /** 已通过仲裁上岗：此后重连只做 RECLAIM 检查，不再完整仲裁 */
+    @Volatile private var arbitrationPassed = false
+    /** 仲裁进行中守卫：connectComplete 与初始连接分支可能双触发，只允许一次进入 */
+    private val arbitrationGate = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** 决策窗口状态机（非空=仲裁中，presence 消息喂给它） */
+    @Volatile private var arbiter: PresenceArbitration? = null
+    private var lastHbPublishedAtMs = 0L
+    /** 占位牌心跳协程：仅进程醒着时顺手补发（不排闹钟不持锁，Doze 冻结无害） */
+    private var hbLoopJob: kotlinx.coroutines.Job? = null
+    /** 对同一挑战者回 CLM 的节流 */
+    private var lastClaimReplySid = ""
+    private var lastClaimReplyAtMs = 0L
+    /** 黄条提醒 + id_conflict 上报的去重集合（同一挑战者只提示/上报一次） */
+    private val challengedSidsReported = mutableSetOf<String>()
+    /** 上岗后监听期截止时刻（TAKEOVER_WATCH_MS 内被抗议则让位） */
+    @Volatile private var takeoverWatchUntilMs = 0L
+    /** 最近收到的外来占位牌（sid to ts）：RECLAIM 检查用；仅保留最新一条即可 */
+    @Volatile private var lastForeignHb: Pair<String, Long>? = null
+    /** RECLAIM 确认探测进行中：期间收到外来 CLAIM 即坐实接管 */
+    @Volatile private var reclaimProbeActive = false
+    @Volatile private var reclaimProbeSeenClaim = false
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -358,6 +484,13 @@ class MqttAgentService : Service() {
             || KeepAliveReceiver.isPaused()
         ) {
             Log.d(TAG, "MQTT 开关关闭或暂停使用中，服务不启动")
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
+            stopSelf()
+            return
+        }
+        // 设备ID冲突守卫：冲突停服后任何自动拉起都不得重连，仅用户手动开启时由 clearIdConflictFlag 解除
+        if (isIdConflictBlocked()) {
+            Log.w(TAG, "设备ID冲突停服中，拒绝自动拉起（需用户手动开启）")
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
             stopSelf()
             return
@@ -482,6 +615,9 @@ class MqttAgentService : Service() {
             MqttKeepAliveStrategy.Level.ALARM -> {
                 // 闹钟保活：AlarmPingSender（系统精确闹钟）驱动心跳
                 alarmPingSender = AlarmPingSender(this)
+                // 占位牌保鲜：蹭 PING 闹钟的唤醒窗口补发 presence HB（钩子内部判连接态+节流），
+                // 不新增闹钟/WakeLock；异常在 AlarmPingSender 内隔离，绝不影响 PING 链路
+                alarmPingSender?.onPingHook = { refreshPresenceHbIfDue() }
                 mqttClient = MqttClientWithAlarmPingSender(
                     BrokerUtils.normalizeBroker(broker), clientId, MemoryPersistence(), alarmPingSender!!
                 )
@@ -541,7 +677,13 @@ class MqttAgentService : Service() {
                     // 持 30s 超时短时锁，覆盖 handleIncoming 内异步处理（快照/任务落库等）。
                     // 不在此处提前 release：同步返回时异步尚未完成；靠超时自动释放省电。
                     acquireCommandWakeLock()
-                    handleIncoming(String(it))
+                    val json = String(it)
+                    // presence 主题走占用仲裁协议（轻量 JSON），先于 handleIncoming 分流
+                    if (topic == topicPresence()) {
+                        handlePresenceMessage(json)
+                        return
+                    }
+                    handleIncoming(json)
                 }
             }
 
@@ -552,40 +694,18 @@ class MqttAgentService : Service() {
                 // 无法取消它；服务已销毁（instance 置空）后到达的迟到成功回调若继续 onConnected()，
                 // updateNotification 会用残留的 notificationBuilder 重新弹一条普通通知。这里直接拦截。
                 if (instance !== this@MqttAgentService) return
-                Log.d(TAG, "MQTT ${if (reconnect) "自动重连" else "首次连接"}成功，重新订阅命令主题并发布 online")
+                Log.d(TAG, "MQTT ${if (reconnect) "自动重连" else "首次连接"}成功")
                 onConnected()
-                // 以下操作失败不应把「已连接」状态重置为 false，否则 TCP 连接仍在但 UI 永久显示未连接
-                try {
-                    // 被控端只接收 cmd / pair，resp 是自己发布给控制端的，不需要订阅
-                    val okCmd = subscribeWithDiag(topicCmd())
-                    val okPair = subscribeWithDiag(topicPair())
-                    if (!okCmd || !okPair) {
-                        "MQTT 订阅被 broker 拒绝：请检查 EMQX 中 DEV 账户（${SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")}）的 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/#".showToast()
-                    }
-                    if (_bound) publishStatus("online")
-                } catch (e: Exception) {
-                    Log.e(TAG, "caught exception", e)
-                    "MQTT 订阅/状态上报失败：${e.message}".showToast()
-                }
+                // 统一上线入口（仲裁/RECLAIM），双触发由 enterServiceAsync 门禁去重
+                enterServiceAsync(reconnect)
             }
         })
 
         try {
             mqttClient?.connect(connectOptions)
             onConnected()
-            // 首次连接也同步订阅一次（connectComplete 在自动重连时同样会订阅，二者幂等）：
-            // 保证即便个别 Paho 版本首连不回调 connectComplete，命令主题也不会遗漏。
-            try {
-                val okCmd = subscribeWithDiag(topicCmd())
-                val okPair = subscribeWithDiag(topicPair())
-                if (!okCmd || !okPair) {
-                    "MQTT 订阅被 broker 拒绝：请检查 EMQX 中 DEV 账户（${SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")}）的 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/#".showToast()
-                }
-                if (_bound) publishStatus("online")
-            } catch (e: Exception) {
-                Log.e(TAG, "caught exception", e)
-                "MQTT 订阅/状态上报失败：${e.message}".showToast()
-            }
+            // 首次连接兜底：个别 Paho 版本首连不回调 connectComplete，命令主题不能遗漏
+            enterServiceAsync(reconnect = false)
         } catch (e: Exception) {
             Log.e(TAG, "caught exception", e)
             onDisconnected()
@@ -606,6 +726,7 @@ class MqttAgentService : Service() {
                 Protocol.CMD_SYNC -> handleSync(packet)
                 Protocol.CMD_PAIR -> handlePair(packet)
                 Protocol.CMD_UNBOUND -> handleUnbound(packet)
+                Protocol.CMD_ALERT_QUERY -> handleAlertQuery(packet)
                 else -> { /* 其它命令暂忽略 */ }
             }
         } catch (e: Exception) {
@@ -628,6 +749,38 @@ class MqttAgentService : Service() {
             return
         }
         RuntimeStateApplier.apply(packet)
+    }
+
+    /** AQ 告警回放查询：校验后把本地告警缓冲经 resp(field=alerts) 密封回放；为空也回空数组 */
+    private fun handleAlertQuery(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) {
+            doPublishAck(packet.rid, "UNBOUND")
+            return
+        }
+        if (!verifyWithSession(packet, session)) {
+            Log.w(TAG, "告警回放查询签名校验失败 rid=${packet.rid}")
+            doPublishAck(packet.rid, "SIGN_FAIL")
+            return
+        }
+        if (!acceptRid(packet.rid, packet.ts)) {
+            doPublishAck(packet.rid, "DUP_OR_STALE")
+            return
+        }
+        scope.launch {
+            try {
+                val payload = buildAlertReplayPayload()
+                val ok = publishResp(packet.rid, "alerts", payload)
+                if (!ok) {
+                    doPublishAck(packet.rid, "ALERTS_FAIL")
+                } else {
+                    Log.d(TAG, "告警回放已返回 rid=${packet.rid} size=${payload.length}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "告警回放构建/发送异常 rid=${packet.rid}", e)
+                doPublishAck(packet.rid, "ALERTS_FAIL")
+            }
+        }
     }
 
     /** 查询快照：校验会话 → 构建设备/运行/设置/任务 JSON → 经 resp 主题回执 */
@@ -1306,6 +1459,313 @@ class MqttAgentService : Service() {
         }
     }
 
+    // ═══════ 设备ID占用仲裁（presence 协议，纯逻辑见 PresenceGuard） ═══════
+
+    /** RECLAIM 检查：重连后等待 broker 补发 retained 占位牌的时长 */
+    private val RECLAIM_RETAINED_WAIT_MS = 1_500L
+
+    private fun topicPresence() = PresenceGuard.presenceTopic(Protocol.TOPIC_PREFIX, deviceId)
+
+    /** 本机会话标识：持久化，跨进程死亡认领自己的旧占位牌 */
+    private fun loadOrCreateSid(): String {
+        var sid = SaveKeyValues.loadString(Constant.MQTT_PRESENCE_SID_KEY, "")
+        if (sid.isBlank()) {
+            sid = UUID.randomUUID().toString()
+            SaveKeyValues.saveString(Constant.MQTT_PRESENCE_SID_KEY, sid)
+        }
+        return sid
+    }
+
+    /** presence 发布：轻量 JSON，QoS1，retained 可选；失败仅记日志（失败开放原则） */
+    private fun publishPresenceMsg(json: String, retained: Boolean) {
+        val client = mqttClient ?: return
+        try {
+            client.publish(
+                topicPresence(),
+                MqttMessage(json.toByteArray()).apply { qos = 1; isRetained = retained }
+            )
+            MqttQuota.add(this, 1, 0)
+        } catch (e: Exception) {
+            Log.w(TAG, "presence 发布失败: ${e.message}")
+        }
+    }
+
+    /**
+     * 连接建立后的统一入口：未上岗先跑占用仲裁，已上岗做 RECLAIM 检查后恢复。
+     * 双触发由 [arbitrationGate] 去重；任何异常一律放行上岗（失败开放，不阻断既有连接能力）。
+     */
+    private fun enterServiceAsync(reconnect: Boolean) {
+        if (instance !== this@MqttAgentService) return // 服务已销毁的迟到回调，直接拦截
+        if (arbitrationPassed) {
+            scope.launch {
+                try {
+                    if (checkReclaimAfterReconnect()) return@launch // 判定被接管：内部已完成停服处置
+                    serveOnline()
+                } catch (e: Exception) {
+                    Log.e(TAG, "RECLAIM 检查异常（失败开放恢复）", e)
+                    serveOnline()
+                }
+            }
+            return
+        }
+        if (!arbitrationGate.compareAndSet(false, true)) {
+            Log.d(TAG, "占用仲裁进行中，忽略本次重复触发")
+            return
+        }
+        scope.launch {
+            try {
+                presenceSid = loadOrCreateSid()
+                runArbitration()
+            } catch (e: Exception) {
+                Log.e(TAG, "占用仲裁异常（失败开放放行）", e)
+                arbiter = null
+                arbitrationPassed = true
+                takeoverWatchUntilMs = System.currentTimeMillis() + PresenceGuard.TAKEOVER_WATCH_MS
+                serveOnline()
+            } finally {
+                arbitrationGate.set(false)
+            }
+        }
+    }
+
+    /** 完整上线仲裁（仅未上岗时执行一次）：先挂状态机再订阅，抖动错峰后发 PRB，窗口结束裁决 */
+    private suspend fun runArbitration() {
+        val collector = PresenceArbitration(presenceSid)
+        arbiter = collector
+        val subOk = runCatching { subscribeWithDiag(topicPresence()) }.getOrDefault(false)
+        if (!subOk) {
+            arbiter = null
+            LogFileManager.action("presence 订阅失败/被拒，跳过占用仲裁直接上岗（失败开放）")
+            arbitrationPassed = true
+            takeoverWatchUntilMs = System.currentTimeMillis() + PresenceGuard.TAKEOVER_WATCH_MS
+            serveOnline()
+            return
+        }
+        delay(400L + (0L..PresenceGuard.PROBE_JITTER_MS).random())
+        publishPresenceMsg(PresenceGuard.encodeProbe(presenceSid, System.currentTimeMillis()), retained = false)
+        delay(PresenceGuard.DECISION_WINDOW_MS)
+        arbiter = null
+        when (val verdict = collector.evaluate()) {
+            is PresenceArbitration.Outcome.Win -> {
+                LogFileManager.action("设备ID占用仲裁通过，本机上岗 sid=${presenceSid.take(8)}")
+                arbitrationPassed = true
+                takeoverWatchUntilMs = System.currentTimeMillis() + PresenceGuard.TAKEOVER_WATCH_MS
+                serveOnline()
+            }
+            is PresenceArbitration.Outcome.Occupied -> {
+                LogFileManager.action("设备ID占用冲突 reason=${verdict.reason} 对方sid=${verdict.foreignSid.take(8)}")
+                handlePresenceConflict(verdict.reason, verdict.foreignSid, verdict.foreignTs)
+            }
+        }
+    }
+
+    /**
+     * 重连后的 RECLAIM 检查：无外来新鲜占位牌/声明 → 直接恢复；有 → 发确认探测再裁决，
+     * 窗口内收到 CLAIM 才判定被接管（防深睡在位者来不及应答被误判）。
+     * @return true 表示判定被接管并已停服处置
+     */
+    private suspend fun checkReclaimAfterReconnect(): Boolean {
+        lastForeignHb = null
+        reclaimProbeSeenClaim = false
+        reclaimProbeActive = true
+        try {
+            val ok = runCatching { subscribeWithDiag(topicPresence()) }.getOrDefault(false)
+            if (!ok) return false // 无法观测 presence → 失败开放恢复服务
+            delay(RECLAIM_RETAINED_WAIT_MS)
+            val freshForeignHbSid = lastForeignHb
+                ?.takeIf { (fsid, ts) ->
+                    fsid != presenceSid && PresenceGuard.isHeartbeatFresh(ts, System.currentTimeMillis())
+                }
+                ?.first
+            if (freshForeignHbSid == null && !reclaimProbeSeenClaim) return false
+            LogFileManager.action("RECLAIM：发现疑似接管（HB=${freshForeignHbSid?.take(8)}），发确认探测")
+            publishPresenceMsg(PresenceGuard.encodeProbe(presenceSid, System.currentTimeMillis()), retained = false)
+            delay(PresenceGuard.DECISION_WINDOW_MS)
+            if (!reclaimProbeSeenClaim) {
+                LogFileManager.action("RECLAIM 确认探测无应答，按残留占位牌处理，恢复服务")
+                return false
+            }
+            handlePresenceConflict(PresenceGuard.ConflictReason.RECLAIM, freshForeignHbSid, lastForeignHb?.second ?: 0L)
+            return true
+        } finally {
+            reclaimProbeActive = false
+        }
+    }
+
+    /** 上岗/恢复：订阅 cmd/pair + 发布 online + 启动占位牌心跳（幂等可重入） */
+    private fun serveOnline() {
+        try {
+            // 被控端只接收 cmd / pair，resp 是自己发布给控制端的，不需要订阅
+            val okCmd = subscribeWithDiag(topicCmd())
+            val okPair = subscribeWithDiag(topicPair())
+            if (!okCmd || !okPair) {
+                "MQTT 订阅被 broker 拒绝：请检查 EMQX 中 DEV 账户（${SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")}）的 ACL 是否允许 ${Protocol.TOPIC_PREFIX}/$deviceId/#".showToast()
+            }
+            if (_bound) publishStatus("online")
+        } catch (e: Exception) {
+            Log.e(TAG, "caught exception", e)
+            "MQTT 订阅/状态上报失败：${e.message}".showToast()
+        }
+        // 立即发布一条占位牌并启动进程内节流补发循环；息屏保鲜由 AlarmPingSender 钩子负责
+        publishPresenceHb(force = true)
+        startHeartbeatLoop()
+    }
+
+    /**
+     * presence 消息分流（messageArrived 按主题进入，轻量 JSON 非 MqttPacket）。
+     * 身份判定顺序：仲裁中喂状态机 / RECLAIM 确认期记声明 / 在位者应答+提醒 / 监听期内让位。
+     * 核心规则：在位者绝不因仲裁停服，只有「挑战者身份」才走冲突停服。
+     */
+    private fun handlePresenceMessage(json: String) {
+        if (instance !== this@MqttAgentService) return
+        val msg = PresenceGuard.decode(json) ?: return
+        if (msg.sid == presenceSid) return // 本机自发自收的回声
+        // 1) 首次上线仲裁中：全部喂给决策状态机
+        arbiter?.let { arb ->
+            arb.onForeignMessage(msg)
+            return
+        }
+        // 2) RECLAIM 确认探测期：坐实接管的唯一证据是对方实时 CLAIM
+        if (reclaimProbeActive && msg.type == Protocol.CMD_CLAIM) {
+            reclaimProbeSeenClaim = true
+            return
+        }
+        when (msg.type) {
+            Protocol.CMD_PROBE -> if (arbitrationPassed) {
+                // 在位者应答敲门：回 CLM（按挑战者节流）+ 黄条提醒（同一挑战者去重）
+                replyClaimToChallenger(msg.sid)
+                noteForeignChallenge(msg.sid)
+            }
+            Protocol.CMD_CLAIM -> if (arbitrationPassed) {
+                if (System.currentTimeMillis() < takeoverWatchUntilMs) {
+                    // 上岗监听期内听到原占用者实时声明（如深睡刚醒、TCP 其实没死）→ 本机是事实上的挑战者，让位
+                    LogFileManager.action("监听期内收到原占用者声明，本机让位 sid=${msg.sid.take(8)}")
+                    handlePresenceConflict(PresenceGuard.ConflictReason.CONTESTED, msg.sid)
+                } else {
+                    // 监听期外的合法回归者已被 RECLAIM 门禁拦下，此处理论不可达；在位者绝不停服
+                    Log.w(TAG, "收到外来 CLAIM（非监听期），忽略 sid=${msg.sid.take(8)}")
+                }
+            }
+            Protocol.CMD_HEARTBEAT -> {
+                // 仅记录最新外来占位牌供 RECLAIM 检查用；在位期间收到不做任何动作
+                lastForeignHb = msg.sid to msg.ts
+            }
+        }
+    }
+
+    /** 回 CLM 给敲门者（按挑战者 sid 节流，避免重复探测刷流量） */
+    private fun replyClaimToChallenger(challengerSid: String) {
+        val now = System.currentTimeMillis()
+        if (challengerSid == lastClaimReplySid &&
+            now - lastClaimReplyAtMs < PresenceGuard.CLAIM_REPLY_THROTTLE_MS
+        ) return
+        lastClaimReplySid = challengerSid
+        lastClaimReplyAtMs = now
+        publishPresenceMsg(PresenceGuard.encodeClaim(presenceSid, now), retained = false)
+    }
+
+    /**
+     * 异常接入提醒 + 上报控制端（同一挑战者只处理一次）：
+     * 本机不停服，仅黄条横幅提醒；id_conflict 由持会话密钥的在位者代报给控制端。
+     */
+    private fun noteForeignChallenge(challengerSid: String) {
+        synchronized(challengedSidsReported) {
+            if (!challengedSidsReported.add(challengerSid)) return
+        }
+        LogFileManager.action("检测到同设备ID设备尝试上线（sid=${challengerSid.take(8)}），已拒绝其接入")
+        val payload = org.json.JSONObject().apply {
+            put("ts", System.currentTimeMillis())
+            put("challenger", challengerSid.take(8))
+        }.toString()
+        SaveKeyValues.saveString(Constant.REMOTE_ID_ALERT_BANNER_KEY, payload)
+        runCatching { idAlertListener?.invoke() }
+        reportIdConflictToController(challengerSid)
+    }
+
+    /** 经 alert 通道向控制端代报异常接入事件；走静态 publishAlert 入口以同时写入本地缓冲 */
+    private fun reportIdConflictToController(challengerSid: String) {
+        val json = org.json.JSONObject().apply {
+            put("type", Protocol.ALERT_TYPE_ID_CONFLICT)
+            put("challenger", challengerSid.take(8))
+            put("ts", System.currentTimeMillis())
+        }.toString()
+        MqttAgentService.publishAlert(json)
+    }
+
+    /** 占位牌发布：retained QoS1；非 force 时按 HB_MIN_INTERVAL_MS 节流（蹭既有唤醒窗口省电） */
+    private fun publishPresenceHb(force: Boolean) {
+        if (mqttClient?.isConnected != true) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastHbPublishedAtMs < PresenceGuard.HB_MIN_INTERVAL_MS) return
+        lastHbPublishedAtMs = now
+        publishPresenceMsg(PresenceGuard.encodeHeartbeat(presenceSid, now), retained = true)
+    }
+
+    /** 心跳保鲜检查：距上次发布超过 HB_MIN_INTERVAL_MS 才真正补发（供循环与唤醒钩子调用） */
+    private fun refreshPresenceHbIfDue() {
+        if (!arbitrationPassed) return
+        if (System.currentTimeMillis() - lastHbPublishedAtMs < PresenceGuard.HB_MIN_INTERVAL_MS) return
+        publishPresenceHb(force = true)
+    }
+
+    /** 进程活跃期补发占位牌的轻量循环（不排闹钟不持锁，Doze 冻结无害） */
+    private fun startHeartbeatLoop() {
+        if (hbLoopJob?.isActive == true) return
+        hbLoopJob = scope.launch {
+            while (true) {
+                delay(30_000L)
+                runCatching { refreshPresenceHbIfDue() }
+            }
+        }
+    }
+
+    private fun stopHeartbeatLoop() {
+        hbLoopJob?.cancel()
+        hbLoopJob = null
+    }
+
+    /** 优雅停止时清掉 retained 占位牌，避免挑战者在过期窗口内误判冲突 */
+    private fun clearPresenceRetainedPayload() {
+        val client = mqttClient ?: return
+        if (!client.isConnected) return
+        try {
+            client.publish(
+                topicPresence(),
+                MqttMessage(ByteArray(0)).apply { qos = 1; isRetained = true }
+            )
+            MqttQuota.add(this, 1, 0)
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 冲突处置（仅挑战者身份走到这里）：持久化标志+原因码 → 静默断开停服 → 取消自动拉起闹钟。
+     * 不发 offline：本机从未上岗或已让位，不应污染共享 status retained。
+     */
+    private fun handlePresenceConflict(reason: PresenceGuard.ConflictReason, foreignSid: String?, foreignTs: Long = 0L) {
+        if (instance !== this@MqttAgentService) return
+        SaveKeyValues.saveBoolean(Constant.MQTT_ID_CONFLICT_KEY, true)
+        SaveKeyValues.saveString(Constant.MQTT_ID_CONFLICT_REASON_KEY, reason.name)
+        SaveKeyValues.saveLong(Constant.MQTT_ID_CONFLICT_FOREIGN_TS_KEY, foreignTs)
+        // 冲突停服时通知 UI 立即刷新（否则用户点"开启"后会一直显示"连接中…"直到切 Tab）
+        runCatching { conflictListener?.invoke() }
+        // 同步把远程总开关置为关，让 UI 开关与实际状态一致（一次点击即可重新开启并重新仲裁）
+        SaveKeyValues.saveBoolean(Constant.MQTT_ENABLED_KEY, false)
+        LogFileManager.error("设备ID冲突停服 reason=$reason foreignSid=${foreignSid?.take(8)}")
+        stopHeartbeatLoop()
+        Thread {
+            try { mqttClient?.disconnectForcibly(2_000) } catch (_: Exception) { }
+            try { mqttClient?.close() } catch (_: Exception) { }
+        }.start()
+        // 状态收口：冲突提示由远程页置顶红色横幅常驻展示
+        _connected = false
+        stateListener?.invoke(false)
+        updateNotification()
+        cancelResurrectAlarms(this)
+        KeepAliveReceiver.cancelRescueAlarm(this)
+        stopSelf()
+    }
+
     // ===== 主题构建（最终模型 dt/{id}/...）=====
     private fun topicCmd() = "${Protocol.TOPIC_PREFIX}/$deviceId/cmd"
     private fun topicStatus() = "${Protocol.TOPIC_PREFIX}/$deviceId/status"
@@ -1320,7 +1780,7 @@ class MqttAgentService : Service() {
      * 与 publishPush 不同，这是「事件」而非「状态」，不进快照缓存，仅推一次。
      * 仅在已配对（有会话密钥）且已连接时推送。
      */
-    private fun publishAlertInternal(json: String) {
+    private fun publishAlertInternal(json: String, ridOverride: String? = null) {
         val client = mqttClient ?: return
         if (!client.isConnected) return
         val session = MqttSecureConfig.loadSession()
@@ -1329,7 +1789,8 @@ class MqttAgentService : Service() {
             try {
                 val wire = SecretBox.seal(session, json)
                 val ts = System.currentTimeMillis()
-                val rid = UUID.randomUUID().toString()
+                // rid 与缓冲 aid 同源（publishAlert 传入）：实时/回放共用去重键；直连调用无 override 时自生成
+                val rid = ridOverride?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
                 val sign = MqttSigner.sign(session, deviceId, ts, rid, "alert", "s", wire, Protocol.CMD_ALERT)
                 val packet = MqttPacket(
                     c = Protocol.CMD_ALERT,
@@ -1386,6 +1847,8 @@ class MqttAgentService : Service() {
         if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
         // 「后台自启」总开关：关闭时不安排复活闹钟，进程被杀后不再尝试自启
         if (!KeepAliveReceiver.isKeepAliveEnabled()) return
+        // 设备ID冲突停服中：不再排复活闹钟（用户手动开启时清除标志后由 UI 拉起）
+        if (isIdConflictBlocked()) return
         val delay = if (resurrectAttempt < 3) 30_000L
         else minOf((1L shl (resurrectAttempt - 2)) * 60_000L, 15 * 60_000L)
         resurrectAttempt++
@@ -1398,6 +1861,8 @@ class MqttAgentService : Service() {
     private fun scheduleResurrect(delayMs: Long) {
         if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)) return
         if (!KeepAliveReceiver.isKeepAliveEnabled()) return
+        // 冲突停服中：复活链条安静（同上，避免撞车循环）
+        if (isIdConflictBlocked()) return
         nextReconnectAtMs = System.currentTimeMillis() + delayMs
         KeepAliveReceiver.scheduleRescue(this, delayMs, "mqtt_resurrect")
     }
@@ -1602,6 +2067,7 @@ class MqttAgentService : Service() {
         // 仅开关开启时返回 START_STICKY（被杀后由系统重新拉起并继续连接）。
         if (!SaveKeyValues.loadBoolean(Constant.MQTT_ENABLED_KEY, false)
             || !KeepAliveReceiver.isKeepAliveEnabled()
+            || isIdConflictBlocked()
         ) {
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) { }
             stopSelf()
@@ -1637,15 +2103,18 @@ class MqttAgentService : Service() {
         instance = null
         stateListener = null
         bindingStateListener = null
+        // 停掉占位牌心跳协程（scope.cancel 亦会取消，此处显式兜底）
+        stopHeartbeatLoop()
         scope.cancel()
         MqttQuota.onDisconnect(this)
-        // 优雅停止：主动发布 retained offline（区别于 broker 的 Last-Will 异常掉线），
-        // 让控制端在服务被主动关闭时也能即时感知离线（需求：掉线增强）。
-        // 注意：publishStatus / disconnect 是 Paho 同步调用，waitForCompletion 在连接半死
-        // （Doze 挂网 / 僵尸 TCP）时 PUBACK 永远不来会无限阻塞；onDestroy 跑在主线程，
-        // 直接同步调用会把整个 UI 卡死，因此必须移出主线程异步执行。
+        // 优雅停止：先清 retained 占位牌再发 offline（冲突停服路径两者都不发——
+        // 本机从未上岗或已让位，不应污染共享 retained）。
+        // publishStatus/disconnect 是 Paho 同步调用，必须移出主线程避免卡 UI。
+        val conflictBlocked = isIdConflictBlocked()
+        val wasServing = arbitrationPassed && !conflictBlocked
         Thread {
-            try { if (mqttClient?.isConnected == true) publishStatus("offline") } catch (_: Exception) { }
+            try { if (wasServing) clearPresenceRetainedPayload() } catch (_: Exception) { }
+            try { if (!conflictBlocked && mqttClient?.isConnected == true) publishStatus("offline") } catch (_: Exception) { }
             try {
                 mqttClient?.disconnect()
                 mqttClient?.close()
