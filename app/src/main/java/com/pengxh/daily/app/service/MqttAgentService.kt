@@ -903,11 +903,10 @@ class MqttAgentService : Service() {
                         "SUCCESS"
                     }
                     Protocol.ACTION_PUNCH -> {
-                        val nms = NotificationMonitorService.instance
-                        if (nms != null) {
-                            nms.performRemotePunch()
-                            "SUCCESS"
-                        } else "SERVICE_UNAVAILABLE"
+                        // 打卡编排已解耦至 RemotePunchRunner：不要求通知监听服务运行，
+                        // 结果确认仍由无障碍文本/截屏兜底链路完成
+                        RemotePunchRunner.run(this@MqttAgentService, scope)
+                        "SUCCESS"
                     }
                     Protocol.ACTION_ATTENDANCE -> {
                         val nms = NotificationMonitorService.instance
