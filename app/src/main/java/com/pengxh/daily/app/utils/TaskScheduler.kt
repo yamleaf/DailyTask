@@ -233,7 +233,7 @@ object TaskScheduler {
                     schedule.size,
                     task.actualTime,
                     task.plannedTime,
-                    task.task.name
+                    task.task.name ?: ""  // 兜底：Room 反射直赋可加载历史 NULL 行，防 NPE
                 )
             )
 
