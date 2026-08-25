@@ -6,6 +6,7 @@ import android.view.View
 import android.widget.EditText
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
+import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.KeepAliveReceiver
@@ -21,6 +22,7 @@ import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import java.time.DayOfWeek
+import java.time.LocalDate
 
 
 class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
@@ -80,6 +82,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             binding.minuteRangeLayout.visibility = View.GONE
         }
 
+        bindHolidayInfo()
     }
 
     override fun initEvent() {
@@ -214,6 +217,89 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             )
         }
 
+    }
+
+    /**
+     * 绑定「节假日数据」信息块：有缓存 / 无缓存两种状态都展示（纯 UI 展示，不修改任何持久化数据）。
+     * - 状态 badge：已同步（绿 md_success）｜未同步（橙 md_warning）
+     * - 第 2 行：覆盖年份 · 节假日/补班天数；有缓存未解析时提示"已缓存"；无缓存给"暂无数据"说明
+     * - 第 3 行：今日类型 + 是否影响任务；无内存数据时给同步操作指引
+     * - 第 4 行：缓存年份过期给黄色提示；正常显示数据来源；无缓存隐藏
+     * 所有数据读取均 runCatching / ?: 兜底，异常路径返回默认占位，绝不向调用方抛错。
+     */
+    private fun bindHolidayInfo() {
+        val mgr = ChinaHolidayManager
+        binding.holidayInfoLayout.visibility = View.VISIBLE
+
+        val holidayCount = mgr.getHolidayCount()
+        val workdayCount = mgr.getWorkdayCount()
+        val cachedYear = mgr.getCachedYear()
+        val currentYear = LocalDate.now().year
+        val hasInMemory = holidayCount > 0 || workdayCount > 0
+        val hasCache = cachedYear != null
+        val ready = hasInMemory || hasCache
+
+        // 状态 badge（标题行右侧）
+        if (ready) {
+            binding.holidayStatusView.text = "已同步"
+            binding.holidayStatusView.setTextColor(R.color.md_success.convertColor(this))
+        } else {
+            binding.holidayStatusView.text = "未同步"
+            binding.holidayStatusView.setTextColor(R.color.md_warning.convertColor(this))
+        }
+
+        // 第 2 行：覆盖数据
+        binding.holidayCoverageView.text = when {
+            hasInMemory -> "覆盖：${cachedYear ?: currentYear}年  ·  节假日 ${holidayCount} 天  ·  补班 ${workdayCount} 天"
+            hasCache -> "覆盖：${cachedYear}年 · 已缓存，等待加载"
+            else -> "暂无节假日数据，节假日/补班判断暂不生效"
+        }
+
+        // 第 3 行：今日类型（有内存数据才可判断；否则给同步指引）
+        if (hasInMemory) {
+            val today = LocalDate.now()
+            val todayKind = when {
+                mgr.isHoliday(today) -> "法定节假日"
+                mgr.isWorkday(today) -> "调休补班日"
+                today.dayOfWeek.value >= 6 -> "周末"
+                else -> "工作日"
+            }
+            val skipOn = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
+            val impact = when {
+                mgr.isHoliday(today) && skipOn -> "开启跳过，不打卡"
+                mgr.isHoliday(today) && !skipOn -> "未开跳过，仍打卡"
+                else -> "不影响任务"
+            }
+            binding.holidayTodayView.text = "今日：${todayKind} · ${impact}"
+            binding.holidayTodayView.visibility = View.VISIBLE
+        } else {
+            binding.holidayTodayView.text =
+                if (hasCache) "数据已缓存，重启 App 后生效" else "前往「设置」→「更新节假日数据」同步后生效"
+            binding.holidayTodayView.visibility = View.VISIBLE
+        }
+
+        // 第 4 行：过期提示 / 来源 / 隐藏
+        if (hasCache && cachedYear != currentYear) {
+            binding.holidayUpdateView.text = "缓存为 ${cachedYear} 年数据，建议在设置页更新"
+            binding.holidayUpdateView.setTextColor(R.color.md_warning.convertColor(this))
+            binding.holidayUpdateView.visibility = View.VISIBLE
+        } else if (ready) {
+            binding.holidayUpdateView.text = "数据来源：远程缓存"
+            binding.holidayUpdateView.setTextColor(R.color.md_onSurfaceVariant.convertColor(this))
+            binding.holidayUpdateView.visibility = View.VISIBLE
+        } else {
+            binding.holidayUpdateView.visibility = View.GONE
+        }
+    }
+
+    /**
+     * 从设置页同步完节假日数据返回时（如点过"更新节假日数据"），任务配置页可见时需刷新
+     * 该信息块。onResume 是最简的统一触发点：Activity 入栈/出栈回到前台都会走到这里，
+     * 幂等无副作用，不影响其他 setting 控件状态。
+     */
+    override fun onResume() {
+        super.onResume()
+        bindHolidayInfo()
     }
 
     private fun showWorkdaySelector() {

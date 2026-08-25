@@ -232,6 +232,71 @@
                 android:layout_marginHorizontal="@dimen/dp_16"
                 android:background="@color/md_outlineVariant" />
 
+            <!-- 节假日数据信息块：有/无缓存两种状态都展示（纯 UI，不引入新数据源）。
+                 标题行：左侧文字 + 右侧状态 badge（已同步=md_success / 未同步=md_warning）；
+                 下方 3 行小字：覆盖数据（或暂无提示）/ 今日类型（或同步指引）/ 来源与过期提示。
+                 风格对齐本页其他行：paddingHorizontal 16dp、标题 TitleSmall、小字 sp_12 md_onSurfaceVariant。 -->
+            <LinearLayout
+                android:id="@+id/holidayInfoLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/dp_16"
+                android:paddingVertical="@dimen/dp_12">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="节假日数据"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                        android:textColor="@color/md_onSurface" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/holidayStatusView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/md_success"
+                        android:textSize="@dimen/sp_12" />
+                </LinearLayout>
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/holidayCoverageView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:textColor="@color/md_onSurfaceVariant"
+                    android:textSize="@dimen/sp_12" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/holidayTodayView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_2"
+                    android:textColor="@color/md_onSurfaceVariant"
+                    android:textSize="@dimen/sp_12" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/holidayUpdateView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_2"
+                    android:textColor="@color/md_onSurfaceVariant"
+                    android:textSize="@dimen/sp_12" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/dividerLine"
+                android:layout_marginHorizontal="@dimen/dp_16"
+                android:background="@color/md_outlineVariant" />
+
             <RelativeLayout
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/itemLayoutHeight"

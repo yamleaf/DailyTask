@@ -205,6 +205,26 @@ object ChinaHolidayManager {
     /** 是否正在同步节假日数据（供快照上报与控制端 UI 展示） */
     fun isSyncing(): Boolean = isSyncing.get()
 
+    /**
+     * 是否有可显示的节假日/补班数据：内存中有数据 OR 已存在远程缓存（即使尚未解析进内存）。
+     * 用于任务配置页等 UI 条件显示「节假日数据」信息块；空状态时该区块隐藏，避免展示无意义占位。
+     */
+    fun hasAvailableData(): Boolean =
+        holidayDates.isNotEmpty() || workdayDates.isNotEmpty() ||
+            runCatching { ConfigStore.get().contains(CACHE_KEY) }.getOrDefault(false)
+
+    /** 当前年份覆盖的法定节假日天数（无数据返回 0） */
+    fun getHolidayCount(): Int = holidayDates.size
+
+    /** 当前年份覆盖的调休补班天数（无数据返回 0） */
+    fun getWorkdayCount(): Int = workdayDates.size
+
+    /** 缓存的年份（无缓存或读取失败返回 null） */
+    fun getCachedYear(): Int? = runCatching {
+        val cache = ConfigStore.get().load(CACHE_KEY)
+        if (cache.size() == 0) null else cache.get("year")?.asInt
+    }.getOrNull()
+
     fun cancel() {
         scope.cancel()
     }
