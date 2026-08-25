@@ -150,11 +150,32 @@ jobs:
             ./gradlew assembleRelease --no-daemon
           fi
 
-      - name: Upload release APK
+      # ===== 加密 APK（7z AES-256，密码=APK_ENCRYPT_PASSWORD）：对所有触发执行，
+      # 上传到 artifact 与上传到 release 复用同一加密产物，保证二者一致 =====
+      - name: Encrypt APK (7z AES-256)
+        run: |
+          pip install py7zr -q
+          python3 - <<'EOF'
+          import glob, os, py7zr
+          apk = glob.glob('app/build/outputs/apk/release/*.apk')[0]
+          out = 'dailyTask_release_%s.7z' % os.path.basename(apk)
+          pw = os.environ.get('APK_ENCRYPT_PASSWORD', '')
+          if not pw:
+              raise SystemExit('APK_ENCRYPT_PASSWORD 未配置，无法加密 artifact')
+          with py7zr.SevenZipFile(out, 'w', password=pw) as z:
+              z.write(apk, os.path.basename(apk))
+          print('加密包:', out)
+          EOF
+
+      # ===== 上传加密后的 7z 到 artifact（不再上传明文 APK）=====
+      # 名称带 run_number 后缀：每次构建独立、可并存，便于"保留最近 30 次"；
+      # retention-days 作为兜底，防止清理步骤偶发未执行时无限堆积。
+      - name: Upload encrypted release APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: dailyTask_alpha_release
-          path: app/build/outputs/apk/release/*.apk
+          name: dailyTask_alpha_release_${{ github.run_number }}
+          path: dailyTask_release_*.7z
+          retention-days: 10
 
       # ===== 手动触发：dump APK 版本号，供 GitHub Release Draft 展示（版本信息发版在本地执行） =====
       # 自定义包名构建与默认包名同流程：同样走版本提取 → 7z 加密 → Release Draft（tag=dt-{versionCode}）。
@@ -173,21 +194,6 @@ jobs:
           echo "version_code=$VC" >> "$GITHUB_OUTPUT"
           echo "version_name=$VN" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
-
-      # ===== 手动触发：APK 加密为 7z（AES-256，密码=APK_ENCRYPT_PASSWORD）供 Gitee Go 拉取解压 =====
-      # GitHub 仓库公开 → release 资产公开，加密防直接下载；Gitee 私有仓库存明文 APK。
-      - name: Encrypt APK (7z AES-256)
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          pip install py7zr -q
-          python3 - <<'EOF'
-          import glob, os, py7zr
-          apk = glob.glob('app/build/outputs/apk/release/*.apk')[0]
-          out = 'dailyTask_release_%s.7z' % os.path.basename(apk)
-          with py7zr.SevenZipFile(out, 'w', password=os.environ['APK_ENCRYPT_PASSWORD']) as z:
-              z.write(apk, os.path.basename(apk))
-          print('加密包:', out)
-          EOF
 
       # ===== 发版（上传 APK + .dat 到 Gitee）已改为本地执行 =====
       # 原因：GitHub CI（美国）跨境上传 Gitee（国内）极慢（实测 >9min），
@@ -296,4 +302,4 @@ jobs:
               });
               removed++;
             }
-            console.log(`pruned ${removed} old timestamp cache(s), kept ${keepKey}`);
+            console.log(`pruned ${removed} old timestamp cache(s), kept ${keepKey}`)
