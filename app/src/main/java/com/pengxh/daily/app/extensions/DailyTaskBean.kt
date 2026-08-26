@@ -45,9 +45,13 @@ fun DailyTaskBean.resolveExecutionTime(): String {
 private fun DailyTaskBean.resolveExecutionSeconds(): Int {
     val needRandom = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
 
-    //18:00:59
-    val array = this.time.split(":")
-    var totalSeconds = array[0].toInt() * 3600 + array[1].toInt() * 60 + array[2].toInt()
+    // time 为可空 DB 列且格式不保证（导入/历史数据可能是 "HH:mm" 或脏值），
+    // 健壮解析避免 NPE / IndexOutOfBounds / NumberFormatException 打断调度协程
+    val parts = time?.trim()?.split(":").orEmpty()
+    val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 0
+    val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+    val second = parts.getOrNull(2)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+    var totalSeconds = hour * 3600 + minute * 60 + second
 
     // 随机时间
     if (needRandom) {
