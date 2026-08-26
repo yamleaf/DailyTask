@@ -60,6 +60,9 @@
         <activity android:name=".ui.TaskConfigActivity" />
         <activity android:name=".ui.CommandActivity" />
         <activity android:name=".ui.QuestionAndAnswerActivity" />
+        <activity android:name=".ui.CommandHistoryActivity" />
+        <activity android:name=".ui.LogViewerActivity" />
+        <activity android:name=".ui.PunchRecordActivity" />
 
         <service android:name=".service.FloatingWindowService" />
 

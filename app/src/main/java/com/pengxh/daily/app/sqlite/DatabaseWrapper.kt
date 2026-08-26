@@ -57,11 +57,12 @@ object DatabaseWrapper {
         val from = "${start} 00:00:00"
         val to = "${endExclusive} 00:00:00"
         val notices = withContext(Dispatchers.IO) { noticeDao.loadBetween(from, to) }
-        val successDates = notices.filter { it.noticeMessage.contains("考勤打卡成功") }
-            .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull() }
+        // noticeMessage/postTime 为可空列（历史数据可能为 NULL），全部空安全访问
+        val successDates = notices.filter { it.noticeMessage?.contains("考勤打卡成功") == true }
+            .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime?.take(10) ?: return@mapNotNull null) }.getOrNull() }
             .toSet()
-        val timeoutDates = notices.filter { it.noticeMessage.contains("考勤打卡超时") }
-            .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime.take(10)) }.getOrNull() }
+        val timeoutDates = notices.filter { it.noticeMessage?.contains("考勤打卡超时") == true }
+            .mapNotNull { note -> runCatching { LocalDate.parse(note.postTime?.take(10) ?: return@mapNotNull null) }.getOrNull() }
             .toSet()
         return PunchDateResult(successDates, timeoutDates)
     }
@@ -74,9 +75,13 @@ object DatabaseWrapper {
     suspend fun loadLatestPunchTime(day: LocalDate): String? = withContext(Dispatchers.IO) {
         val notices = noticeDao.loadBetween("${day} 00:00:00", "${day.plusDays(1)} 00:00:00")
         notices.asSequence()
-            .filter { it.noticeMessage.contains("考勤打卡成功") || it.noticeMessage.contains("考勤打卡超时") }
-            .mapNotNull { it.postTime.takeIf { p -> p.startsWith("$day ") } }
+            .filter { it.noticeMessage?.contains("考勤打卡成功") == true || it.noticeMessage?.contains("考勤打卡超时") == true }
+            .mapNotNull { it.postTime?.takeIf { p -> p.startsWith("$day ") } }
             .maxOrNull()
+    }
+
+    suspend fun loadNoticeRange(start: LocalDate, endExclusive: LocalDate): MutableList<NotificationBean> = withContext(Dispatchers.IO) {
+        noticeDao.loadBetween("${start} 00:00:00", "${endExclusive} 00:00:00")
     }
 
     /**
