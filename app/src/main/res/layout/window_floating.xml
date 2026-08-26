@@ -15,7 +15,7 @@
         android:elevation="3dp"
         android:visibility="gone" />
 
-    <!-- 非打卡空闲：桌面小宠物（设置开关打开时）；贴边播 blink_dock_left/right -->
+    <!-- 非打卡空闲：桌面小宠物（设置开关打开时）；空闲态居中 -->
     <com.pengxh.daily.app.widget.DesktopPetView
         android:id="@+id/idlePetView"
         android:layout_width="wrap_content"
@@ -24,27 +24,27 @@
         android:background="@android:color/transparent"
         android:visibility="gone" />
 
-    <!-- 打卡期间展开的倒计时卡片：紧凑胶囊，末段由 Service 渐隐以免挡截图关键信息 -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/countdownCardView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        app:cardBackgroundColor="@android:color/transparent"
-        app:cardCornerRadius="18dp"
-        app:cardElevation="8dp"
-        app:strokeWidth="0dp">
-
-        <LinearLayout
+    <!-- 打卡期间展开的倒计时卡片：贴屏幕左缘，末段由 Service 纯透明度渐隐以免挡截图关键信息 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/countdownCardView"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="@drawable/bg_floating_countdown"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="14dp"
-            android:paddingTop="10dp"
-            android:paddingEnd="12dp"
-            android:paddingBottom="10dp">
+            app:cardBackgroundColor="@android:color/transparent"
+            app:cardCornerRadius="18dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:id="@+id/countdownContent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_floating_countdown"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="14dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="10dp">
 
             <ImageView
                 android:layout_width="20dp"
@@ -78,17 +78,6 @@
                     android:textSize="24sp"
                     android:textStyle="bold" />
             </LinearLayout>
-
-            <View
-                android:layout_width="1dp"
-                android:layout_height="28dp"
-                android:layout_marginHorizontal="10dp"
-                android:background="@color/dash_progress_bg" />
-
-            <com.pengxh.daily.app.widget.WaveProgressView
-                android:id="@+id/waveProgressView"
-                android:layout_width="28dp"
-                android:layout_height="28dp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </FrameLayout>
