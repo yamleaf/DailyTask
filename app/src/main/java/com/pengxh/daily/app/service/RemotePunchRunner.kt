@@ -42,7 +42,8 @@ object RemotePunchRunner {
     fun run(
         context: Context,
         scope: CoroutineScope,
-        keyword: String = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
+        keyword: String = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡"),
+        fromController: Boolean = false
     ) {
         // 「暂停使用」开启时不执行远程打卡
         if (KeepAliveReceiver.isPaused()) {
@@ -51,15 +52,6 @@ object RemotePunchRunner {
         }
         LogFileManager.action("收到远程打卡指令（关键词=$keyword）")
         // 遥控"打卡"：一次性，只唤起目标 App 并倒计时，不关联任务调度
-        val timeoutSeconds = SaveKeyValues.loadInt(
-            Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
-        )
-        MessageDispatcher.sendMessage(
-            "远程打卡通知",
-            StatusReporter.buildRemotePunchHtml(timeoutSeconds),
-            force = true,
-            appendMeta = false
-        )
         // 打卡前准备：屏幕当前息屏时先亮屏再打卡，保证打卡界面真实可见、可被无障碍正常操作；
         // 伪息屏蒙层显示时同样先保亮、再移除蒙层（避免蒙层释放 SCREEN_DIM 瞬间被系统休眠锁屏）。
         val keptAwakeForPunch = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(context)
@@ -185,6 +177,26 @@ object RemotePunchRunner {
                         }
 
                         // 统一发送远程打卡结果：无论何种模式都必须有反馈，避免“什么都没有”。
+                        // 控制端下发的打卡：结果经 alert 通道回传（仅控制端触发时，定时/DT# 不回传），
+                        // 供控制端关闭等待弹窗并展示打卡结果；消息带执行时间
+                        if (fromController) {
+                            val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA)
+                                .format(java.util.Date())
+                            val resultMsg = if (detectedSuccess) {
+                                "打卡成功（执行时间 $timeStr）"
+                            } else {
+                                "打卡超时，请手动确认执行结果（执行时间 $timeStr）"
+                            }
+                            runCatching {
+                                MqttAgentService.publishAlert(
+                                    org.json.JSONObject().apply {
+                                        put("type", com.yample.mqttprotocol.Protocol.ALERT_TYPE_PUNCH_RESULT)
+                                        put("msg", resultMsg)
+                                        put("ts", System.currentTimeMillis())
+                                    }.toString()
+                                )
+                            }
+                        }
                         if (detectedSuccess) {
                             // 文本检测命中成功：无障碍服务已直接发过“打卡结果通知”，不重复
                             LogFileManager.action("远程打卡结果：文本识别已成功")

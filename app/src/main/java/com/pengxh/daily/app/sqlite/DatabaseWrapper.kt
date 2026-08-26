@@ -85,17 +85,18 @@ object DatabaseWrapper {
     }
 
     /**
-     * 写入一条通知记录。
-     * 注意：底层 noticeDao.insert 是非 suspend 的阻塞式 @Insert，必须在 IO 线程执行，
-     * 否则当调用方位于主线程（如 TaskScheduler.scope=Dispatchers.Main、
-     * MainActivity.lifecycleScope=Dispatchers.Main）时，Room 会因默认禁止主线程访问数据库
-     * 抛出 IllegalStateException，被上层 catch 静默吞掉，导致"考勤打卡成功/超时"记录丢失，
-     * 状态查询日历无法正确标记当天打卡状态（曾导致超时后日历仍显示"计划打卡"）。
-     * 此处统一切到 Dispatchers.IO，确保任何调用方线程下都能安全落库。
+     * 写入一条通知记录（IO 线程安全：底层 insert 为阻塞式，此处分发到 IO 线程，避免主线程写库被 Room 拒绝）。
+     * 落库前防重：同一 postTime + noticeMessage 已存在则跳过——解决双路径重复写入
+     * （TaskScheduler 人工写超时记录 + saveTargetNotice 捕获目标App弹的同一通知），从根源杜绝重复记录。
      */
     suspend fun insertNotice(bean: NotificationBean) {
         withContext(Dispatchers.IO) {
-            noticeDao.insert(bean)
+            val time = bean.postTime ?: return@withContext
+            val message = bean.noticeMessage ?: return@withContext
+            val dup = noticeDao.findDuplicated(time, message)
+            if (dup == null) {
+                noticeDao.insert(bean)
+            }
         }
     }
 }

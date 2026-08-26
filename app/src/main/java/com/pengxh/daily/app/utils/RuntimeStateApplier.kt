@@ -100,10 +100,14 @@ object RuntimeStateApplier {
                 Protocol.FIELD_TASK_AUTO_RECYCLE -> {
                     val v = (packet.v as? PacketValue.BooleanValue)?.b ?: return@launch
                     SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, v)
-                    // 危险操作留痕：经控制端下发关闭每日循环
+                    // 操作留痕：经控制端下发切换每日循环（开/关均入告警）
                     if (!v) {
                         MqttAgentService.publishDangerAlert(
                             Protocol.ALERT_TYPE_LOOP_OFF, "控制端下发关闭每日循环"
+                        )
+                    } else {
+                        MqttAgentService.publishDangerAlert(
+                            Protocol.ALERT_TYPE_LOOP_ON, "控制端下发开启每日循环"
                         )
                     }
                     true

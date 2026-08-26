@@ -546,21 +546,26 @@ class NotificationMonitorService : NotificationListenerService() {
                 emptyList()
             }
 
-            val record = buildString {
+val attendanceText = buildString {
                 var index = 1
+                // 落库可能重复写入同一条通知（监听竞态），按「消息+时间」去重
+                val seen = HashSet<String>()
                 notices.filter {
-                    it.noticeMessage.contains("考勤打卡")
+                    it.noticeMessage?.contains("打卡") == true
                 }.forEach {
-                    append("【第${index}次】${it.noticeMessage}，时间：${it.postTime}\r\n")
-                    index++
+                    val key = "${it.noticeMessage}|${it.postTime}"
+                    if (seen.add(key)) {
+                        append("第${index}次。${it.noticeMessage}，时间：${it.postTime}\r\n")
+                        index++
+                    }
                 }
             }
 
             val htmlContent = try {
-                StatusReporter.buildAttendanceRecordHtml(record)
+                StatusReporter.buildAttendanceRecordHtml(attendanceText)
             } catch (e: Exception) {
                 Log.e(kTag, "Build attendance HTML failed, fallback to plain text", e)
-                record.ifBlank { "暂无考勤记录" }
+                attendanceText.ifBlank { "暂无考勤记录" }
             }
             MessageDispatcher.sendMessage(
                 "当天考勤记录通知",

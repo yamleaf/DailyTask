@@ -975,6 +975,10 @@ class MqttAgentService : Service() {
                             kotlinx.coroutines.delay(500)
                         }
                         TaskScheduler.startTask()
+                        // 操作留痕：远程启动任务 → 告警列表（与终止对偶）
+                        MqttAgentService.publishDangerAlert(
+                            Protocol.ALERT_TYPE_TASK_START, "控制端远程启动任务"
+                        )
                         "SUCCESS"
                     }
                     Protocol.ACTION_STOP -> {
@@ -987,16 +991,36 @@ class MqttAgentService : Service() {
                     }
                     Protocol.ACTION_PUNCH -> {
                         // 打卡编排已解耦至 RemotePunchRunner：不要求通知监听服务运行，
-                        // 结果确认仍由无障碍文本/截屏兜底链路完成
-                        RemotePunchRunner.run(this@MqttAgentService, scope)
+                        // 结果确认仍由无障碍文本/截屏兜底链路完成；
+                        // fromController=true：打卡结果经 alert 通道回传，供控制端弹窗反馈
+                        RemotePunchRunner.run(this@MqttAgentService, scope, fromController = true)
                         "SUCCESS"
                     }
                     Protocol.ACTION_ATTENDANCE -> {
-                        val nms = NotificationMonitorService.instance
-                        if (nms != null) {
-                            nms.performAttendanceExport()
-                            "SUCCESS"
-                        } else "SERVICE_UNAVAILABLE"
+                        // 考勤记录读的是本地 DB（历史通知落库），不依赖通知监听服务在线；
+                        // 记录经 resp 密封回传给控制端弹窗展示；消息渠道导出在服务在位时顺带执行。
+                        // 注：落库可能重复写入同一条通知（监听竞态），此处按「消息+时间」去重再回传
+                        runCatching {
+                            val notices = com.pengxh.daily.app.sqlite.DatabaseWrapper.loadCurrentDayNotice()
+                            val arr = com.google.gson.JsonArray()
+                            val seen = HashSet<String>()
+                            notices.filter { it.noticeMessage?.contains("打卡") == true }.forEach { n ->
+                                val key = "${n.noticeMessage}|${n.postTime}"
+                                if (seen.add(key)) {
+                                    arr.add(com.google.gson.JsonObject().apply {
+                                        addProperty("msg", n.noticeMessage ?: "")
+                                        addProperty("time", n.postTime ?: "")
+                                    })
+                                }
+                            }
+                            val body = com.google.gson.JsonObject().apply {
+                                addProperty("count", arr.size())
+                                add("records", arr)
+                            }
+                            publishResp(packet.rid, "attendance", body.toString())
+                        }
+                        NotificationMonitorService.instance?.performAttendanceExport()
+                        "SUCCESS"
                     }
                     Protocol.ACTION_SCREENSHOT -> {
                         val nms = NotificationMonitorService.instance

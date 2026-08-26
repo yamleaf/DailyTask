@@ -16,6 +16,9 @@ public interface NotificationBeanDao {
     @Query("SELECT * FROM notice_record_table WHERE postTime >= :from AND postTime < :to")
     List<NotificationBean> loadBetween(String from, String to);
 
+    @Query("SELECT * FROM notice_record_table WHERE postTime = :postTime AND noticeMessage = :noticeMessage LIMIT 1")
+    NotificationBean findDuplicated(String postTime, String noticeMessage);
+
     @Insert
     void insert(NotificationBean bean);
 }
