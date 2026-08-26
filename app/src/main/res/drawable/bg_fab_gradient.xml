@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    添加任务按钮：清透玉珠感
+    - 基底：白 → 浅灰绿-灰青，半透明的润玉质感
+    - 顶部高光层：纯白水滴反光
+    - 底部暗部层：灰青压暗底部，果冻般的半透明体积感
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:angle="270"
+                android:endColor="#C2E5DE"
+                android:startColor="#E3F3EE"
+                android:type="linear" />
+        </shape>
+    </item>
+
+    <!-- 顶部高光：纯白的水滴反光 -->
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:centerX="0.5"
+                android:centerY="0.15"
+                android:endColor="#00FFFFFF"
+                android:gradientRadius="46%p"
+                android:startColor="#FFFFFF"
+                android:type="radial" />
+        </shape>
+    </item>
+
+    <!-- 底部暗部：灰青压底，半透果冻体积感 -->
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:centerX="0.5"
+                android:centerY="1"
+                android:endColor="#00799E95"
+                android:gradientRadius="60%p"
+                android:startColor="#40799E95"
+                android:type="radial" />
+        </shape>
+    </item>
+</layer-list>

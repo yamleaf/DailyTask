@@ -1,6 +1,7 @@
 package com.pengxh.daily.app.ui
 
 import com.pengxh.daily.app.UiInsets
+import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
@@ -28,6 +29,7 @@ import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.ChinaHolidayManager
+import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.CustomWorkdayManager
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.TaskScheduler
@@ -37,6 +39,7 @@ import com.pengxh.kt.lite.divider.RecyclerViewItemBorder
 import com.pengxh.kt.lite.extensions.convertColor
 import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.show
+import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
 import com.pengxh.daily.app.utils.DialogCardBuilder
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
@@ -105,25 +108,13 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         mainHandler.post(timeUpdateRunnable)
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                R.id.menu_add_task -> {
-                    if (TaskScheduler.isRunning()) {
-                        "任务进行中，无法添加".show(ctx)
-                    } else if (taskBeans.isEmpty()) {
-                        // 空列表：弹出「添加任务 / 导入任务」选择
-                        BottomActionSheet.Builder()
-                            .setContext(ctx)
-                            .setActionItemTitle(arrayListOf("添加任务", "导入任务"))
-                            .setItemTextColor(R.color.md_primary.convertColor(ctx))
-                            .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
-                                override fun onActionItemClick(position: Int) {
-                                    if (position == 0) createTask() else importTask()
-                                }
-                            })
-                            .build()
-                            .show()
-                    } else {
-                        createTask()
-                    }
+                R.id.menu_command_history -> {
+                    val intent = Intent(requireActivity(), CommandHistoryActivity::class.java)
+                    startActivity(intent)
+                }
+                R.id.menu_log_viewer -> {
+                    val intent = Intent(requireActivity(), LogViewerActivity::class.java)
+                    startActivity(intent)
                 }
             }
             true
@@ -138,6 +129,15 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         binding.recyclerView.addItemDecoration(
             RecyclerViewItemBorder(marginOffset, marginOffset / 4, marginOffset, marginOffset / 4)
         )
+
+        binding.fabAddTask.setOnClickListener { showAddTaskSheet() }
+
+        binding.punchRecordRow.setOnClickListener {
+            val intent = Intent(requireActivity(), PunchRecordActivity::class.java)
+            startActivity(intent)
+        }
+
+        updateStatusExtraInfo()
 
         // 每日重置后的重复周期提示（repeatTimeView）
         viewLifecycleOwner.lifecycleScope.launch {
@@ -156,11 +156,13 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                     binding.executeTaskButton.setIconResource(R.drawable.ic_start)
                     binding.executeTaskButton.setIconTintResource(R.color.md_success)
                     binding.executeTaskButton.text = "启动"
+                    updateStatusExtraInfo()
                 } else {
                     binding.executeTaskButton.setIconResource(R.drawable.ic_stop)
                     binding.executeTaskButton.setIconTintResource(R.color.md_error)
                     binding.executeTaskButton.text = "停止"
                     refreshActualHintsFromSchedule()
+                    updateStatusExtraInfo()
                 }
             }
         }
@@ -207,6 +209,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                         binding.tipsView.text = "今日任务已全部执行完毕，等待下次任务"
                         binding.execDetailView.visibility = View.GONE
                         dailyTaskAdapter.setActualHintState(true, emptyMap())
+                        updateStatusExtraInfo()
                     }
                 }
             }
@@ -243,6 +246,42 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /** 添加任务：底部时间选择弹层 */
+    private fun updateStatusExtraInfo() {
+        val parts = mutableListOf<String>()
+        val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
+        val skipHoliday = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, false)
+        val customWorkday = SaveKeyValues.loadString(Constant.CUSTOM_WORKDAYS_KEY, "").isNotBlank()
+        if (autoRecycle) parts.add("每日循环") else parts.add("循环关闭")
+        if (skipHoliday) parts.add("跳过节假日")
+        if (customWorkday) parts.add("自定义工作日")
+        if (parts.isEmpty()) {
+            binding.statusExtraView.visibility = View.GONE
+        } else {
+            binding.statusExtraView.text = parts.joinToString(" · ")
+            binding.statusExtraView.visibility = View.VISIBLE
+        }
+    }
+
+    private fun showAddTaskSheet() {
+        if (TaskScheduler.isRunning()) {
+            "任务进行中，无法添加".show(ctx)
+        } else if (taskBeans.isEmpty()) {
+            BottomActionSheet.Builder()
+                .setContext(ctx)
+                .setActionItemTitle(arrayListOf("添加任务", "导入任务"))
+                .setItemTextColor(R.color.md_primary.convertColor(ctx))
+                .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
+                    override fun onActionItemClick(position: Int) {
+                        if (position == 0) createTask() else importTask()
+                    }
+                })
+                .build()
+                .show()
+        } else {
+            createTask()
+        }
+    }
+
     private fun createTask() {
         val view = layoutInflater.inflate(R.layout.bottom_sheet_layout_select_time, null)
         val dialog = BottomSheetDialog(requireContext())

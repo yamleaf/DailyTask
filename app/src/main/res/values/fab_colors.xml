@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 添加任务按钮的染色投影（浅色模式：灰青色 30% 透明度，配清透玉珠感） -->
+    <color name="fab_shadow">#4D799E95</color>
+</resources>

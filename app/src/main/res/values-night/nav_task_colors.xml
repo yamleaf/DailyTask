@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 晨曦微光：凸起任务按钮选中态（深色模式：暖深褐底，蜜桃图标更亮眼） -->
+    <color name="nav_task_selected_bg">#3A352C</color>
+    <color name="nav_task_selected_icon">#FFB86C</color>
+    <color name="nav_task_unselected_icon">#7A8087</color>
+</resources>

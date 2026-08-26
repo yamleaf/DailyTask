@@ -1,85 +1,89 @@
 <?xml version="1.0" encoding="utf-8"?>
-    <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto"
-        android:id="@+id/rootView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@color/md_background"
-        android:orientation="vertical">
-
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:minHeight="?attr/actionBarSize"
-        android:background="@drawable/bg_header_gradient"
-        android:elevation="@dimen/elev_appbar"
-        app:menu="@menu/main_top_bar_menu"
-        app:subtitleTextAppearance="@style/TextAppearance.Material3.TitleSmall"
-        app:subtitleTextColor="@color/on_header"
-        app:titleTextColor="@color/on_header" />
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootView"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/md_background">
 
     <LinearLayout
-        android:id="@+id/contentView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:paddingStart="@dimen/dp_12"
-        android:paddingTop="@dimen/dp_12"
-        android:paddingEnd="@dimen/dp_12">
+        android:orientation="vertical">
 
-        <!-- 运行状态信息卡（紧凑） -->
-        <com.google.android.material.card.MaterialCardView
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            style="@style/Widget.Daily.SectionCard">
+            android:minHeight="?attr/actionBarSize"
+            android:background="@drawable/bg_header_gradient"
+            android:elevation="@dimen/elev_appbar"
+            app:menu="@menu/main_top_bar_menu"
+            app:subtitleTextAppearance="@style/TextAppearance.Material3.TitleSmall"
+            app:subtitleTextColor="@color/on_header"
+            app:titleTextColor="@color/on_header" />
 
-            <LinearLayout
+        <LinearLayout
+            android:id="@+id/contentView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/dp_12"
+            android:paddingTop="@dimen/dp_12"
+            android:paddingEnd="@dimen/dp_12">
+
+            <!-- 运行状态信息卡（紧凑） -->
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/dp_16">
+                style="@style/Widget.Daily.SectionCard">
 
-                <!-- 刷新周期状态行 -->
-                <com.google.android.material.textview.MaterialTextView
-                    android:id="@+id/repeatTimeView"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:drawablePadding="@dimen/dp_6"
-                    android:gravity="center_vertical"
-                    android:singleLine="true"
-                    android:text="--分钟后刷新每日任务"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                    android:textColor="@color/md_primary"
-                    app:drawableStartCompat="@drawable/ic_sand"
-                    app:drawableTint="@color/md_primary" />
-
-                <!-- 状态区：左侧文案两行 + 右侧启动/停止按钮 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/dp_12"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:orientation="vertical"
+                    android:padding="@dimen/dp_16">
 
-                    <LinearLayout
-                        android:layout_width="0dp"
+                    <!-- 刷新周期状态行 -->
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/repeatTimeView"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
+                        android:drawablePadding="@dimen/dp_6"
+                        android:gravity="center_vertical"
+                        android:singleLine="true"
+                        android:text="--分钟后刷新每日任务"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                        android:textColor="@color/md_primary"
+                        app:drawableStartCompat="@drawable/ic_sand"
+                        app:drawableTint="@color/md_primary" />
 
-                        <!-- 第一行：状态主文案 -->
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/tipsView"
-                            android:layout_width="match_parent"
+                    <!-- 状态区：左侧文案两行 + 右侧启动/停止按钮 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dp_12"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:hint="点击按钮后开始执行任务"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onSurface"
-                            android:textColorHint="@color/md_onSurfaceVariant" />
+                            android:layout_weight="1"
+                            android:orientation="vertical">
 
-                        <!-- 第二行：执行时间 + 备注（仅调度中展示） -->
+                            <!-- 第一行：状态主文案 -->
+                            <com.google.android.material.textview.MaterialTextView
+                                android:id="@+id/tipsView"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:hint="点击按钮后开始执行任务"
+                                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                                android:textColor="@color/md_onSurface"
+                                android:textColorHint="@color/md_onSurfaceVariant" />
+
+<!-- 第二行：执行时间 + 备注（仅调度中展示） -->
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/execDetailView"
                             android:layout_width="match_parent"
@@ -89,75 +93,142 @@
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="@color/md_onSurfaceVariant"
                             android:visibility="gone" />
+
+                        <!-- 第三行：调度额外信息（循环/节假日/下次打卡） -->
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/statusExtraView"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/dp_4"
+                            android:gravity="center_vertical"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:visibility="gone" />
+                        </LinearLayout>
+
+                        <!-- 启动 / 停止按钮（图标与文字由 Fragment 动态切换） -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/executeTaskButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/dp_44"
+                            android:layout_marginStart="@dimen/dp_12"
+                            android:contentDescription="启动执行任务"
+                            android:text="启动"
+                            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                            app:cornerRadius="@dimen/radius_button"
+                            app:icon="@drawable/ic_start"
+                            app:iconGravity="textStart"
+                            app:iconTint="@color/md_success"
+                            app:iconPadding="@dimen/dp_8" />
                     </LinearLayout>
 
-                    <!-- 启动 / 停止按钮（图标与文字由 Fragment 动态切换） -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/executeTaskButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="@dimen/dp_44"
-                        android:layout_marginStart="@dimen/dp_12"
-                        android:contentDescription="启动执行任务"
-                        android:text="启动"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        app:cornerRadius="@dimen/radius_button"
-                        app:icon="@drawable/ic_start"
-                        app:iconGravity="textStart"
-                        app:iconTint="@color/md_success"
-                        app:iconPadding="@dimen/dp_8" />
+                    <!-- 打卡记录入口 -->
+                    <LinearLayout
+                        android:id="@+id/punchRecordRow"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dp_12"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingTop="@dimen/dp_8"
+                        android:background="?attr/selectableItemBackground">
+
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="查看打卡记录"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                            android:textColor="@color/md_primary" />
+
+                        <ImageView
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:src="@drawable/ic_chevron_right"
+                            android:contentDescription="@null"
+                            app:tint="@color/md_onSurfaceVariant" />
+                    </LinearLayout>
                 </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+            </com.google.android.material.card.MaterialCardView>
 
-        <!-- 任务列表卡 -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_marginTop="@dimen/dp_12"
-            android:layout_weight="1"
-            style="@style/Widget.Daily.SectionCard">
-
-            <LinearLayout
+            <!-- 任务列表卡 -->
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
+                android:layout_height="0dp"
+                android:layout_marginTop="@dimen/dp_12"
+                android:layout_weight="1"
+                style="@style/Widget.Daily.SectionCard">
 
-                <com.google.android.material.textview.MaterialTextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="@dimen/dp_16"
-                    android:paddingTop="@dimen/dp_12"
-                    android:paddingEnd="@dimen/dp_16"
-                    android:paddingBottom="@dimen/dp_4"
-                    android:text="任务列表"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                    android:textColor="@color/md_onSurface" />
-
-                <!-- 列表底部留白让最后一项可滚出悬浮导航之上；滚动时内容从磨砂导航下掠过 -->
-                <FrameLayout
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:layout_marginTop="@dimen/dp_4"
-                    android:layout_marginBottom="@dimen/dp_8"
-                    android:layout_marginStart="@dimen/dp_8"
-                    android:layout_marginEnd="@dimen/dp_8">
+                    android:orientation="vertical">
 
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/recyclerView"
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="@dimen/dp_16"
+                        android:paddingTop="@dimen/dp_12"
+                        android:paddingEnd="@dimen/dp_16"
+                        android:paddingBottom="@dimen/dp_4"
+                        android:text="任务列表"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="@color/md_onSurface" />
+
+                    <!-- 列表底部留白让最后一项可滚出悬浮导航之上；滚动时内容从磨砂导航下掠过 -->
+                    <FrameLayout
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        android:paddingBottom="@dimen/nav_content_inset"
-                        android:clipToPadding="false"
-                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+                        android:layout_marginTop="@dimen/dp_4"
+                        android:layout_marginBottom="@dimen/dp_8"
+                        android:layout_marginStart="@dimen/dp_8"
+                        android:layout_marginEnd="@dimen/dp_8">
 
-                    <com.pengxh.kt.lite.widget.EmptyView
-                        android:id="@+id/emptyView"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:visibility="gone"
-                        app:show_reload_button="false" />
-                </FrameLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/recyclerView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:paddingBottom="@dimen/nav_content_inset"
+                            android:clipToPadding="false"
+                            app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+                        <com.pengxh.kt.lite.widget.EmptyView
+                            android:id="@+id/emptyView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:visibility="gone"
+                            app:show_reload_button="false" />
+                    </FrameLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
     </LinearLayout>
-</LinearLayout>
+
+    <!-- 添加任务按钮：紫罗兰渐变圆底 + 品牌染色立体投影（elevation 16dp 拉开层次） -->
+    <FrameLayout
+        android:id="@+id/fabAddTask"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="20dp"
+        android:layout_marginBottom="88dp"
+        android:background="@drawable/bg_fab_gradient"
+        android:contentDescription="添加任务"
+        android:elevation="16dp"
+        android:outlineAmbientShadowColor="@color/fab_shadow"
+        android:outlineSpotShadowColor="@color/fab_shadow"
+        android:foreground="?attr/selectableItemBackgroundBorderless"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_menu_add"
+            app:tint="#333333"
+            android:contentDescription="@null" />
+    </FrameLayout>
+</FrameLayout>

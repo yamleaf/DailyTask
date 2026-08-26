@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-
     <item
-        android:id="@+id/menu_add_task"
-        android:icon="@drawable/ic_menu_add"
-        android:title="添加"
-        app:showAsAction="always" />
+        android:id="@+id/menu_command_history"
+        android:title="指令历史"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_log_viewer"
+        android:title="运行日志"
+        app:showAsAction="never" />
 </menu>
