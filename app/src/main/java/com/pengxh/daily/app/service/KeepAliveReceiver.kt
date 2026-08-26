@@ -223,6 +223,12 @@ class KeepAliveReceiver : BroadcastReceiver() {
         fun pauseAllServices(context: Context) {
             val appCtx = context.applicationContext
             LogFileManager.action("暂停使用已开启：停止所有服务与闹钟")
+            // 危险操作留痕：暂停使用（MQTT 即将停止，先入缓冲供恢复后 AQ 回放）
+            runCatching {
+                MqttAgentService.publishDangerAlert(
+                    com.yample.mqttprotocol.Protocol.ALERT_TYPE_PAUSED, "进入暂停使用状态"
+                )
+            }
             // 先停任务，避免前台服务销毁时打卡协程半截残留
             runCatching { TaskScheduler.stopTask() }
             runCatching { FloatingWindowController.stopFloatSession() }

@@ -155,11 +155,10 @@ class ForegroundRunningService : Service() {
         // "Unable to create service" 崩溃整个进程，连带同进程的通知监听（远程指令）一起死掉。
         // 失败时优雅 stopSelf，由 KeepAliveReceiver 心跳/前台打开 App 在配额恢复后重新拉起。
         val foregroundOk = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // 三参 startForeground 自 API 29、SPECIAL_USE 类型自 API 34 才存在，低版本直调会崩
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(
                     Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification,
-                    // Android 15+ 对 dataSync 类型 FGS 有 6h/24h 时间配额，常驻任务调度服务跑满即被系统
-                    // 停止且重启全部被拒（08-18 K20 Pro 夜间离线根因）。改 specialUse 不受时限，可无限常驻。
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 )
             } else {
@@ -238,6 +237,14 @@ class ForegroundRunningService : Service() {
         KeepAliveReceiver.scheduleBatteryAlert(this)
         KeepAliveReceiver.startMqttAgentIfEnabled(this)
         if (intent?.action == KeepAliveReceiver.ACTION_RESET_TASK) {
+            // 危险操作留痕：每日任务重置推进
+            if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
+                runCatching {
+                    MqttAgentService.publishDangerAlert(
+                        com.yample.mqttprotocol.Protocol.ALERT_TYPE_TASK_RESET, "每日任务重置"
+                    )
+                }
+            }
             if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
                 if (TaskScheduler.isRunning()) {
                     // 调度在跑（可能处于「等待重置期」被冻结，isRunning()=true 但实际空转）→

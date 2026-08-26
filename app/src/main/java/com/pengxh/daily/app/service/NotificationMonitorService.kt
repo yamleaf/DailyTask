@@ -19,6 +19,7 @@ import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
+import com.pengxh.daily.app.utils.CommandHistoryRecorder
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
 import com.pengxh.daily.app.utils.FloatingWindowController
@@ -36,6 +37,7 @@ import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.extensions.timestampToCompleteDate
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import com.yample.mqttprotocol.Protocol
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -332,6 +334,28 @@ class NotificationMonitorService : NotificationListenerService() {
 
         Log.d(kTag, "收到远程指令: pkg=$pkg, cmd=$command, scopeActive=${serviceScope.isActive}")
 
+        // 指令识别：与下方执行链同序匹配，取首个命中名记入历史；打卡关键词两处共用同一次加载
+        val punchKey = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
+        val identified: String? = when {
+            command.contains("执行任务") -> "执行任务"
+            command.contains("终止任务") -> "终止任务"
+            command.contains("开启循环") -> "开启循环"
+            command.contains("关闭循环") -> "关闭循环"
+            command.contains("息屏") -> "息屏"
+            command.contains("亮屏") -> "亮屏"
+            command.contains("考勤记录") -> "考勤记录"
+            command.contains("状态查询") -> "状态查询"
+            command.contains("截屏") -> "截屏"
+            command.contains("开启转移") -> "开启转移"
+            command.contains("关闭转移") -> "关闭转移"
+            command.contains("开启远程") -> "开启远程"
+            command.contains("关闭远程") -> "关闭远程"
+            command.contains(punchKey) -> punchKey
+            else -> null
+        }
+        // 未识别的 DT# 文本也记录（截断防长消息撑爆条目），便于排查误触发
+        CommandHistoryRecorder.record("DT#指令", identified ?: command.trim().take(24))
+
         when {
             command.contains("执行任务") -> {
                 LogFileManager.action("收到执行任务指令")
@@ -340,6 +364,8 @@ class NotificationMonitorService : NotificationListenerService() {
 
             command.contains("终止任务") -> {
                 LogFileManager.writeLog("收到终止任务指令")
+                // 危险操作留痕
+                MqttAgentService.publishDangerAlert(Protocol.ALERT_TYPE_REMOTE_STOP, "DT#指令 远程终止任务")
                 emitMonitorEvent(MonitorEvent.StopTaskCommand)
             }
 
@@ -357,6 +383,10 @@ class NotificationMonitorService : NotificationListenerService() {
                 LogFileManager.writeLog("收到关闭循环指令")
                 SaveKeyValues.saveBoolean(Constant.TASK_AUTO_RECYCLE_KEY, false)
                 KeepAliveReceiver.cancelResetAlarm(this)
+                // 危险操作留痕：关闭每日循环
+                MqttAgentService.publishDangerAlert(
+                    Protocol.ALERT_TYPE_LOOP_OFF, "DT#指令 关闭每日循环"
+                )
                 MessageDispatcher.sendMessage(
                     "循环任务状态通知", StatusReporter.buildCycleStatusHtml(false),
                     force = true, appendMeta = false
@@ -483,10 +513,10 @@ class NotificationMonitorService : NotificationListenerService() {
             }
 
             else -> {
-                // 自定义打卡指令，用户可配置关键词（如 "打卡"），同样需要 DT# 前缀
-                val key = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
-                if (command.contains(key)) {
-                    performRemotePunch(key)
+                // 自定义打卡指令，用户可配置关键词（如 "打卡"），同样需要 DT# 前缀；
+                // punchKey 已在上方识别段加载
+                if (command.contains(punchKey)) {
+                    performRemotePunch(punchKey)
                 }
             }
         }

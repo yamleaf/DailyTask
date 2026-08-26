@@ -30,6 +30,7 @@ import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.MqttSecureConfig
+import com.pengxh.daily.app.utils.CommandHistoryRecorder
 import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.LogFileManager
 import com.yample.mqttprotocol.MqttQuota
@@ -222,6 +223,19 @@ class MqttAgentService : Service() {
             instance?.publishAlertInternal(json, ridOverride = aid)
         }
 
+        /**
+         * 危险操作告警：终止任务/关闭循环/暂停使用/任务重置/解绑 等操作留痕。
+         * 复用 alert 通道（进缓冲 + 实时推送，控制端可 AQ 回放）。类型见 Protocol.ALERT_TYPE_*。
+         */
+        fun publishDangerAlert(type: String, message: String) {
+            val json = org.json.JSONObject().apply {
+                put("type", type)
+                put("msg", message)
+                put("ts", System.currentTimeMillis())
+            }.toString()
+            publishAlert(json)
+        }
+
         /** 被控端主动强制解绑：仅清绑定态，保留 MQTT 配置 */
         fun unbind() {
             instance?.doUnbind(notifyController = true)
@@ -363,7 +377,8 @@ class MqttAgentService : Service() {
             val cutoff = System.currentTimeMillis() - ALERT_REPLAY_MAX_AGE_MS
             val out = com.google.gson.JsonArray()
             for (e in loadAlertBuffer()) {
-                val obj = e.asJsonObject ?: continue
+                // 缓冲损坏时可能出现非对象元素，asJsonObject 会抛异常而非返回 null，需 runCatching 兜住
+                val obj = runCatching { e.asJsonObject }.getOrNull() ?: continue
                 val ts = obj.get("ts")?.asLong ?: 0L
                 if (ts in 1..cutoff) continue
                 val item = JsonObject()
@@ -497,15 +512,11 @@ class MqttAgentService : Service() {
         }
         // 注册本地数据变更广播：设置/任务经 RuntimeStateApplier / applyTaskChange 改动后会发此广播，
         // 由此统一触发增量推送，避免控制端轮询全量快照。
-        try {
-            ContextCompat.registerReceiver(
-                this, remoteChangedReceiver,
-                IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-        } catch (_: Exception) {
-            registerReceiver(remoteChangedReceiver, IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED))
-        }
+        ContextCompat.registerReceiver(
+            this, remoteChangedReceiver,
+            IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         // C1：前台服务启动防护。Android 15+ 对后台启动前台服务有严格配额（"Time limit already exhausted"），
         // startForeground 可能抛 ForegroundServiceStartNotAllowedException；若任其扩散会以
         // "Unable to create service" 崩溃整个进程，连带同进程的 NotificationMonitorService（远程指令链路）
@@ -556,7 +567,13 @@ class MqttAgentService : Service() {
             // Android 15+ 对 dataSync/unknown 类 FGS 有 6h/24h 时间配额：常驻服务跑满即被系统停止，
             // 且重启 startForeground 全部被拒（08-18 K20 Pro 夜间离线根因：type unknown/dataSync 配额耗尽）。
             // 显式传 specialUse（manifest 已声明 + FOREGROUND_SERVICE_SPECIAL_USE 权限 + property）不受时限。
-            startForeground(1001, notificationBuilder!!.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            // 三参 startForeground 自 API 29、SPECIAL_USE 类型自 API 34 才存在；
+            // 低版本直调会 NoSuchMethodError（Error 不走 catch），故仅 API 34+ 用三参 specialUse
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1001, notificationBuilder!!.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(1001, notificationBuilder!!.build())
+            }
             updateNotification()
             true
         } catch (e: Exception) {
@@ -718,6 +735,8 @@ class MqttAgentService : Service() {
     private fun handleIncoming(json: String) {
         try {
             val packet = gson.fromJson(json, MqttPacket::class.java) ?: return
+            // 指令历史只记录「验签 + 防重放通过」的用户意图指令（U/T/X），
+            // 在各 handleXxx 内记录——此处预记录会让伪造包/探活噪音污染历史
             when (packet.c) {
                 Protocol.CMD_UPDATE -> handleUpdate(packet)
                 Protocol.CMD_QUERY -> handleQuery(packet)
@@ -734,6 +753,50 @@ class MqttAgentService : Service() {
         }
     }
 
+    /** 设置字段码 → 中文名（指令历史可读性） */
+    private val FIELD_NAMES = mapOf(
+        Protocol.FIELD_POWER_SAVE to "省电模式",
+        Protocol.FIELD_FORCE_PSEUDO_MASK to "强制伪息屏",
+        Protocol.FIELD_SCREEN_MODE to "屏幕模式",
+        Protocol.FIELD_PSEUDO_MASK_TIMEOUT to "伪息屏延时",
+        Protocol.FIELD_PSEUDO_MASK_NO_CLOCK to "伪息屏隐藏时钟",
+        Protocol.FIELD_NOTIFICATION_TRANSFER to "通知转移",
+        Protocol.FIELD_FEEDBACK_DISABLED to "结果反馈",
+        Protocol.FIELD_SKIP_HOLIDAY to "跳过节假日",
+        Protocol.FIELD_UPDATE_HOLIDAY to "更新节假日数据",
+        Protocol.FIELD_CUSTOM_WORKDAYS to "自定义工作日",
+        Protocol.FIELD_TASK_AUTO_RECYCLE to "每日循环",
+        Protocol.FIELD_RANDOM_TIME to "随机时间",
+        Protocol.FIELD_GESTURE_DETECT to "手势识别",
+        Protocol.FIELD_BACK_TO_HOME to "打卡后回桌面",
+        Protocol.FIELD_RESET_HOUR to "每日重置点",
+        Protocol.FIELD_TIME_RANGE to "打卡时间范围",
+        Protocol.FIELD_STAY_OVERTIME to "驻留超时",
+        Protocol.FIELD_MSG_CHANNEL to "消息渠道",
+        Protocol.FIELD_MESSAGE_TITLE to "消息标题",
+        Protocol.FIELD_REMOTE_ENABLED to "远程开关",
+        Protocol.FIELD_MSG_CONFIG to "渠道配置",
+        Protocol.FIELD_LOW_BATTERY_THRESHOLD to "低电量阈值",
+        Protocol.FIELD_BATTERY_SMART_ALERT to "智能预警",
+        Protocol.FIELD_BATTERY_WARNING_HOUR to "预警上报时间",
+        Protocol.FIELD_BATTERY_ALERT_STAGES to "告警分段",
+        Protocol.FIELD_BATTERY_ALERT_RANGE_START to "预警区间起始",
+        Protocol.FIELD_BATTERY_ALERT_RANGE_DURATION to "预警区间时长",
+        Protocol.FIELD_BOOT_AUTO_SCHEDULE to "开机自动调度",
+        Protocol.FIELD_DESKTOP_PET to "桌面宠物",
+        Protocol.FIELD_LOG_ENABLED to "运行日志"
+    )
+
+    private fun fieldName(code: String): String = FIELD_NAMES[code] ?: code
+
+    /** 负载值预览：布尔转开/关，字符串截断，供指令历史展示 */
+    private fun valuePreview(packet: MqttPacket): String = when (val v = packet.v) {
+        is PacketValue.BooleanValue -> if (v.b) "开" else "关"
+        is PacketValue.IntValue -> v.i.toString()
+        is PacketValue.StringValue -> v.s.take(24)
+        null -> ""
+    }
+
     private fun handleUpdate(packet: MqttPacket) {
         val session = MqttSecureConfig.loadSession()
         if (session.isBlank()) {
@@ -748,6 +811,7 @@ class MqttAgentService : Service() {
             doPublishAck(packet.rid, "DUP_OR_STALE")
             return
         }
+        CommandHistoryRecorder.record("控制端", "设置:${fieldName(packet.f)}=${valuePreview(packet)}")
         RuntimeStateApplier.apply(packet)
     }
 
@@ -845,6 +909,11 @@ class MqttAgentService : Service() {
                 val time = json.get("time")?.asString ?: ""
                 val oldTime = json.get("oldTime")?.asString
                 val name = json.get("name")?.asString
+                // 记录任务变更详情（哪个任务、什么动作、改成几点）
+                CommandHistoryRecorder.record(
+                    "控制端",
+                    "任务:${action}${if (name.isNullOrBlank()) "" else " $name"}${if (time.isBlank()) "" else " → $time"}"
+                )
                 applyTaskChange(action, time, oldTime, name)
             }.fold(
                 onSuccess = { it },
@@ -874,6 +943,16 @@ class MqttAgentService : Service() {
             return
         }
         val action = packet.f
+        // 快捷操作中文名，与控制端总览页 2×3 快捷网格对应
+        val actionName = when (action) {
+            Protocol.ACTION_PUNCH -> "手动打卡"
+            Protocol.ACTION_START -> "执行任务"
+            Protocol.ACTION_STOP -> "终止任务"
+            Protocol.ACTION_ATTENDANCE -> "考勤记录"
+            Protocol.ACTION_SCREENSHOT -> "远程截屏"
+            else -> action
+        }
+        CommandHistoryRecorder.record("控制端", actionName)
         scope.launch {
             // 动作分支（如 TaskScheduler.stopTask 在无可停任务时）可能抛异常；必须用 runCatching 包裹，
             // 否则协程崩溃会跳过 doPublishAck，导致控制端收不到回执、长期超时。任何异常都回 ACK_ACTION_FAIL。
@@ -900,6 +979,10 @@ class MqttAgentService : Service() {
                     }
                     Protocol.ACTION_STOP -> {
                         TaskScheduler.stopTask()
+                        // 危险操作留痕：远程终止任务 → 告警列表
+                        MqttAgentService.publishDangerAlert(
+                            Protocol.ALERT_TYPE_REMOTE_STOP, "控制端远程终止任务"
+                        )
                         "SUCCESS"
                     }
                     Protocol.ACTION_PUNCH -> {
@@ -1058,6 +1141,7 @@ class MqttAgentService : Service() {
         }
         // 令牌在 PAIRING_TTL_MS 内可重复用于重试（防 PA 丢包）；PA 本身用令牌签名，防伪造 accept。
         Log.d(TAG, "配对令牌匹配 rid=${packet.rid}，开始派生会话密钥")
+        CommandHistoryRecorder.record("控制端", "配对请求")
         val pairingToken = active.first
         val session = Hkdf.deriveHex(pairingToken, deviceId, Protocol.PAIRING_INFO, Protocol.SESSION_KEY_LEN)
         MqttSecureConfig.saveSession(session)
@@ -1088,6 +1172,7 @@ class MqttAgentService : Service() {
                 return
             }
         }
+        CommandHistoryRecorder.record("控制端", "解绑")
         doUnbind(notifyController = false)
     }
 
@@ -1107,6 +1192,13 @@ class MqttAgentService : Service() {
     /** 控制端主动解绑 / 被控端强制解绑：仅清绑定态，保留 MQTT 配置 */
     private fun doUnbind(notifyController: Boolean) {
         val wasBound = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
+        // 危险操作留痕：解绑（须在清空会话前发布会话签名密封的告警，否则 session 为空无法加密投递）
+        if (wasBound || notifyController) {
+            MqttAgentService.publishDangerAlert(
+                Protocol.ALERT_TYPE_UNBOUND,
+                if (notifyController) "本机强制解绑" else "控制端发起解绑"
+            )
+        }
         // 先用会话签了解绑状态信封，再清密钥（否则公共 Broker 上 plain unbound 可被伪造）
         val sessionForSign = MqttSecureConfig.loadSession()
         val statusText = if (notifyController) "force_unbound" else "unbound"
@@ -1963,15 +2055,8 @@ class MqttAgentService : Service() {
             )
             screenReceiverRegistered = true
         } catch (_: Exception) {
-            try {
-                registerReceiver(screenStateReceiver, IntentFilter().apply {
-                    addAction(Intent.ACTION_SCREEN_OFF)
-                    addAction(Intent.ACTION_SCREEN_ON)
-                })
-                screenReceiverRegistered = true
-            } catch (_: Exception) {
-                Log.w(TAG, "注册屏幕广播失败（CPU 保活降级：无法按屏幕状态持锁）")
-            }
+            // 注册失败仅降级：息屏时无法按屏幕状态持锁（CPU 保活兜底失效，不崩进程）
+            Log.w(TAG, "注册屏幕广播失败（CPU 保活降级：无法按屏幕状态持锁）")
         }
         // 初始对齐：服务启动时若已处于息屏（如保活闹钟在后台拉起），立即持有，避免空窗掉线
         val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
