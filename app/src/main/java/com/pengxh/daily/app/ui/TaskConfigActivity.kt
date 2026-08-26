@@ -2,8 +2,11 @@ package com.pengxh.daily.app.ui
 
 import com.pengxh.daily.app.UiInsets
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
 import com.pengxh.daily.app.utils.ChinaHolidayManager
@@ -29,7 +32,6 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
     private val kTag = "TaskConfigActivity"
     private val context = this
-    private val hourArray = arrayListOf("0", "1", "2", "3", "4", "5", "6", "自定义（单位：时）")
     private val timeArray = arrayListOf("15", "30", "45", "自定义（单位：秒）")
     override fun initViewBinding(): ActivityTaskConfigBinding {
         return ActivityTaskConfigBinding.inflate(layoutInflater)
@@ -86,17 +88,7 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
     }
 
     override fun initEvent() {
-        binding.resetTimeLayout.setOnClickListener {
-            BottomActionSheet.Builder()
-                .setContext(this)
-                .setActionItemTitle(hourArray)
-                .setItemTextColor(R.color.md_primary.convertColor(this))
-                .setOnActionSheetListener(object : BottomActionSheet.OnActionSheetListener {
-                    override fun onActionItemClick(position: Int) {
-                        setHourByPosition(position)
-                    }
-                }).build().show()
-        }
+        binding.resetTimeLayout.setOnClickListener { showResetHourSlider() }
 
         binding.timeoutLayout.setOnClickListener {
             BottomActionSheet.Builder()
@@ -333,31 +325,44 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         binding.workdayValueView.text = CustomWorkdayManager.formatWorkdays(workdays)
     }
 
-    private fun setHourByPosition(position: Int) {
-        if (position == hourArray.size - 1) {
-            val editText = EditText(this).apply { hint = "直接输入整数时间即可，如：6" }
-            UnifiedDialogKit.showForm(
-                this, editText,
-                title = "设置重置时间",
-                positiveText = "确定",
-                negativeText = "取消",
-                onConfirm = {
-                    val value = editText.text.toString().trim()
-                    if (value.isEmpty()) {
-                        "输入错误，请检查！".show(this)
-                        false
-                    } else if (value.isNumber()) {
-                        updateResetHour(value.toInt())
-                        true
-                    } else {
-                        "直接输入整数时间即可".show(this)
-                        false
-                    }
-                }
-            )
-        } else {
-            updateResetHour(hourArray[position].toInt())
+    /** 重置点设置：滑块样式（对齐控制端）——大号当前值 + 0~23 小时滑块 */
+    private fun showResetHourSlider() {
+        val dp = { v: Float -> (v * resources.displayMetrics.density + 0.5f).toInt() }
+        val current = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
+        val valueView = TextView(this).apply {
+            text = "每天 ${current} 点"
+            gravity = Gravity.CENTER
+            setTextColor(R.color.md_primary.convertColor(this@TaskConfigActivity))
+            textSize = 36f
+            isAllCaps = false
+            setPadding(0, dp(16f), 0, dp(8f))
         }
+        val slider = com.google.android.material.slider.Slider(this).apply {
+            valueFrom = 0f
+            valueTo = 23f
+            stepSize = 1f
+            value = current.toFloat().coerceIn(0f, 23f)
+            addOnChangeListener { _, value, _ ->
+                valueView.text = "每天 ${value.toInt()} 点"
+            }
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24f), dp(8f), dp(24f), dp(8f))
+            addView(valueView)
+            addView(slider)
+        }
+        UnifiedDialogKit.showForm(
+            ctx = this,
+            contentView = content,
+            title = "设置重置时间",
+            positiveText = "保存",
+            negativeText = "取消",
+            onConfirm = {
+                updateResetHour(slider.value.toInt())
+                true
+            }
+        )
     }
 
     private fun updateResetHour(hour: Int) {

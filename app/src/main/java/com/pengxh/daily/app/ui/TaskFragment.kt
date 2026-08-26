@@ -246,12 +246,13 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /** 添加任务：底部时间选择弹层 */
+    /** 状态卡附加信息：只展示偏离默认的异常态（循环关闭/跳过节假日/自定义工作日），默认配置不噪音展示 */
     private fun updateStatusExtraInfo() {
         val parts = mutableListOf<String>()
         val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
         val skipHoliday = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, false)
         val customWorkday = SaveKeyValues.loadString(Constant.CUSTOM_WORKDAYS_KEY, "").isNotBlank()
-        if (autoRecycle) parts.add("每日循环") else parts.add("循环关闭")
+        if (!autoRecycle) parts.add("循环关闭")
         if (skipHoliday) parts.add("跳过节假日")
         if (customWorkday) parts.add("自定义工作日")
         if (parts.isEmpty()) {
