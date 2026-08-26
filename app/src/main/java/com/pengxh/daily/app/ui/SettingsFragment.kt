@@ -21,6 +21,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
+import android.Manifest
 import android.provider.Settings
 import android.util.Log
 import android.util.TypedValue
@@ -40,6 +41,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.view.ContextThemeWrapper
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -1038,12 +1040,28 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
     }
 
+    /** 通知权限（POST_NOTIFICATIONS）运行时请求：结果由 onResume 重建自检弹窗时反映 */
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            LogFileManager.writeLog("通知权限授权结果: $granted")
+        }
+
+    /** 权限自检弹窗引用：跳系统设置授权返回后，在 onResume 重建弹窗刷新各行状态 */
+    private var selfCheckDialog: AlertDialog? = null
+
     override fun onResume() {
         super.onResume()
         if (!isHidden) refreshUi()
         // 兜底复位：无论 refreshUi 是否完整执行 syncSettingsUiFromStore，离开重建窗口后都解除同步锁，
         // 避免用户后续手动切换开关被误吞
         syncingSwitchState = false
+        // 从系统授权页返回：自检弹窗若在展示中则重建，刷新各行授权状态
+        selfCheckDialog?.let { dlg ->
+            if (dlg.isShowing) {
+                dlg.dismiss()
+                showSetupSelfCheck()
+            }
+        }
     }
 
     override fun onPause() {
@@ -1388,46 +1406,167 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             val pm = ctx.getSystemService(PowerManager::class.java)
             pm.isIgnoringBatteryOptimizations(ctx.packageName)
         } else true
+        val dp = { value: Float -> (value * ctx.resources.displayMetrics.density + 0.5f).toInt() }
 
-        val sb = StringBuilder()
-        sb.append("① 通知监听（远程指令接收）\n")
-        when {
-            !noticeAuthorized -> sb.append("    ✗ 未授权，无法接收远程指令\n")
-            !noticeConnected -> sb.append("    ⚠ 已授权但服务未连接（国产 ROM 可能需要开启自启动权限）\n")
-            else -> sb.append("    ✓ 已连接，可接收远程指令\n")
-        }
-        sb.append("\n② 后台弹出界面（后台拉起打卡 App）\n")
-        sb.append("    [${RomDetector.displayName()}]\n")
-        when (queryBackgroundStartOp()) {
-            BackgroundStartState.ALLOWED -> sb.append("    ✓ 已授予，后台可拉起目标 App\n")
-            BackgroundStartState.DENIED -> sb.append(
-                "    ✗ 未授予，后台拉起目标 App / 伪息屏蒙层会被系统拦截\n"
-            )
-            BackgroundStartState.UNKNOWN -> sb.append(
-                "    ⓘ 系统未暴露该权限状态，请用下方「后台验证」实测确认\n"
-            )
-        }
-        sb.append("\n③ 悬浮窗权限（结果提示/蒙层）\n")
-        sb.append(if (overlayGranted) "    ✓ 已获取\n" else "    ✗ 未获取\n")
-        sb.append("\n④ 电池白名单（电池优化豁免，后台保活）\n")
-        sb.append(if (batteryExempt) "    ✓ 已加入白名单\n" else "    ✗ 未豁免，锁屏后可能被杀\n")
-        sb.append("\n⑤ 自启动权限（开机自启/后台常驻）\n")
-        when (val auto = queryAutostartState()) {
-            true -> sb.append("    ✓ 已允许自启动（MIUI/HyperOS）\n")
-            false -> sb.append("    ✗ 已禁用自启动，重启后 App 不会自动拉起\n")
-            null -> sb.append(
-                "    ${if (RomDetector.isMiui()) "ⓘ 无法读取，请到系统设置确认" else "✓ 系统默认允许（原生 Android 无独立自启开关）"}\n"
-            )
-        }
+        // 状态三色：正常=品牌绿，警告=琥珀，异常=错误红
+        data class CheckRow(
+            val title: String,
+            val desc: String,
+            val status: String,
+            val level: Int, // 0=ok 1=warn 2=error
+            val action: (() -> Unit)? = null // 点击该行触发的授权动作，null 表示不可点击
+        )
+
+        val noticeGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } else true
+
+        val rows = mutableListOf<CheckRow>()
+        rows.add(
+            when (val auto = queryAutostartState()) {
+                true -> CheckRow("自启动权限", "开机自启 / 后台常驻可用", "已允许", 0)
+                false -> CheckRow("自启动权限", "重启后 App 不会自动拉起，点击前往设置", "已禁用", 2,
+                    action = { openAppDetailSettings(ctx.packageName) })
+                null ->
+                    if (RomDetector.isMiui()) CheckRow("自启动权限", "无法读取，点击前往设置确认", "未知", 1,
+                        action = { openAppDetailSettings(ctx.packageName) })
+                    else CheckRow("自启动权限", "原生 Android 默认允许，无独立开关", "默认允许", 0)
+            }
+        )
+        rows.add(
+            when (queryBackgroundStartOp()) {
+                BackgroundStartState.ALLOWED -> CheckRow(
+                    "后台弹出界面", "${RomDetector.displayName()} · 后台可拉起目标 App", "已授予", 0
+                )
+                BackgroundStartState.DENIED -> CheckRow(
+                    "后台弹出界面", "后台拉起会被系统拦截，点击前往应用设置", "未授予", 2,
+                    action = { openAppDetailSettings(ctx.packageName) }
+                )
+                BackgroundStartState.UNKNOWN -> CheckRow(
+                    "后台弹出界面", "系统未暴露状态，请用「后台验证」实测", "未知", 1
+                )
+            }
+        )
+        rows.add(
+            if (overlayGranted) CheckRow("悬浮窗权限", "打卡结果提示 / 伪息屏蒙层", "已获取", 0)
+            else CheckRow("悬浮窗权限", "结果提示与蒙层不可用，点击授权", "未获取", 2,
+                action = {
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+                    )
+                })
+        )
+        rows.add(
+            if (batteryExempt) CheckRow("电池白名单", "锁屏保活不受系统限制", "已豁免", 0)
+            else CheckRow("电池白名单", "未豁免，锁屏后进程可能被杀，点击设置", "未豁免", 2,
+                action = {
+                    try {
+                        startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .apply { data = Uri.parse("package:${ctx.packageName}") }
+                        )
+                    } catch (_: Exception) {
+                        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }
+                })
+        )
+        rows.add(
+            when {
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ->
+                    CheckRow("通知权限", "Android 13 以下系统默认允许", "默认允许", 0)
+                noticeGranted -> CheckRow("通知权限", "任务执行结果通知可正常弹出", "已授权", 0)
+                else -> CheckRow("通知权限", "结果通知无法弹出，点击申请授权", "未授权", 2,
+                    action = {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    })
+            }
+        )
+        rows.add(
+            when {
+                !noticeAuthorized -> CheckRow(
+                    "通知监听", "无法接收远程指令，点击前往授权", "未授权", 2,
+                    action = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                )
+                !noticeConnected -> CheckRow(
+                    "通知监听", "已授权但服务未连接，点击前往修复", "未连接", 1,
+                    action = { showNotificationListenerFixGuide() }
+                )
+                else -> CheckRow("通知监听", "远程指令接收通道就绪", "已连接", 0)
+            }
+        )
 
         val contentView = ScrollView(ctx).apply {
-            addView(TextView(ctx).apply {
-                text = sb.toString()
-                setPadding(24, 16, 24, 16)
-                textSize = 14f
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
+                rows.forEachIndexed { index, row ->
+                    addView(LinearLayout(ctx).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        minimumHeight = dp(52f)
+                        setPadding(dp(12f), dp(6f), dp(12f), dp(6f))
+
+                        // 有授权动作的行可点击（波纹反馈），与权限列表弹窗交互一致
+                        if (row.action != null) {
+                            isClickable = true
+                            isFocusable = true
+                            val outValue = android.util.TypedValue()
+                            ctx.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+                            if (outValue.resourceId != 0) {
+                                background = ContextCompat.getDrawable(ctx, outValue.resourceId)
+                            }
+                            setOnClickListener { row.action.invoke() }
+                        }
+
+                        addView(ImageView(ctx).apply {
+                            layoutParams = LinearLayout.LayoutParams(dp(28f), dp(28f)).apply {
+                                marginEnd = dp(12f)
+                                gravity = Gravity.CENTER_VERTICAL
+                            }
+                            setImageResource(R.drawable.ic_dialog_permission)
+                            imageTintList = ContextCompat.getColorStateList(ctx, R.color.md_primary)
+                        })
+
+                        addView(LinearLayout(ctx).apply {
+                            orientation = LinearLayout.VERTICAL
+                            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                            addView(TextView(ctx).apply {
+                                text = row.title
+                                textSize = 15f
+                                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
+                            })
+                            addView(TextView(ctx).apply {
+                                text = row.desc
+                                textSize = 12f
+                                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
+                            })
+                        })
+
+                        val statusColor = when (row.level) {
+                            0 -> ContextCompat.getColor(ctx, R.color.md_success)
+                            1 -> 0xFFFFA000.toInt()
+                            else -> ContextCompat.getColor(ctx, R.color.md_error)
+                        }
+                        addView(TextView(ctx).apply {
+                            text = row.status
+                            textSize = 12f
+                            setPadding(dp(8f), dp(2f), dp(8f), dp(2f))
+                            setTextColor(statusColor)
+                        })
+                    })
+                    if (index != rows.lastIndex) {
+                        addView(View(ctx).apply {
+                            layoutParams = LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT, 1
+                            ).apply { marginStart = dp(12f) }
+                            setBackgroundColor(ContextCompat.getColor(ctx, R.color.md_outlineVariant))
+                        })
+                    }
+                }
             })
         }
-        UnifiedDialogKit.showForm(
+        selfCheckDialog = UnifiedDialogKit.showForm(
             ctx = ctx,
             contentView = contentView,
             title = "权限自检",

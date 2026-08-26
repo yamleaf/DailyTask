@@ -16,11 +16,14 @@ import android.provider.Settings
 import android.util.Log
 import androidx.transition.TransitionManager
 import android.view.KeyEvent
+import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.TextView
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.content.res.ColorStateList
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -124,6 +127,12 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     /** 自启动权限引导是否已在本次生命周期提示过（避免 onResume 反复弹窗） */
     private var autostartPermissionPrompted = false
+
+    /** 首次启动弹窗是否已在展示中（防止 onResume 重复触发） */
+    private var firstLaunchDialogShowing = false
+
+    /** 权限列表弹窗各行状态视图：Pair(授权检查函数, 状态TextView)，供系统设置返回后刷新 */
+    private val permissionStatusRows = mutableListOf<Pair<() -> Boolean, TextView>>()
 
     /** 三个 Tab 常驻 Fragment（一次性 add，hide/show 切换，与控制端交互一致） */
     private lateinit var taskFragment: TaskFragment
@@ -251,8 +260,8 @@ currentTabTag = savedInstanceState.getString(KEY_CURRENT_TAB, TAG_TASK) ?: TAG_T
         // 开机自动调度兜底：若开机广播路径未成功 startTask，打开 App 时再补一次
         ensureBootAutoScheduleIfNeeded()
 
-        // 首次启动（含覆盖安装/清除数据/卸载重装）弹出使用须知
-        binding.rootView.post { maybeShowUsageNotice() }
+        // 使用须知改由 onResume → handleFirstLaunch 统一触发（使用须知 → 权限列表），
+        // 不再在此处 post 旧入口，避免与首次启动流程叠加弹出两个使用须知。
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -325,11 +334,10 @@ fun switchToTaskTab() {
         setSideState(binding.bottomNavBar.iconSettings, binding.bottomNavBar.labelSettings, activeTag == TAG_SETTINGS)
 
         val taskActive = activeTag == TAG_TASK
-        binding.bottomNavBar.navTask.setBackgroundResource(
-            if (taskActive) R.drawable.bg_brand_gradient_circle else R.drawable.bg_nav_raised_silent)
+        // 凸起按钮两态共用同一圆盘（同材质同投影，杜绝悬浮感割裂），选中仅以图标颜色区分
         binding.bottomNavBar.iconTask.imageTintList = ColorStateList.valueOf(
             ContextCompat.getColor(this,
-                if (taskActive) R.color.on_header else R.color.brand_purple))
+                if (taskActive) R.color.nav_task_selected_icon else R.color.nav_task_unselected_icon))
     }
 
 private fun applyTabFromIntent(intent: Intent?) {
@@ -350,6 +358,32 @@ private fun applyTabFromIntent(intent: Intent?) {
             IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        // 悬浮窗权限硬门禁（最高优先级）：未授权直接跳系统授权页；返回仍未授权会在
+        // 下次前台再次拉起，不授权不允许进入主界面。「暂停使用」状态下不强制。
+        // 必须先于首次启动引导流程执行，保证卸载重装后第一眼是系统授权页而非主界面。
+        if (!Settings.canDrawOverlays(this)) {
+            if (!KeepAliveReceiver.isPaused()) {
+                overlayPermissionLauncher.launch(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+                return
+            }
+            "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
+        }
+        // 关键基础权限（自启动/悬浮窗/电池白名单/通知）缺失：冷启动弹使用须知+权限列表；
+        // 权限满足后跨版本不再打扰，同会话内不重复弹
+        if (hasMissingCriticalPermissions()) {
+            if (firstLaunchDialogShowing) {
+                // 从系统授权页返回：仅刷新各行授权状态，不重建弹窗
+                refreshPermissionRows()
+            } else {
+                handleFirstLaunch()
+            }
+            return
+        }
         // 首次进入（含首次启动）必须加载一次任务列表；
         // 配置导入成功后也需刷新一次。其余 onResume 不再无谓查询 DB。
         if (ConfigImportSignal.pendingMainActivityRefresh) {
@@ -369,20 +403,6 @@ private fun applyTabFromIntent(intent: Intent?) {
         }
         if (!maskViewController.isMaskVisible() && !MaskOverlayHelper.isShowing()) {
             resetIdleMaskTimer()
-        }
-        if (!Settings.canDrawOverlays(this)) {
-            // 悬浮窗权限门禁：未授权直接跳系统授权页；返回仍未授权会在下次前台再次拉起，
-            // 不授权不允许进入主界面。「暂停使用」状态下不强制。
-            if (!KeepAliveReceiver.isPaused()) {
-                overlayPermissionLauncher.launch(
-                    Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-                return
-            }
-            "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
         }
         runStartupSelfCheck()
     }
@@ -800,14 +820,58 @@ private fun applyTabFromIntent(intent: Intent?) {
         )
     }
 
-    /**
-     * 使用须知弹窗：仅在「本版本尚未选择不再提醒」时弹出。
-     */
-    private fun maybeShowUsageNotice() {
-        val ackVersion = SaveKeyValues.loadInt(USAGE_NOTICE_ACK_VERSION_KEY, 0)
-        if (ackVersion == BuildConfig.VERSION_CODE) {
+    /** 首次启动流程：未确认使用须知 → 先弹使用须知，再进权限列表；已确认 → 直接进权限列表 */
+    /** 授权页返回后刷新权限列表各行状态（不重建弹窗） */
+    private fun refreshPermissionRows() {
+        permissionStatusRows.forEach { (check, view) ->
+            val granted = try {
+                check()
+            } catch (_: Exception) {
+                false
+            }
+            view.text = if (granted) "已授权" else "未授权"
+            view.setTextColor(
+                ContextCompat.getColor(
+                    this,
+                    if (granted) R.color.md_success else R.color.md_onSurfaceVariant
+                )
+            )
+        }
+    }
+
+    /** 关键基础权限（悬浮窗/通知/电池白名单/自启动）任一缺失即需引导；自启动 ROM 不可读视为已具备 */
+    private fun hasMissingCriticalPermissions(): Boolean {
+        // 悬浮窗
+        if (!Settings.canDrawOverlays(this)) return true
+        // 通知（Android 13+ 运行时权限）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return true
+        // 电池优化白名单
+        val pm = getSystemService(PowerManager::class.java)
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) return true
+        // 自启动
+        if (isAutostartGranted() == false) return true
+        return false
+    }
+
+    private fun handleFirstLaunch() {
+        if (firstLaunchDialogShowing) {
+            LogFileManager.writeLog("handleFirstLaunch 跳过（已在展示中）")
             return
         }
+        firstLaunchDialogShowing = true
+        LogFileManager.action("首次启动：开始权限引导流程")
+        val ackVersion = SaveKeyValues.loadInt(USAGE_NOTICE_ACK_VERSION_KEY, 0)
+        if (ackVersion != BuildConfig.VERSION_CODE) {
+            showUsageNoticeThenPermissionList()
+            return
+        }
+        showPermissionListDialog()
+    }
+
+    private fun showUsageNoticeThenPermissionList() {
         UnifiedDialogKit.showConfirm(
             this,
             "使用须知",
@@ -816,8 +880,175 @@ private fun applyTabFromIntent(intent: Intent?) {
             confirmText = "知道了",
             cancelText = "不再提醒",
             cancelable = false,
+            onConfirm = {
+                showPermissionListDialog()
+            },
             onCancel = {
                 SaveKeyValues.saveInt(USAGE_NOTICE_ACK_VERSION_KEY, BuildConfig.VERSION_CODE)
+                showPermissionListDialog()
+            }
+        )
+    }
+
+    private fun showPermissionListDialog() {
+        val ctx = this
+        val dp = { value: Float -> (value * ctx.resources.displayMetrics.density + 0.5f).toInt() }
+        val rippleBg = run {
+            val outValue = android.util.TypedValue()
+            ctx.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+            if (outValue.resourceId != 0) ContextCompat.getDrawable(ctx, outValue.resourceId) else null
+        }
+
+        val contentView = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
+        }
+
+        data class PermissionItem(
+            val icon: Int,
+            val title: String,
+            val desc: String,
+            val isGranted: () -> Boolean,
+            val onAction: () -> Unit
+        )
+
+        val items = listOf(
+            PermissionItem(
+                icon = R.drawable.ic_dialog_permission,
+                title = "悬浮窗权限",
+                desc = "控制悬浮窗显示与状态指示",
+                isGranted = { Settings.canDrawOverlays(ctx) },
+                onAction = {
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                    )
+                }
+            ),
+            PermissionItem(
+                icon = R.drawable.ic_dialog_permission,
+                title = "通知权限",
+                desc = "接收任务执行结果通知",
+                isGranted = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+                            PackageManager.PERMISSION_GRANTED
+                    } else true
+                },
+                onAction = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            ),
+            PermissionItem(
+                icon = R.drawable.ic_dialog_permission,
+                title = "自启动权限",
+                desc = "确保重启后自动拉起服务",
+                isGranted = { isAutostartGranted() != false },
+                onAction = { showAutostartGuide() }
+            ),
+            PermissionItem(
+                icon = R.drawable.ic_dialog_permission,
+                title = "通知监听权限",
+                desc = "解析远程指令与打卡结果",
+                isGranted = { notificationEnable() },
+                onAction = {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
+            ),
+            PermissionItem(
+                icon = R.drawable.ic_dialog_permission,
+                title = "电池优化豁免",
+                desc = "锁屏后不被系统限制后台运行",
+                isGranted = {
+                    val pm = ctx.getSystemService(PowerManager::class.java)
+                    pm.isIgnoringBatteryOptimizations(packageName)
+                },
+                onAction = {
+                    try {
+                        startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .apply { data = Uri.parse("package:$packageName") }
+                        )
+                    } catch (_: Exception) {
+                        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }
+                }
+            )
+        )
+
+        items.forEach { perm ->
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(52f)
+                setPadding(dp(12f), dp(4f), dp(12f), dp(4f))
+                background = rippleBg
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { perm.onAction() }
+            }
+
+            row.addView(ImageView(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(28f), dp(28f)).apply {
+                    marginEnd = dp(12f)
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                setImageResource(perm.icon)
+                imageTintList = ContextCompat.getColorStateList(ctx, R.color.md_primary)
+            })
+
+            val textCol = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            textCol.addView(TextView(ctx).apply {
+                text = perm.title
+                textSize = 15f
+                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurface))
+            })
+            textCol.addView(TextView(ctx).apply {
+                text = perm.desc
+                textSize = 12f
+                setTextColor(ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant))
+            })
+            row.addView(textCol)
+
+            val statusView = TextView(ctx).apply {
+                text = if (perm.isGranted()) "已授权" else "未授权"
+                textSize = 12f
+                setPadding(dp(8f), dp(2f), dp(8f), dp(2f))
+                setTextColor(ContextCompat.getColor(ctx,
+                    if (perm.isGranted()) R.color.md_success else R.color.md_onSurfaceVariant
+                ))
+            }
+            row.addView(statusView)
+            permissionStatusRows.add(perm.isGranted to statusView)
+
+            contentView.addView(row)
+            if (perm != items.last()) {
+                contentView.addView(View(ctx).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, 1
+                    ).apply { marginStart = dp(12f) }
+                    setBackgroundColor(ContextCompat.getColor(ctx, R.color.md_outlineVariant))
+                })
+            }
+        }
+
+        UnifiedDialogKit.showForm(
+            ctx = ctx,
+            contentView = contentView,
+            title = "权限设置",
+            message = "请逐一授权以下权限，以确保所有功能正常运行",
+            positiveText = "完成",
+            negativeText = null,
+            cancelable = false,
+            onConfirm = {
+                // 完成引导不写任何持久化标记：下次冷启动按「关键权限是否缺失」重新判定。
+                // 使用须知语义保持——仅点「不再提醒」才持久关闭，点「知道了」下版本/缺权限时仍会提示。
+                permissionStatusRows.clear()
+                true
             }
         )
     }
@@ -831,7 +1062,9 @@ private fun applyTabFromIntent(intent: Intent?) {
                 startService(this)
             }
         }
-        // 授权返回后继续串行引导链（自启动/电池优化）
+        // 首次启动流程由 handleFirstLaunch 接管，不重复弹窗
+        // 首次启动引导流程由 handleFirstLaunch 把管（关键权限仍缺失时不重复弹自检）
+        if (hasMissingCriticalPermissions()) return@registerForActivityResult
         runStartupSelfCheck()
     }
 
