@@ -1005,11 +1005,19 @@ class MqttAgentService : Service() {
                             val arr = com.google.gson.JsonArray()
                             val seen = HashSet<String>()
                             notices.filter { it.noticeMessage?.contains("打卡") == true }.forEach { n ->
-                                val key = "${n.noticeMessage}|${n.postTime}"
+                                val rawMsg = n.noticeMessage ?: ""
+                                val postTime = n.postTime ?: ""
+                                val key = "$rawMsg|$postTime"
                                 if (seen.add(key)) {
+                                    // 规范化：msg 映射为状态词（打卡·成功/打卡·超时），time 保留完整日期时间
+                                    val status = when {
+                                        rawMsg.contains("超时") -> "打卡·超时"
+                                        rawMsg.contains("成功") -> "打卡·成功"
+                                        else -> rawMsg
+                                    }
                                     arr.add(com.google.gson.JsonObject().apply {
-                                        addProperty("msg", n.noticeMessage ?: "")
-                                        addProperty("time", n.postTime ?: "")
+                                        addProperty("msg", status)
+                                        addProperty("time", postTime)
                                     })
                                 }
                             }

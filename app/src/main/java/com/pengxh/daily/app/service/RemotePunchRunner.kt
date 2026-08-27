@@ -182,10 +182,11 @@ object RemotePunchRunner {
                         if (fromController) {
                             val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA)
                                 .format(java.util.Date())
+                            // 弹窗主内容（第一行时间+状态；超时第二行小字提示）
                             val resultMsg = if (detectedSuccess) {
-                                "打卡成功（执行时间 $timeStr）"
+                                "$timeStr 打卡·成功"
                             } else {
-                                "打卡超时，请手动确认执行结果（执行时间 $timeStr）"
+                                "$timeStr 打卡·超时\n打卡结果未识别，请手动确认执行结果"
                             }
                             runCatching {
                                 MqttAgentService.publishAlert(
