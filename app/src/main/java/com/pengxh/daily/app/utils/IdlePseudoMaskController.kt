@@ -279,12 +279,10 @@ object IdlePseudoMaskController {
     }
 
     // ═══════════════════════ 前台「无操作」自动进入伪熄屏 ═══════════════════════
-    // 由 lite 模块 KotlinBaseActivity 经 ForegroundIdleBridge 在 DailyTaskApplication.onCreate
-    // 接线：统一驱动任务页 / 远程页 / 设置页等所有前台页面的无操作计时，
-    // 复用「伪熄屏增强」延时配置。
-    // - 伪息屏总开关开启：前台无操作超时进伪熄屏（与后台路径一致）
-    // - 伪息屏总开关关闭 + 屏幕模式=0：仅前台无操作超时盖黑蒙层
-    // - 伪息屏关闭 + 屏幕模式=1/2：不启此前台计时
+    // 由 lite 模块 KotlinBaseActivity 经 ForegroundIdleBridge 在 Application.onCreate 接线，
+    // 统一驱动各前台页面的无操作计时，复用「伪熄屏增强」延时配置。
+    // - 伪息屏总开关开：前台无操作超时进伪熄屏（同后台路径）
+    // - 总开关关 + 屏幕模式=0：仅前台无操作超时盖黑蒙层；关 + 模式=1/2：不启前台计时
 
     private var idleMaskContext: Context? = null
 

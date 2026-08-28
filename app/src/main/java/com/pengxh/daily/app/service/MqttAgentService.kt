@@ -517,11 +517,8 @@ class MqttAgentService : Service() {
             IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        // C1：前台服务启动防护。Android 15+ 对后台启动前台服务有严格配额（"Time limit already exhausted"），
-        // startForeground 可能抛 ForegroundServiceStartNotAllowedException；若任其扩散会以
-        // "Unable to create service" 崩溃整个进程，连带同进程的 NotificationMonitorService（远程指令链路）
-        // 一起死掉。因此 startForeground 失败时优雅退出本服务（stopSelf），绝不崩进程；
-        // MQTT 由 KeepAliveReceiver / 复活闹钟 / 前台打开 App 在配额恢复后重新拉起。
+        // 前台启动防护：Android 15+ 后台启 FGS 有配额，startForeground 失败会崩整个进程（连带远程指令链路）。
+        // 故失败时优雅 stopSelf 退出，MQTT 由 KeepAliveReceiver / 复活闹钟 / 前台打开在配额恢复后重拉。
         if (!startForegroundNotification()) {
             LogFileManager.error("MQTT 服务前台启动被系统拒绝（后台 FGS 配额限制），已降级退出，等待配额恢复后重试")
             quitDueToFgsQuota = true
@@ -529,13 +526,10 @@ class MqttAgentService : Service() {
             return
         }
         registerNetworkCallback()
-        // 息屏保活 WiFi 锁改「PING 窗口持有」（方案 A，省电优先，详见 acquireWifiLock 注释）：
-        // - ALARM 模式（默认）：由 AlarmPingSender 在每次发 PINGREQ 的窗口内短时持有 WifiLock，
-        //   息屏间隙 WiFi 可 suspend 挂起，比全程常驻明显省电；连接靠 80s 内活动保活不断连。
-        // - CPU 模式（兜底）：由 acquireScreenWakeLock 在息屏时持续持有 WifiLock（与 PARTIAL_WAKE_LOCK 绑定），
-        //   保证极不可靠设备连接稳定（行为同旧版常驻）。
-        // 故 onCreate 不再常驻获取，改由各模式按需持有。
-        // 息屏保活：auto 模式每次启动重置为 ALARM（起步即闹钟心跳）；指定模式保持固定级别。不做降级
+        // 息屏保活 WiFi 锁改「PING 窗口持有」（省电优先，详见 acquireWifiLock 注释）：
+        // - ALARM（默认）：AlarmPingSender 每次发 PINGREQ 窗口内短时持 WifiLock，息屏间隙 WiFi 挂起省电
+        // - CPU（兜底）：acquireScreenWakeLock 息屏时持 WifiLock，保证极不可靠设备连接稳定
+        // 故 onCreate 不再常驻获取，改由各模式按需持有。auto 模式每次启动重置为 ALARM。
         MqttKeepAliveStrategy.onServiceStart()
         // Paho connect 为阻塞调用（失败时最长等待 connectionTimeout=10s），必须在后台线程执行，
         // 否则在主线程执行会导致服务启动超时 + 界面 ANR
@@ -642,11 +636,9 @@ class MqttAgentService : Service() {
             }
         }
         connectOptions = MqttConnectOptions().apply {
-            // 使用全新会话：Doze 挂网产生半死僵尸会话后，重连若沿用旧会话（cleanSession=false）
-            // 会触发 EMQX 会话接管/合并，导致重订阅被 broker 以 SUBACK 0x80(ACL) 拒绝。
-            // 改新会话后每次重连都重新订阅（connectComplete 已幂等订阅），不再依赖 broker 侧会话恢复。
-            // 注意：被控端 publish 的告警/状态是「发布」，投递由订阅方会话保证（控制端 ctl-mon 持久会话），
-            // 不受本端会话策略影响；仅离线期间 broker 排队给本端的 cmd/pair 指令不再补发（有 rid 去重+超时兜底）。
+            // 全新会话：旧会话僵尸后重连会触发 EMQX 会话接管导致重订阅被 SUBACK 0x80(ACL) 拒绝；
+            // 改新会话后每次重连重新订阅（connectComplete 幂等），不再依赖 broker 会话恢复。
+            // 注：被控端 publish 投递由订阅方持久会话保证，不受本端策略影响。
             isCleanSession = true
             userName = SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")
             password = MqttSecureConfig.loadPass().toCharArray()
@@ -660,11 +652,10 @@ class MqttAgentService : Service() {
             setWill(topicStatus(), "offline".toByteArray(), 1, true)
         }
 
-        // 关键：回调必须在 connect() 之前注册，否则连接成功后到达的消息/断线事件可能丢失或不被分发。
-        // 用 MqttCallbackExtended：connectComplete 在【首次连接】与【Paho 自动重连】时都会触发。
-        // 把“订阅命令主题 + 发布 online + 纠正连接态”集中到这里，可保证 broker 重启/掉线恢复后
-        // 仍能收到指令（否则自动重连不会重新订阅，导致收不到 cmd、不回 ack、查询超时），
-        // 同时纠正“已连但 UI 显示未连接”的问题（自动重连不会回调 onConnected）。
+        // 回调须在 connect() 前注册，否则连接成功后的消息/断线事件会丢失。
+        // 用 MqttCallbackExtended：connectComplete 在首次连接与自动重连都会触发，集中做
+        // 订阅命令主题 + 发布 online + 纠正连接态，保证 broker 重启/掉线恢复后仍能收指令，
+        // 同时修正“已连但 UI 显示未连接”（自动重连不会回调 onConnected）。
         mqttClient?.setCallback(object : MqttCallbackExtended {
             override fun connectionLost(cause: Throwable?) {
                 // P3：服务已销毁（onDestroy 已将 instance 置空）后到达的迟到断线回调，
@@ -680,12 +671,10 @@ class MqttAgentService : Service() {
                 if (!isRebuilding && MqttKeepAliveStrategy.recordDisconnect() != null) {
                     rebuildMqttClient()
                 }
-                // 进程存活时的瞬时掉线，统一交给 Paho isAutomaticReconnect 自行退避重连：
-                // connectComplete(reconnect=true) 会幂等重订阅并发布 online，进程内无需再做任何事。
-                // 此前在此处排复活闹钟 + 3s 后手动 reconnect()，与 Paho 自动重连构成双驱动，
-                // 互相抢同一 clientId 连接槽位 → broker 会话接管互踢 + 32110「已在进行连接」，
-                // 且每次掉线都堆一个 30s 闹钟（真机 90s 内堆了 105 个），持续给循环喂料——
-                // 正是反复上线下线重连的放大器。进程/服务被系统杀死的情况由 onDestroy 单独排复活闹钟兜底。
+                // 进程存活时的瞬时掉线统一交给 Paho isAutomaticReconnect 退避重连
+                // （connectComplete(reconnect=true) 幂等重订阅并发布 online）。此前在此手动 reconnect()
+                // 与自动重连双驱动抢同一 clientId → 会话接管互踢 + 32110 + 每掉线堆 30s 闹钟，放大上下线循环；
+                // 进程被杀场景由 onDestroy 单独排复活闹钟兜底。
             }
 
             override fun messageArrived(topic: String?, message: MqttMessage?) {

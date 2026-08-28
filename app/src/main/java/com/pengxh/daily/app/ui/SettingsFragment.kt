@@ -464,11 +464,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     }
 
     override fun initEvent() {
-        // 提前置位：本 Fragment 经 recreate（如切换主题）重建时，视图系统会在 onViewCreated 之后、
-        // onResume 之前「恢复」各 Switch 的勾选状态（默认值与已存值不同时会触发监听器）。
-        // 此时 syncSettingsUiFromStore 尚未执行、syncingSwitchState 仍为 false，会导致恢复动作
-        // 被误判为用户操作而弹「开启手势识别？」等确认框。这里先置 true，覆盖重建后的状态恢复窗口，
-        // 待 onResume → refreshUi → syncSettingsUiFromStore 在 finally 中复位为 false。
+        // 提前置位：本 Fragment 经 recreate（如切主题）重建时，视图系统会在 onViewCreated 之后、onResume 之前
+        // 恢复 Switch 勾选状态并触发监听器，此时 syncSettingsUiFromStore 未执行、syncingSwitchState 仍为 false，
+        // 会被误判为用户操作而弹确认框。先置 true 覆盖恢复窗口，待 onResume→refreshUi 的 finally 中复位。
         syncingSwitchState = true
         // ── 目标应用 ──
         binding.targetAppLayout.setOnClickListener {

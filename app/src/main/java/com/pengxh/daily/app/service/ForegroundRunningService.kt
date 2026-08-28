@@ -287,11 +287,8 @@ class ForegroundRunningService : Service() {
 
                     Intent.ACTION_SCREEN_OFF -> {
                         IdlePseudoMaskController.onSystemScreenOff(this@ForegroundRunningService)
-                        // 真息屏打卡优化：伪息屏关 + 屏幕模式=息屏时，摘掉打卡返回时盖的不保亮黑蒙层。
-                        // 守卫同时保证不会误摘：伪息屏开→伪息屏蒙层（onSystemScreenOff 已处理）、
-                        // 模式0→前台无操作蒙层（shouldForegroundIdleMaskWhenPseudoOff）。
-                        // 仅在蒙层确实存在时摘除并记日志——SCREEN_OFF 在任务等待期/普通灭屏也会触发，
-                        // 无条件记录会让日志失去「蒙层是否真被摘除」的可信度（排查黑屏残留的关键判据）。
+                        // 真息屏打卡优化：伪息屏关+屏幕模式=息屏时，摘掉打卡返回时盖的不保亮黑蒙层。
+                        // 守卫保证不误摘伪息屏蒙层/前台无操作蒙层，且仅在蒙层真实存在时记录（保日志可信）。
                         if (!AppRuntimeConfig.isForcePseudoMask() &&
                             AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF &&
                             MaskOverlayHelper.isShowing()

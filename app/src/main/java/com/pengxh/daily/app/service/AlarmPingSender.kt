@@ -95,14 +95,10 @@ class AlarmPingSender(context: Context) : MqttPingSender {
                 observeNetworkRecovery(wakeAtElapsed)
             }
             try {
-                // 问题2修复（08-18 实测实证）：Paho checkForActivity 的「该发 PINGREQ」判定在闹钟驱动下
-                // 持续 false（① PINGRESP 一次没回导致 pingOutstanding 卡住，之后永远不发新 ping；
-                // ② 重连后 lastOutbound=CONNECT 时刻，240s 边界毫秒误差判定未到点），心跳从未实际发出
-                // → broker 360s 踢线（实测 3 次唤醒 0 次 PINGREQ）。
-                // 改为闹钟到点【无条件强制发 PINGREQ】：sendNoWait 直接入队（已连接时由 CommsSender 写出，
-                // 不经过"该发判定"）；随后 checkForActivity 仅用于让 Paho 更新内部计时并排下一轮闹钟。
-                // 注意：token 必须非 null——实测传 null 触发 Paho internalSend 内部 token.getClient() NPE
-                // （反编译确认：internalSend 会自动把 comms 的 client 设进 token，传 MqttToken(clientId) 即可）。
+                // 闹钟驱动下 Paho checkForActivity 的「该发 PINGREQ」判定会持续 false
+                // （PINGRESP 未回卡住 pingOutstanding / 重连后 240s 毫秒误差），导致心跳从未发出 → broker 360s 踢线。
+                // 故闹钟到点【无条件强制发 PINGREQ】：sendNoWait 直接入队，checkForActivity 仅用于更新内部计时并排下一轮。
+                // token 必须非 null（传 null 触发 internalSend 内 token.getClient() NPE），用 MqttToken(clientId)。
                 val commsRef = comms
                 if (commsRef != null && commsRef.isConnected) {
                     commsRef.sendNoWait(MqttPingReq(), MqttToken(commsRef.getClient().clientId))
@@ -189,12 +185,9 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     /** Paho 每次 checkForActivity 后按剩余 keepalive 时间调用；同 PendingIntent 多次 set 自动覆盖旧闹钟 */
     override fun schedule(delayInMilliseconds: Long) {
         if (delayInMilliseconds <= 0) return
-        // ALARM 加固（08-18）：息屏待机时 App Standby Bucket 把精确闹钟延迟约 60s，
-        // 名义 240s 心跳实际≈300s，逼近 broker 360s 踢线死线（裕度仅 60s）。
-        // 把排程间隔压缩为 1/ALARM_PING_COMPRESS_DIVISOR（≈80s），即便被 Standby 推到窗口末端
-        // (+248s) 有效间隔仍 <360s，稳；PINGREQ 发得比 keepAlive(240s) 更勤完全合法，
-        // broker 只要求 ≤keepAlive 内有活动，发更勤只会更确信连接存活。
-        // 注：本方法被 start() 与 Paho checkForActivity() 驱动的下一轮排程共用，入口统一压缩即覆盖全部节律。
+        // ALARM 加固：息屏待机时 Standby Bucket 把精确闹钟延迟约 60s，名义 240s 心跳实际≈300s，逼近 broker 360s 死线。
+        // 压缩排程为 1/ALARM_PING_COMPRESS_DIVISOR（≈80s），即便被推到窗口末端仍 <360s；PINGREQ 发得比 keepAlive 更勤合法。
+        // 本方法被 start() 与 checkForActivity 驱动的下一轮排程共用，入口统一压缩即覆盖全部节律。
         val actualDelay = delayInMilliseconds / ALARM_PING_COMPRESS_DIVISOR
         val triggerAt = SystemClock.elapsedRealtime() + actualDelay
         try {

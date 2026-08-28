@@ -63,12 +63,9 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
     private var floatViewParams: WindowManager.LayoutParams? = null
     private var memoryMonitorJob: Job? = null
     private var lastMemoryAlertAt = 0L
-    // 悬浮窗可见性由三个独立维度决定：
-    // 1) floatSessionActive —— 是否处于「被控端主动跳到目标 App」的操作会话中（由 openApplication 统一 start、各操作结束 stop）
-    // 2) visibilityAllowed —— 蒙层是否未遮挡（由 show/hide 控制，蒙层显示时临时隐藏避免截到黑屏）
-    // 3) hiddenForScreenshot —— 截屏流水线进行中强制 GONE，避免倒计时/贴边宠物进图
-    // 形态切换：会话中显示完整倒计时卡片；空闲显示悬浮小球或桌宠（由桌宠开关决定），
-    // 保证悬浮窗窗口常驻可见可拖动，为安卓 15+ 后台跳转提供可见窗口豁免；蒙层遮挡时整体隐藏。
+    // 悬浮窗可见性由三维决定：floatSessionActive（操作会话，openApplication 统一 start/各操作 stop）、
+    // visibilityAllowed（蒙层是否遮挡，遮挡时隐藏避免截到黑屏）、hiddenForScreenshot（截屏流水线强制 GONE）。
+    // 形态：会话示完整倒计时卡片，空闲示小球/桌宠；常驻可见为安卓 15+ 后台跳转提供可见窗口豁免。
     private var floatSessionActive = false
     private var visibilityAllowed = true
     private var hiddenForScreenshot = false
