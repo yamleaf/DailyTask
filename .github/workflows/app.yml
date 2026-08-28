@@ -142,6 +142,24 @@ jobs:
           done
           ./gradlew --version
 
+      # ==== 编译工具链版本与支持版本信息（参考 Shizuku app CI 风格）====
+      - name: Show build toolchain versions
+        run: |
+          echo "---- JDK ----"
+          java -version 2>&1
+          echo "---- Gradle ----"
+          ./gradlew --version 2>&1 | sed -n '1,8p'
+          echo "---- App SDK targets (app/build.gradle) ----"
+          grep -E "compileSdk|targetSdk|minSdk" app/build.gradle | sed 's/^[[:space:]]*//'
+          echo "---- AGP / Kotlin (build.gradle) ----"
+          grep -E "com.android.application|com.android.library|org.jetbrains.kotlin.android" build.gradle | sed 's/^[[:space:]]*//'
+          echo "---- Installed build-tools ----"
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || echo "(none)"
+          echo "---- Installed NDK ----"
+          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "(none)"
+          echo "---- Installed CMake ----"
+          ls "$ANDROID_HOME/cmake" 2>/dev/null || echo "(none)"
+
       # ==== 签名：若定义了 KEY_STORE，用外部密钥覆盖仓库内置 DailyTask.jks；
       # 未定义则跳过，build.gradle 回退到内置默认签名 ====
       - name: Apply signing secret (override default jks)
@@ -193,6 +211,16 @@ jobs:
           name: dailyTask_alpha_release_${{ github.run_number }}
           path: dailyTask_release_*.7z
           retention-days: 10
+
+      # ===== 上传 ProGuard mapping（release 已开启 minify，用于崩溃堆栈反混淆）=====
+      - name: Upload ProGuard mapping
+        if: hashFiles('app/build/outputs/mapping/release/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dailyTask_mapping_${{ github.run_number }}
+          path: app/build/outputs/mapping/release
+          retention-days: 30
+          if-no-files-found: ignore
 
       # ===== 手动触发：dump APK 版本号，供 GitHub Release Draft 展示（版本信息发版在本地执行） =====
       # 自定义包名构建与默认包名同流程：同样走版本提取 → 7z 加密 → Release Draft（tag=dt-{versionCode}）。
