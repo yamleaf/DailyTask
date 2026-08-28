@@ -3,7 +3,6 @@ import java.util.TimeZone
 
 plugins {
     id('com.android.application')
-    id('org.jetbrains.kotlin.android')
 }
 
 // ==== 构建标识（在 android{} 之外定义，供 defaultConfig 与产物命名共用）====
@@ -61,7 +60,7 @@ def buildTime = cnFormat('yyyy-MM-dd HH:mm', new Date())
 
 android {
     namespace 'com.pengxh.daily.app'
-    compileSdk 36
+    compileSdk 37
 
     lint {
         disable 'NewerVersionAvailable'
@@ -71,7 +70,7 @@ android {
     defaultConfig {
         applicationId (customPackageId ?: 'com.pengxh.daily.app')
         minSdk 26
-        targetSdk 36
+        targetSdk 37
 
         // 版本号策略（alpha 分支）：
         // - 基线版本号自动同步 master 分支的 app/build.gradle（alpha 即基于该主线版本）
@@ -200,20 +199,14 @@ android {
         viewBinding true
     }
 
-    kotlinOptions {
-        jvmTarget = "21"
-    }
-
-    // 产物命名：dailyTask_<构建来源>-<git短哈希>[_custom]_<构建类型>.apk
-    // 如 dailyTask_local-9a76231_release.apk / dailyTask_ci-abcdef1_release.apk；
-    // 自定义包名构建追加 _custom 后缀，一眼区分定制包名产物。
-    // 刻意不带版本号：版本号已在 App 内「版本信息」页与 versionName 中可查，
-    // 文件名只承担「这个包从哪来、对应哪次提交」的溯源职责。
-    applicationVariants.configureEach { variant ->
-        variant.outputs.configureEach {
-            outputFileName = "dailyTask_${buildTag}${customPackageId ? '_custom' : ''}_${variant.buildType.name}.apk"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
         }
     }
+
+    // 产物命名使用 AGP 默认，版本号在 App 内「版本信息」页与 versionName 可查，
+    // 文件名只承担溯源职责，短而稳定，便于分发与对账。
 }
 
 dependencies {

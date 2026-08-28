@@ -1,11 +1,10 @@
 plugins {
     id('com.android.library')
-    id('org.jetbrains.kotlin.android')
 }
 
 android {
     namespace 'com.pengxh.kt.lite'
-    compileSdk 36
+    compileSdk 37
 
     lint {
         disable 'NewerVersionAvailable'
@@ -20,7 +19,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 
@@ -40,8 +39,10 @@ android {
         viewBinding true
     }
 
-    kotlinOptions {
-        jvmTarget = "21"
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+        }
     }
 }
 
