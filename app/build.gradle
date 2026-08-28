@@ -205,8 +205,16 @@ android {
         }
     }
 
-    // 产物命名使用 AGP 默认，版本号在 App 内「版本信息」页与 versionName 可查，
-    // 文件名只承担溯源职责，短而稳定，便于分发与对账。
+    // 产物命名（AGP 9）：dailyTask_<构建来源>-<git短哈希>[_custom]_<构建类型>.apk
+    // 如 dailyTask_local-00995a7_debug.apk / dailyTask_ci-abcdef1_release.apk；
+    // 自定义包名构建追加 _custom 后缀，一眼区分定制包名产物。
+    androidComponents {
+        onVariants(selector().all()) { variant ->
+            variant.outputs.forEach { output ->
+                output.outputFileName.set("dailyTask_${buildTag}${customPackageId ? '_custom' : ''}_${variant.name}.apk")
+            }
+        }
+    }
 }
 
 dependencies {
