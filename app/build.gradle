@@ -157,12 +157,26 @@ android {
         }
     }
 
+    // ==== 签名：优先使用外部 Secret（CI 注入），未定义则回退仓库内置默认 jks ====
+    // 统一 Secret 命名（GitHub repository secret，与 Shizuku app.yml 一致）：
+    // KEY_STORE / KEY_STORE_PASSWORD / ALIAS / KEY_PASSWORD。
+    // 只要定义了 KEY_STORE 就启用外部签名（workflow 已把 base64 解码覆盖到 DailyTask.jks）；
+    // 未定义时使用仓库内置的 DailyTask.jks（密码 123456789 / 别名 key0）。
+    def ksSecretBase64 = System.getenv('KEY_STORE')
+    def ksUseSecret = (ksSecretBase64 != null && !ksSecretBase64.isEmpty())
+    def ksSecretPass = System.getenv('KEY_STORE_PASSWORD')
+    def ksSecretKeyPass = System.getenv('KEY_PASSWORD')
+    def ksSecretAlias = System.getenv('ALIAS')
+    def ksStorePass = ksUseSecret ? (ksSecretPass ?: '123456789') : '123456789'
+    def ksKeyPass = ksUseSecret ? (ksSecretKeyPass ?: '123456789') : '123456789'
+    def ksKeyAlias = ksUseSecret ? (ksSecretAlias ?: 'key0') : 'key0'
+
     signingConfigs {
         release {
             storeFile file('DailyTask.jks')
-            storePassword '123456789'
-            keyAlias 'key0'
-            keyPassword '123456789'
+            storePassword ksStorePass
+            keyAlias ksKeyAlias
+            keyPassword ksKeyPass
         }
     }
 

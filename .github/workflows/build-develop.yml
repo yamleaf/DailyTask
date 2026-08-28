@@ -85,6 +85,12 @@ jobs:
       # secrets 不能直接出现在 step 的 if 表达式里，故先落到 job 级 env，
       # 未配置 Secret 时该变量为空字符串，if 判断按 env. 读取。
       APK_ENCRYPT_PASSWORD: ${{ secrets.APK_ENCRYPT_PASSWORD }}
+      # 签名：统一 Secret 命名（与 Shizuku app.yml 一致）。定义了 KEY_STORE 时用外部密钥
+      # 覆盖内置 DailyTask.jks，未定义时 build.gradle 回退到仓库内置默认签名。四个为一组，需同时配齐。
+      KEY_STORE: ${{ secrets.KEY_STORE }}
+      KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+      ALIAS: ${{ secrets.ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       # 发版已改为本地执行（scripts/publish_local.sh）：GitHub CI（美国）跨境上传
       # Gitee（国内）极慢（实测 >9min），本地跑 ~30s。故 CI 不再持有 Gitee 凭据；
       # 本地发版需 GITEE_TOKEN（写权限）+ VERSION_KEY（与 App 内置一致）。
@@ -135,6 +141,17 @@ jobs:
             sleep 5
           done
           ./gradlew --version
+
+      # ==== 签名：若定义了 KEY_STORE，用外部密钥覆盖仓库内置 DailyTask.jks；
+      # 未定义则跳过，build.gradle 回退到内置默认签名 ====
+      - name: Apply signing secret (override default jks)
+        run: |
+          if [ -n "$KEY_STORE" ]; then
+            printf '%s' "$KEY_STORE" | base64 -d > app/DailyTask.jks
+            echo "已用外部 Secret 签名密钥覆盖 DailyTask.jks"
+          else
+            echo "未定义签名 Secret，使用仓库内置默认签名"
+          fi
 
       - name: Build release APK (alpha)
         env:
