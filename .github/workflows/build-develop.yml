@@ -105,7 +105,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools ndk;27.3.13750724 cmake;3.31.6'
+          packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools ndk;28.2.13676358 cmake;3.31.6'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
