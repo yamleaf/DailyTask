@@ -124,7 +124,7 @@ android {
             versionName buildSource == 'ci' ? baselineVersion : "${baselineVersion}-local"
         }
 
-        ndkVersion '21.4.7075529'
+        ndkVersion '27.3.13750724'
 
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
@@ -144,12 +144,17 @@ android {
                 cppFlags "-std=c++14"
             }
         }
+
+        packagingOptions {
+            exclude 'META-INF/INDEX.LIST'
+            exclude 'META-INF/io.netty.versions.properties'
+        }
     }
 
     externalNativeBuild {
         cmake {
             path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1"
+            version "3.31.6"
         }
     }
 
@@ -214,13 +219,13 @@ android {
 dependencies {
     implementation project(':protocol')
     implementation project(':lite')
-    implementation 'androidx.core:core-ktx:1.17.0'
+    implementation 'androidx.core:core-ktx:1.18.0'
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     //数据库框架
-    implementation 'androidx.room:room-runtime:2.8.2'
-    annotationProcessor 'androidx.room:room-compiler:2.8.2'
+    implementation 'androidx.room:room-runtime:2.8.4'
+    annotationProcessor 'androidx.room:room-compiler:2.8.4'
     // 敏感信息加密存储（基于 Android Keystore 的 EncryptedSharedPreferences）
     implementation 'androidx.security:security-crypto:1.1.0'
     //邮件
@@ -238,9 +243,9 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:5.4.0'
     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
     // 绑定二维码生成（ZXing core，仅编解码，无 Android 视图依赖）
-    implementation 'com.google.zxing:core:3.4.1'
+    implementation 'com.google.zxing:core:3.5.3'
     // 磨砂玻璃（悬浮导航模糊背景；API 31+ 走硬件 RenderEffect，低版本走 RenderScript）
     implementation 'com.github.Dimezis:BlurView:version-2.0.4'
     // 桌面小宠物动画（呼吸/眨眼/尾巴摆动/张望/点击反馈），用户后续把 Lottie JSON 投到 assets/pet/ 即可
-    implementation 'com.airbnb.android:lottie:6.5.0'
+    implementation 'com.airbnb.android:lottie:6.7.1'
 }
