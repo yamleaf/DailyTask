@@ -113,60 +113,51 @@ class FileDownloadManager(builder: Builder) : CoroutineScope {
 
             override fun onResponse(call: Call, response: Response) {
                 launch(Dispatchers.IO) {
-                    var body: okhttp3.ResponseBody? = null
+                    val body = response.body
                     try {
-                        body = response.body
-                        if (body == null) {
+                        val inputStream = body.byteStream()
+                        val fileSize = body.contentLength()
+                        if (fileSize <= 0) {
                             isExecuting.set(false)
                             withContext(Dispatchers.Main) {
-                                listener.onDownloadFailed(IOException("Response body is null"))
+                                listener.onDownloadFailed(IllegalArgumentException("Invalid file size"))
                             }
                             return@launch
-                        } else {
-                            val inputStream = body.byteStream()
-                            val fileSize = body.contentLength()
-                            if (fileSize <= 0) {
-                                isExecuting.set(false)
+                        }
+                        withContext(Dispatchers.Main) {
+                            Log.d(kTag, "onDownloadStart: fileSize: $fileSize")
+                            listener.onDownloadStart(fileSize)
+                        }
+
+                        val file = File(directory, "${System.currentTimeMillis()}.${suffix}")
+                        file.outputStream().use { fos ->
+                            // 大缓冲区提高性能
+                            val buffer = ByteArray(8192)
+                            var sum = 0
+                            var read: Int
+                            while (inputStream.read(buffer).also { read = it } != -1) {
+                                if (!isActive) break // 检查协程是否被取消
+
+                                fos.write(buffer, 0, read)
+                                sum += read
+
                                 withContext(Dispatchers.Main) {
-                                    listener.onDownloadFailed(IllegalArgumentException("Invalid file size"))
-                                }
-                                return@launch
-                            }
-                            withContext(Dispatchers.Main) {
-                                Log.d(kTag, "onDownloadStart: fileSize: $fileSize")
-                                listener.onDownloadStart(fileSize)
-                            }
-
-                            val file = File(directory, "${System.currentTimeMillis()}.${suffix}")
-                            file.outputStream().use { fos ->
-                                // 大缓冲区提高性能
-                                val buffer = ByteArray(8192)
-                                var sum = 0
-                                var read: Int
-                                while (inputStream.read(buffer).also { read = it } != -1) {
-                                    if (!isActive) break // 检查协程是否被取消
-
-                                    fos.write(buffer, 0, read)
-                                    sum += read
-
-                                    withContext(Dispatchers.Main) {
-                                        if (isExecuting.get()) { // 确保下载仍在进行
-                                            listener.onProgressChanged(sum)
-                                        }
+                                    if (isExecuting.get()) { // 确保下载仍在进行
+                                        listener.onProgressChanged(sum)
                                     }
                                 }
                             }
+                        }
 
-                            // 只有当下载成功且未被取消时才触发完成回调
-                            if (isExecuting.get()) {
-                                withContext(Dispatchers.Main) {
-                                    Log.d(kTag, "onDownloadEnd: file ${file.absolutePath}")
-                                    listener.onDownloadEnd(file)
-                                }
-                            } else {
-                                // 如果下载被取消，删除临时文件
-                                file.delete()
+                        // 只有当下载成功且未被取消时才触发完成回调
+                        if (isExecuting.get()) {
+                            withContext(Dispatchers.Main) {
+                                Log.d(kTag, "onDownloadEnd: file ${file.absolutePath}")
+                                listener.onDownloadEnd(file)
                             }
+                        } else {
+                            // 如果下载被取消，删除临时文件
+                            file.delete()
                         }
                     } catch (e: Exception) {
                         isExecuting.set(false)
@@ -175,7 +166,7 @@ class FileDownloadManager(builder: Builder) : CoroutineScope {
                         }
                     } finally {
                         isExecuting.set(false)
-                        body?.close() // 确保响应体被关闭
+                        body.close() // 确保响应体被关闭
                     }
                 }
             }

@@ -99,17 +99,13 @@ class HttpRequestKit(builder: Builder) {
 
                 if (response.isSuccessful) {
                     val responseBody = response.body
-                    if (responseBody != null) {
-                        try {
-                            val result = responseBody.string()
-                            listener.onSuccess(result)
-                        } catch (e: IOException) {
-                            listener.onFailure(e)
-                        } finally {
-                            responseBody.close()
-                        }
-                    } else {
-                        listener.onFailure(IOException("Response body is null"))
+                    try {
+                        val result = responseBody.string()
+                        listener.onSuccess(result)
+                    } catch (e: IOException) {
+                        listener.onFailure(e)
+                    } finally {
+                        responseBody.close()
                     }
                 } else {
                     listener.onFailure(IOException("Unexpected code ${response.code}"))
