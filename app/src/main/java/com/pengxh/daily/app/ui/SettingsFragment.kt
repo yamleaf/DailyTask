@@ -84,8 +84,6 @@ import com.pengxh.kt.lite.utils.LoadingDialog
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.extensions.toJson
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
-import android.os.Environment
-import java.io.File
 import java.util.Date
 import com.pengxh.daily.app.extensions.format
 import com.pengxh.daily.app.model.EmailConfigData
@@ -221,7 +219,29 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
     }
 
-    /** 配置导出：远程/任务/设置三页全量配置序列化为 JSON，经系统分享面板导出 */
+    /** 待导出 JSON：SAF 选中目标后写入 */
+    private var pendingExportJson: String? = null
+
+    /** 配置导出：系统保存对话框（SAF），JSON 写入用户选择的可见目录 */
+    private val exportLauncher =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+            val json = pendingExportJson ?: return@registerForActivityResult
+            if (uri == null) return@registerForActivityResult
+            pendingExportJson = null
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching {
+                    val os = ctx.contentResolver.openOutputStream(uri, "w")
+                        ?: throw IllegalStateException("无法写入所选文件")
+                    os.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                    true
+                }.fold(
+                    onSuccess = { withContext(Dispatchers.Main) { "配置已导出到所选目录".show(ctx) } },
+                    onFailure = { withContext(Dispatchers.Main) { "导出失败：${it.message}".show(ctx) } }
+                )
+            }
+        }
+
+    /** 配置导出：远程/任务/设置三页全量配置序列化为 JSON，经 SAF 保存对话框写入用户选择的可见目录（如 Downloads） */
     private fun exportConfig() {
         val exportData = ExportDataModel()
 
@@ -329,30 +349,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             val json = exportData.toJson()
             Log.d(javaClass.simpleName, "导出配置长度=${json.length}")
 
-            // 写入文件（getExternalFilesDir/Documents，无需存储权限）
-            val dir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-            if (dir == null) {
-                "导出失败：外部存储不可用".show(ctx)
-                return@launch
-            }
+            // SAF 保存对话框：JSON 直接落盘到用户选择的可见目录（如 Downloads）
             val timeStamp = Date().format("yyyyMMdd_HHmmss")
-            val file = File(dir, "dailytask_config_$timeStamp.json")
-            runCatching { file.writeText(json) }.onFailure {
-                "导出失败：${it.message}".show(ctx)
-                return@launch
-            }
-
-            // 通过系统分享面板导出文件（FileProvider 授权临时读取）
-            val authority = BuildConfig.APPLICATION_ID + ".fileprovider"
-            val uri = FileProvider.getUriForFile(ctx, authority, file)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/json"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            pendingExportJson = json
             try {
-                startActivity(Intent.createChooser(shareIntent, "导出配置"))
-                "配置已导出为文件：${file.name}".show(ctx)
+                exportLauncher.launch("dailytask_config_$timeStamp.json")
             } catch (e: Exception) {
                 "导出失败：${e.message}".show(ctx)
             }
