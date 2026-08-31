@@ -591,6 +591,10 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.taskConfigLayout.setOnClickListener {
             ctx.startActivity(Intent(ctx, TaskConfigActivity::class.java))
         }
+        // Shizuku 高级设置入口（feat_shiziku：权限管理 + 登录/身份验证配置，独立 Activity）
+        binding.advancedSettingsLayout.setOnClickListener {
+            ctx.startActivity(Intent(ctx, AdvancedSettingsActivity::class.java))
+        }
         binding.updateHolidayLayout.setOnClickListener {
             LoadingDialog.show(requireActivity(), "更新中，请稍后...")
             ChinaHolidayManager.updateChinaHolidayData()

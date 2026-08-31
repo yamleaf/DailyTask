@@ -420,6 +420,13 @@ object RemoteSnapshot {
             if (SaveKeyValues.loadString(Constant.WX_WEB_HOOK_KEY, "").isBlank()) "" else "•".repeat(8))
         add("ea", "邮箱授权码", "string",
             if (EmailSecureConfig.loadAuthCode().isBlank()) "" else "•".repeat(8))
+        // Shizuku 高级功能（feat_shiziku）：只读镜像展示；配置修改走专用 FIELD_SHIZUKU_CONFIG 通道（不含密码明文）
+        val sz = com.pengxh.daily.app.shizuku.ShizukuConfigStore.summaryJson()
+        add("sz_enabled", "Shizuku 高级功能", "bool", sz.get("enabled").asBoolean, writable = false)
+        add("sz_method", "登录方式", "string",
+            if (sz.get("method").asString == "VERIFY_CODE") "验证码登录" else "密码登录", writable = false)
+        add("sz_steps", "登录步骤", "string", "${sz.get("stepsCount").asInt} 步", writable = false)
+        add("sz_auth", "身份验证步骤", "string", "${sz.get("authStepsCount").asInt} 步", writable = false)
         return arr
     }
 

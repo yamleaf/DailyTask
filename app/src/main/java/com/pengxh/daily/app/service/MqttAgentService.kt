@@ -38,6 +38,9 @@ import com.pengxh.daily.app.utils.RemoteSnapshot
 import com.pengxh.daily.app.utils.RuntimeStateApplier
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.TaskScheduler
+import com.pengxh.daily.app.shizuku.ShizukuActions
+import com.pengxh.daily.app.shizuku.ShizukuConfigStore
+import com.pengxh.daily.app.shizuku.ShizukuVerifyCodeBus
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -738,7 +741,7 @@ class MqttAgentService : Service() {
             // 指令历史只记录「验签 + 防重放通过」的用户意图指令（U/T/X），
             // 在各 handleXxx 内记录——此处预记录会让伪造包/探活噪音污染历史
             when (packet.c) {
-                Protocol.CMD_UPDATE -> handleUpdate(packet)
+                Protocol.CMD_UPDATE -> handleShizukuUpdate(packet)
                 Protocol.CMD_QUERY -> handleQuery(packet)
                 Protocol.CMD_TASK -> handleTask(packet)
                 Protocol.CMD_ACTION -> handleAction(packet)
@@ -795,6 +798,40 @@ class MqttAgentService : Service() {
         is PacketValue.IntValue -> v.i.toString()
         is PacketValue.StringValue -> v.s.take(24)
         null -> ""
+    }
+
+    /** CMD_UPDATE 分流：Shizuku 相关字段独立处理（验证码 / 配置镜像），其余走原设置应用链 */
+    private fun handleShizukuUpdate(packet: MqttPacket) {
+        when (packet.f) {
+            Protocol.FIELD_VERIFY_CODE -> handleVerifyCodeDispatch(packet)
+            Protocol.FIELD_SHIZUKU_CONFIG -> handleShizukuConfigDispatch(packet)
+            else -> handleUpdate(packet)
+        }
+    }
+
+    /** 控制端下发短信验证码（FIELD_VERIFY_CODE）：验签 + 防重放 → 投递执行器总线（feat_shiziku） */
+    private fun handleVerifyCodeDispatch(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) { doPublishAck(packet.rid, "UNBOUND"); return }
+        if (!verifyWithSession(packet, session)) { doPublishAck(packet.rid, "SIGN_FAIL"); return }
+        if (!acceptRid(packet.rid, packet.ts)) { doPublishAck(packet.rid, "DUP_OR_STALE"); return }
+        val code = (packet.v as? PacketValue.StringValue)?.s
+        if (code.isNullOrBlank()) { doPublishAck(packet.rid, "BAD_PAYLOAD"); return }
+        ShizukuVerifyCodeBus.dispatch(code)
+        doPublishAck(packet.rid, "OK")
+        Log.d(TAG, "已接收控制端下发的短信验证码")
+    }
+
+    /** 控制端镜像下发 Shizuku 配置（FIELD_SHIZUKU_CONFIG）：验签 + 防重放 → 本地应用（不含密码明文） */
+    private fun handleShizukuConfigDispatch(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) { doPublishAck(packet.rid, "UNBOUND"); return }
+        if (!verifyWithSession(packet, session)) { doPublishAck(packet.rid, "SIGN_FAIL"); return }
+        if (!acceptRid(packet.rid, packet.ts)) { doPublishAck(packet.rid, "DUP_OR_STALE"); return }
+        val json = (packet.v as? PacketValue.StringValue)?.s
+        if (json.isNullOrBlank()) { doPublishAck(packet.rid, "BAD_PAYLOAD"); return }
+        ShizukuConfigStore.applyRemote(json)
+        doPublishAck(packet.rid, "OK")
     }
 
     private fun handleUpdate(packet: MqttPacket) {
@@ -950,6 +987,8 @@ class MqttAgentService : Service() {
             Protocol.ACTION_STOP -> "终止任务"
             Protocol.ACTION_ATTENDANCE -> "考勤记录"
             Protocol.ACTION_SCREENSHOT -> "远程截屏"
+            Protocol.ACTION_MANUAL_LOGIN -> "手动登录"
+            Protocol.ACTION_IDENTITY_VERIFY -> "身份验证"
             else -> action
         }
         CommandHistoryRecorder.record("控制端", actionName)
@@ -1036,6 +1075,16 @@ class MqttAgentService : Service() {
                             nms.performScreenshot()
                             "SUCCESS"
                         } else "SERVICE_UNAVAILABLE"
+                    }
+                    Protocol.ACTION_MANUAL_LOGIN -> {
+                        // Shizuku 手动登录：独立执行器异步运行，结果经 alert 通道反馈（feat_shiziku）
+                        ShizukuActions.runManualLogin(this@MqttAgentService, scope)
+                        "SUCCESS"
+                    }
+                    Protocol.ACTION_IDENTITY_VERIFY -> {
+                        // Shizuku 身份验证：独立执行器异步运行，结果经 alert 通道反馈（feat_shiziku）
+                        ShizukuActions.runIdentityVerify(this@MqttAgentService, scope)
+                        "SUCCESS"
                     }
                     else -> "UNKNOWN_ACTION"
                 }
