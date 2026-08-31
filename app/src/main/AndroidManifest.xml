@@ -125,6 +125,15 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Shizuku（feat_shiziku）：Server 启动后经此 Provider 向本 App 传递 binder，缺失则 API 无法工作 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <!-- 后台保活：开机自启 + 精确闹钟复活前台服务 + 自定义重置点准时启动调度 -->
         <receiver
             android:name=".service.KeepAliveReceiver"
