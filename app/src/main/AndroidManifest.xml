@@ -63,6 +63,8 @@
         <activity android:name=".ui.CommandHistoryActivity" />
         <activity android:name=".ui.LogViewerActivity" />
         <activity android:name=".ui.PunchRecordActivity" />
+        <!-- Shizuku 高级设置（feat_shiziku）：Shizuku 权限管理 + 登录/验证码/身份验证配置 -->
+        <activity android:name=".ui.AdvancedSettingsActivity" />
 
         <service android:name=".service.FloatingWindowService" />
 
