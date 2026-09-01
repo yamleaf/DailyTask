@@ -43,7 +43,7 @@ object UiNodeParser {
     private fun parseBounds(s: String?): Rect? {
         if (s.isNullOrBlank()) return null
         val m = Regex("""\[(\d+),(\d+)\]\[(\d+),(\d+)\]""").find(s) ?: return null
-        val (x1, y1, x2, y2) = m.destructure
+        val (x1, y1, x2, y2) = m.destructured
         return Rect(x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt())
     }
 

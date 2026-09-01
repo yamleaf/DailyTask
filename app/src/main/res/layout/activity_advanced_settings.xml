@@ -3,209 +3,129 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/md_surface"
+    android:background="@color/md_background"
     android:orientation="vertical">
 
-    <!-- 标题栏 -->
-    <LinearLayout
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/itemLayoutHeight"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="@dimen/dp_16">
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_header_gradient"
+        app:navigationIcon="@drawable/ic_title_left"
+        app:title="高级设置"
+        app:titleTextColor="@color/on_header" />
 
-        <com.google.android.material.textview.MaterialTextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="高级设置"
-            android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
-            android:textColor="@color/md_onSurface" />
-
-        <com.google.android.material.textview.MaterialTextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="@dimen/dp_12"
-            android:layout_weight="1"
-            android:gravity="end"
-            android:text="Shizuku"
-            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
-            android:textColor="@color/md_onSurfaceVariant" />
-    </LinearLayout>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="@dimen/dividerLine"
-        android:background="@color/md_outlineVariant" />
-
-    <ScrollView
+    <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:fillViewport="true">
+        android:clipToPadding="false"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="32dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingHorizontal="@dimen/dp_16"
-            android:paddingBottom="@dimen/dp_24">
+            android:orientation="vertical">
 
-            <!-- ══════ Shizuku 服务卡片 ══════ -->
+            <!-- ══════ Shizuku 服务（胶囊化状态 + 授权按钮）══════ -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/dp_12"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/md_outlineVariant"
-                app:strokeWidth="1dp">
+                android:layout_marginBottom="@dimen/dp_12"
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical">
+                    android:orientation="vertical"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp">
 
-                    <com.google.android.material.textview.MaterialTextView
+                    <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:paddingTop="@dimen/dp_12"
-                        android:text="Shizuku 服务"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:textColor="@color/md_primary" />
+                        android:text="服务权限状态"
+                        android:textColor="@color/md_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
 
-                    <!-- Shizuku 状态 -->
                     <LinearLayout
                         android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
+                        android:orientation="horizontal">
 
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Shizuku 状态"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:id="@+id/txtShizukuStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onSurfaceVariant" />
-                    </LinearLayout>
+                            android:background="@drawable/bg_chip"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="5dp"
+                            android:text="服务：不可用"
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="12sp" />
 
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/md_outlineVariant" />
-
-                    <!-- 授权状态 + 去授权 -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="授权状态"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
-
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:id="@+id/txtShizukuAuth"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onSurfaceVariant" />
+                            android:layout_marginStart="8dp"
+                            android:background="@drawable/bg_chip"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="5dp"
+                            android:text="授权：未授权"
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="12sp" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnShizukuAuth"
                             style="@style/Widget.Material3.Button.TextButton"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="@dimen/dp_8"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:minHeight="0dp"
+                            android:minWidth="0dp"
+                            android:paddingHorizontal="8dp"
                             android:text="去授权"
                             android:textColor="@color/md_primary"
+                            android:textSize="12sp"
                             android:visibility="gone" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/md_outlineVariant" />
-
-                    <!-- 高级功能总开关 -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="高级功能"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/md_onSurface" />
-
-                            <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Shizuku 可用且已授权后可开启"
-                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                                android:textColor="@color/md_onSurfaceVariant" />
-                        </LinearLayout>
-
-                        <com.google.android.material.materialswitch.MaterialSwitch
-                            android:id="@+id/swAdvancedFeature"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ══════ 登录选项卡片 ══════ -->
+            <!-- ══════ 登录配置（配置区）══════ -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardLogin"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/dp_12"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/md_outlineVariant"
-                app:strokeWidth="1dp">
+                android:layout_marginBottom="@dimen/dp_12"
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <com.google.android.material.textview.MaterialTextView
+                    <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:paddingTop="@dimen/dp_12"
-                        android:text="登录选项"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:textColor="@color/md_primary" />
+                        android:paddingStart="16dp"
+                        android:paddingTop="14dp"
+                        android:paddingEnd="16dp"
+                        android:text="登录配置"
+                        android:textColor="@color/md_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
 
-                    <!-- 登录方式（密码/验证码二选一） -->
+                    <!-- 登录方式（当前生效方式，控制端可切换） -->
                     <LinearLayout
                         android:id="@+id/layoutLoginMethod"
                         android:layout_width="match_parent"
@@ -213,22 +133,23 @@
                         android:background="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
 
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:text="登录方式"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
+                            android:textColor="@color/md_onSurface"
+                            android:textSize="15sp" />
 
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:id="@+id/txtLoginMethod"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onSurfaceVariant" />
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="14sp" />
 
                         <ImageView
                             android:layout_width="wrap_content"
@@ -239,11 +160,12 @@
 
                     <View
                         android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:layout_height="1dp"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"
                         android:background="@color/md_outlineVariant" />
 
-                    <!-- 密码缓存（仅密码登录显示） -->
+                    <!-- 密码缓存 -->
                     <LinearLayout
                         android:id="@+id/layoutPassword"
                         android:layout_width="match_parent"
@@ -251,8 +173,8 @@
                         android:background="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:visibility="gone">
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -260,20 +182,20 @@
                             android:layout_weight="1"
                             android:orientation="vertical">
 
-                            <com.google.android.material.textview.MaterialTextView
+                            <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="密码缓存"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/md_onSurface" />
+                                android:textColor="@color/md_onSurface"
+                                android:textSize="15sp" />
 
-                            <com.google.android.material.textview.MaterialTextView
+                            <TextView
                                 android:id="@+id/txtPasswordStatus"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="未设置"
-                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                                android:textColor="@color/md_onSurfaceVariant" />
+                                android:textColor="@color/md_onSurfaceVariant"
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <ImageView
@@ -284,14 +206,107 @@
                     </LinearLayout>
 
                     <View
-                        android:id="@+id/dividerPassword"
                         android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/md_outlineVariant"
-                        android:visibility="gone" />
+                        android:layout_height="1dp"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"
+                        android:background="@color/md_outlineVariant" />
 
-                    <!-- 验证码等待（仅验证码登录显示） -->
+                    <!-- 密码登录步骤 -->
+                    <LinearLayout
+                        android:id="@+id/layoutPwdSteps"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="密码登录步骤"
+                                android:textColor="@color/md_onSurface"
+                                android:textSize="15sp" />
+
+                            <TextView
+                                android:id="@+id/txtPwdSteps"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="默认"
+                                android:textColor="@color/md_onSurfaceVariant"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:src="@drawable/ic_arrow_right"
+                            android:contentDescription="@null" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"
+                        android:background="@color/md_outlineVariant" />
+
+                    <!-- 验证码登录步骤 -->
+                    <LinearLayout
+                        android:id="@+id/layoutVerifySteps"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="验证码登录步骤"
+                                android:textColor="@color/md_onSurface"
+                                android:textSize="15sp" />
+
+                            <TextView
+                                android:id="@+id/txtVerifySteps"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="默认"
+                                android:textColor="@color/md_onSurfaceVariant"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:src="@drawable/ic_arrow_right"
+                            android:contentDescription="@null" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"
+                        android:background="@color/md_outlineVariant" />
+
+                    <!-- 验证码超时 -->
                     <LinearLayout
                         android:id="@+id/layoutVerifyWait"
                         android:layout_width="match_parent"
@@ -299,70 +314,23 @@
                         android:background="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:visibility="gone">
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
 
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="验证码等待"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
+                            android:text="验证码超时"
+                            android:textColor="@color/md_onSurface"
+                            android:textSize="15sp" />
 
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:id="@+id/txtVerifyWait"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onSurfaceVariant" />
-
-                        <ImageView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:src="@drawable/ic_arrow_right"
-                            android:contentDescription="@null" />
-                    </LinearLayout>
-
-                    <View
-                        android:id="@+id/dividerVerifyWait"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
-                        android:background="@color/md_outlineVariant"
-                        android:visibility="gone" />
-
-                    <!-- 登录步骤 -->
-                    <LinearLayout
-                        android:id="@+id/layoutLoginSteps"
-                        android:layout_width="match_parent"
-                        android:layout_height="@dimen/itemLayoutHeight"
-                        android:background="?attr/selectableItemBackground"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-
-                            <com.google.android.material.textview.MaterialTextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="登录步骤"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/md_onSurface" />
-
-                            <com.google.android.material.textview.MaterialTextView
-                                android:id="@+id/txtLoginSteps"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="未配置"
-                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                                android:textColor="@color/md_onSurfaceVariant" />
-                        </LinearLayout>
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="14sp" />
 
                         <ImageView
                             android:layout_width="wrap_content"
@@ -373,32 +341,31 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- ══════ 身份验证卡片 ══════ -->
+            <!-- ══════ 身份验证（配置区）══════ -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/cardAuth"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/dp_12"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/md_outlineVariant"
-                app:strokeWidth="1dp">
+                android:layout_marginBottom="@dimen/dp_12"
+                style="@style/Widget.Daily.SectionCard">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical">
 
-                    <com.google.android.material.textview.MaterialTextView
+                    <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:paddingHorizontal="@dimen/dp_16"
-                        android:paddingTop="@dimen/dp_12"
-                        android:text="身份验证"
-                        android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
-                        android:textColor="@color/md_primary" />
+                        android:paddingStart="16dp"
+                        android:paddingTop="14dp"
+                        android:paddingEnd="16dp"
+                        android:text="身份验证配置"
+                        android:textColor="@color/md_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
 
-                    <!-- 验证码等待 -->
+                    <!-- 身份验证超时 -->
                     <LinearLayout
                         android:id="@+id/layoutAuthWait"
                         android:layout_width="match_parent"
@@ -406,22 +373,23 @@
                         android:background="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
 
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="验证码等待"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                            android:textColor="@color/md_onSurface" />
+                            android:text="验证码超时"
+                            android:textColor="@color/md_onSurface"
+                            android:textSize="15sp" />
 
-                        <com.google.android.material.textview.MaterialTextView
+                        <TextView
                             android:id="@+id/txtAuthWait"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_onSurfaceVariant" />
+                            android:textColor="@color/md_onSurfaceVariant"
+                            android:textSize="14sp" />
 
                         <ImageView
                             android:layout_width="wrap_content"
@@ -432,8 +400,9 @@
 
                     <View
                         android:layout_width="match_parent"
-                        android:layout_height="@dimen/dividerLine"
-                        android:layout_marginHorizontal="@dimen/dp_16"
+                        android:layout_height="1dp"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginEnd="16dp"
                         android:background="@color/md_outlineVariant" />
 
                     <!-- 操作步骤 -->
@@ -444,7 +413,8 @@
                         android:background="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
-                        android:paddingHorizontal="@dimen/dp_16">
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -452,20 +422,86 @@
                             android:layout_weight="1"
                             android:orientation="vertical">
 
-                            <com.google.android.material.textview.MaterialTextView
+                            <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="操作步骤"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                                android:textColor="@color/md_onSurface" />
+                                android:textColor="@color/md_onSurface"
+                                android:textSize="15sp" />
 
-                            <com.google.android.material.textview.MaterialTextView
+                            <TextView
                                 android:id="@+id/txtAuthSteps"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="未配置"
-                                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                                android:textColor="@color/md_onSurfaceVariant" />
+                                android:text="默认"
+                                android:textColor="@color/md_onSurfaceVariant"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <ImageView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:src="@drawable/ic_arrow_right"
+                            android:contentDescription="@null" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- ══════ 模拟打卡（配置区）══════ -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardPunch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/dp_12"
+                style="@style/Widget.Daily.SectionCard">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="16dp"
+                        android:paddingTop="14dp"
+                        android:paddingEnd="16dp"
+                        android:text="模拟打卡配置"
+                        android:textColor="@color/md_primary"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <!-- 操作步骤 -->
+                    <LinearLayout
+                        android:id="@+id/layoutPunchSteps"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/itemLayoutHeight"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="操作步骤"
+                                android:textColor="@color/md_onSurface"
+                                android:textSize="15sp" />
+
+                            <TextView
+                                android:id="@+id/txtPunchSteps"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="默认"
+                                android:textColor="@color/md_onSurfaceVariant"
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <ImageView
@@ -478,14 +514,16 @@
             </com.google.android.material.card.MaterialCardView>
 
             <!-- 说明 -->
-            <com.google.android.material.textview.MaterialTextView
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/dp_12"
+                android:layout_marginTop="4dp"
+                android:paddingHorizontal="4dp"
                 android:lineSpacingExtra="4dp"
-                android:text="说明：\n· 密码仅在本次设置界面可查看，其他任何界面均不显示。\n· 登录步骤/操作步骤按从上到下依次点击，按钮文字用于自动识别。\n· 验证码登录时，被控端会弹请求并经控制端输入下发，超时则退出本次操作。\n· 授权 Shizuku 后，控制端可下发「手动登录 / 身份验证」指令。"
-                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                android:textColor="@color/md_onSurfaceVariant" />
+                android:text="配置说明：\n· 每步选择类型，并用「从当前屏幕采集坐标」点选按钮位置。\n· 点击坐标＝点按钮；密码/验证码输入＝点输入框后回填；验证信息采集＝通知你发送短信。\n· 多格验证码（1 格 1 位）需添加多个「验证码输入」步骤，逐格点选。"
+                android:textColor="@color/md_onSurfaceVariant"
+                android:textSize="12sp" />
+
         </LinearLayout>
-    </ScrollView>
+    </androidx.core.widget.NestedScrollView>
 </LinearLayout>

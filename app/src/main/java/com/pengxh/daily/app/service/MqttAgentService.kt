@@ -789,13 +789,39 @@ class MqttAgentService : Service() {
         null -> ""
     }
 
-    /** CMD_UPDATE 分流：Shizuku 相关字段独立处理（验证码 / 配置镜像），其余走原设置应用链 */
+    /** CMD_UPDATE 分流：Shizuku 相关字段独立处理（验证码 / 配置镜像 / 短信已发送），其余走原设置应用链 */
     private fun handleShizukuUpdate(packet: MqttPacket) {
         when (packet.f) {
             Protocol.FIELD_VERIFY_CODE -> handleVerifyCodeDispatch(packet)
             Protocol.FIELD_SHIZUKU_CONFIG -> handleShizukuConfigDispatch(packet)
+            Protocol.FIELD_SMS_SENT -> handleSmsSentDispatch(packet)
+            Protocol.FIELD_RESULT_CONFIRM -> handleResultConfirmDispatch(packet)
             else -> handleUpdate(packet)
         }
+    }
+
+    /** 控制端确认「短信已发送」（FIELD_SMS_SENT，钉钉验证码登录）：验签 + 防重放 → 投递执行器总线 */
+    private fun handleSmsSentDispatch(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) { doPublishAck(packet.rid, "UNBOUND"); return }
+        if (!verifyWithSession(packet, session)) { doPublishAck(packet.rid, "SIGN_FAIL"); return }
+        if (!acceptRid(packet.rid, packet.ts)) { doPublishAck(packet.rid, "DUP_OR_STALE"); return }
+        ShizukuVerifyCodeBus.dispatchSmsSent()
+        doPublishAck(packet.rid, "OK")
+        Log.d(TAG, "已接收控制端短信已发送确认")
+    }
+
+    /** 控制端人工确认结果（FIELD_RESULT_CONFIRM，结果判定步骤）：验签 + 防重放 → 投递执行器总线 */
+    private fun handleResultConfirmDispatch(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) { doPublishAck(packet.rid, "UNBOUND"); return }
+        if (!verifyWithSession(packet, session)) { doPublishAck(packet.rid, "SIGN_FAIL"); return }
+        if (!acceptRid(packet.rid, packet.ts)) { doPublishAck(packet.rid, "DUP_OR_STALE"); return }
+        val v = (packet.v as? PacketValue.StringValue)?.s
+        if (v != "success" && v != "fail") { doPublishAck(packet.rid, "BAD_PAYLOAD"); return }
+        ShizukuVerifyCodeBus.dispatchResultConfirm(v)
+        doPublishAck(packet.rid, "OK")
+        Log.d(TAG, "已接收控制端结果确认: $v")
     }
 
     /** 控制端下发短信验证码（FIELD_VERIFY_CODE）：验签 + 防重放 → 投递执行器总线（feat_shiziku） */
@@ -978,6 +1004,7 @@ class MqttAgentService : Service() {
             Protocol.ACTION_SCREENSHOT -> "远程截屏"
             Protocol.ACTION_MANUAL_LOGIN -> "手动登录"
             Protocol.ACTION_IDENTITY_VERIFY -> "身份验证"
+            Protocol.ACTION_SIMULATE_PUNCH -> "模拟打卡"
             else -> action
         }
         CommandHistoryRecorder.record("控制端", actionName)
@@ -1073,6 +1100,11 @@ class MqttAgentService : Service() {
                     Protocol.ACTION_IDENTITY_VERIFY -> {
                         // Shizuku 身份验证：独立执行器异步运行，结果经 alert 通道反馈（feat_shiziku）
                         ShizukuActions.runIdentityVerify(this@MqttAgentService, scope)
+                        "SUCCESS"
+                    }
+                    Protocol.ACTION_SIMULATE_PUNCH -> {
+                        // Shizuku 模拟打卡：独立执行器异步运行，结果经 alert 通道反馈（feat_shiziku）
+                        ShizukuActions.runSimulatePunch(this@MqttAgentService, scope)
                         "SUCCESS"
                     }
                     else -> "UNKNOWN_ACTION"

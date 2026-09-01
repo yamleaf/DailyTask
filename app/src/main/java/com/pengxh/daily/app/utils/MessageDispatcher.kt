@@ -85,11 +85,11 @@ object MessageDispatcher {
 
         when (channelType) {
             0 -> {
-                val isHtml = fullContent.trimStart().startsWith("<!DOCTYPE html>", ignoreCase = true)
+                val html = toEmailHtml(title.ifBlank { messageTitle }, fullContent)
                 EmailManager.sendEmail(
                     title.ifBlank { messageTitle },
-                    fullContent,
-                    isHtml = isHtml,
+                    html,
+                    isHtml = true,
                     onSuccess = onSuccess,
                     onFailure = onFailure
                 )
@@ -155,9 +155,9 @@ object MessageDispatcher {
                 }
                 EmailManager.sendAttachmentEmail(
                     title.ifBlank { messageTitle },
-                    fullContent,
+                    toEmailHtml(title.ifBlank { messageTitle }, fullContent),
                     filePath,
-                    isHtml = isHtml,
+                    isHtml = true,
                     onSuccess = onSuccess,
                     onFailure = onFailure
                 )
@@ -171,6 +171,35 @@ object MessageDispatcher {
             }
         }
     }
+
+    /**
+     * 统一邮件 HTML 化：已是完整 HTML 文档（<!DOCTYPE html>/<html 开头）原样直传；
+     * 纯文本则转义后包一层简洁 HTML 外壳，保证所有邮件均以 HTML 渲染（企微渠道不受影响）。
+     */
+    private fun toEmailHtml(title: String, content: String): String {
+        val trimmed = content.trimStart()
+        if (trimmed.startsWith("<!DOCTYPE html>", ignoreCase = true) || trimmed.startsWith("<html", ignoreCase = true)) {
+            return content
+        }
+        val body = buildString {
+            append("<div style=\"max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;\">")
+            append("<div style=\"background:linear-gradient(135deg,#4f6ef7,#6c5ce7);padding:14px 20px;color:#fff;font-size:15px;font-weight:700;\">")
+            append(escapeHtml(title.ifBlank { "通知" }))
+            append("</div>")
+            append("<div style=\"padding:16px 20px;font-size:13px;color:#333;line-height:1.7;white-space:pre-wrap;word-break:break-word;\">")
+            append(escapeHtml(content))
+            append("</div></div>")
+        }
+        return "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"></head>" +
+            "<body style=\"margin:0;padding:16px;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;\">$body</body></html>"
+    }
+
+    private fun escapeHtml(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
 
     private fun shouldSkipDuplicate(title: String, content: String): Boolean {
         val key = "${title.trim()}\n${content.trim()}"

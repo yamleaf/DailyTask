@@ -422,11 +422,24 @@ object RemoteSnapshot {
             if (EmailSecureConfig.loadAuthCode().isBlank()) "" else "•".repeat(8))
         // Shizuku 高级功能（feat_shiziku）：只读镜像展示；配置修改走专用 FIELD_SHIZUKU_CONFIG 通道（不含密码明文）
         val sz = com.pengxh.daily.app.shizuku.ShizukuConfigStore.summaryJson()
-        add("sz_enabled", "Shizuku 高级功能", "bool", sz.get("enabled").asBoolean, writable = false)
+        add("sz_status", "服务状态", "string",
+            if (com.pengxh.daily.app.shizuku.ShizukuManager.isAvailable()) "可用" else "不可用", writable = false)
+        add("sz_granted", "授权状态", "string",
+            if (com.pengxh.daily.app.shizuku.ShizukuManager.isGranted()) "已授权" else "未授权", writable = false)
+        add("sz_enabled", "高级功能", "bool", sz.get("enabled").asBoolean, writable = false)
         add("sz_method", "登录方式", "string",
             if (sz.get("method").asString == "VERIFY_CODE") "验证码登录" else "密码登录", writable = false)
-        add("sz_steps", "登录步骤", "string", "${sz.get("stepsCount").asInt} 步", writable = false)
-        add("sz_auth", "身份验证步骤", "string", "${sz.get("authStepsCount").asInt} 步", writable = false)
+        add("sz_pwdSteps", "密码登录步骤", "int", sz.get("pwdSteps").asInt, writable = false)
+        add("sz_verifySteps", "验证码登录步骤", "int", sz.get("verifySteps").asInt, writable = false)
+        add("sz_authStepsCount", "身份验证步骤", "int", sz.get("authStepsCount").asInt, writable = false)
+        add("sz_punchSteps", "模拟打卡步骤", "int", sz.get("punchSteps").asInt, writable = false)
+        add("sz_pwdStepsLabel", "-", "string", sz.get("pwdStepsLabel").asString, writable = false)
+        add("sz_verifyStepsLabel", "-", "string", sz.get("verifyStepsLabel").asString, writable = false)
+        add("sz_authStepsLabel", "-", "string", sz.get("authStepsLabel").asString, writable = false)
+        add("sz_punchStepsLabel", "-", "string", sz.get("punchStepsLabel").asString, writable = false)
+        add("sz_hasPassword", "密码状态", "bool", sz.get("hasPassword").asBoolean, writable = false)
+        add("sz_verifyWait", "验证码超时（秒）", "int", sz.get("verifyWait").asInt, writable = false)
+        add("sz_authWait", "身份验证超时（秒）", "int", sz.get("authWait").asInt, writable = false)
         return arr
     }
 

@@ -1954,14 +1954,14 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 高级设置（feat_shiziku：Shizuku 权限 + 登录/身份验证配置） -->
+            <!-- 权限增强（feat_shiziku：登录/身份验证与高级权限入口，独立页面承载） -->
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="@dimen/dp_4"
                 android:layout_marginTop="@dimen/dp_22"
                 android:layout_marginBottom="@dimen/dp_6"
-                android:text="高级设置"
+                android:text="权限增强"
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="@color/md_onSurfaceVariant" />
 
@@ -1984,12 +1984,17 @@
                         android:orientation="horizontal"
                         android:paddingHorizontal="@dimen/dp_16">
 
+                        <ImageView
+                            android:layout_width="@dimen/size_28"
+                            android:layout_height="@dimen/size_28"
+                            android:src="@drawable/ic_lock" android:contentDescription="@null" />
+
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="@dimen/dp_12"
                             android:layout_weight="1"
-                            android:text="Shizuku 高级设置"
+                            android:text="高级设置"
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                             android:textColor="@color/md_onSurface" />
 

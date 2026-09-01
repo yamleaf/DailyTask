@@ -264,5 +264,6 @@ dependencies {
     // 桌面小宠物动画（呼吸/眨眼/尾巴摆动/张望/点击反馈），用户后续把 Lottie JSON 投到 assets/pet/ 即可
     implementation 'com.airbnb.android:lottie:6.7.1'
     // Shizuku（feat_shiziku）：以 shell 权限执行 uiautomator/input/screencap，替代无障碍实现点击与屏幕信息获取
-    implementation 'dev.rikka.shizuku:shizuku-api:13.1.5'
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
 }

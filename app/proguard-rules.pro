@@ -113,6 +113,18 @@
 -keep class javax.activation.** { *; }
 # 注：META-INF/services（JavaMail 的 Provider 发现文件）R8 默认不截断，无需额外 -keepresources。
 
+# ---- 3.6) Shizuku（feat_shiziku）：保留 AIDL 接口与运行时类，防止公版混淆不可用 ----
+# Shizuku 官方 api/aidl 库自带 consumer 规则为空（13.1.5），R8 会重命名
+# IShizukuService/IRemoteProcess 等 AIDL 接口。虽然 Binder 事务靠「descriptor 字符串 +
+# 事务码」匹配、类名改动理论仍可通信，但为兼容各 ROM 与混淆行为变化，显式 keep：
+#   - moe.shizuku.server.**   AIDL 接口 + Stub/Proxy（asInterface 需稳定类名）
+#   - rikka.shizuku.**        Shizuku 单例 / ShizukuRemoteProcess / Provider
+#   - dev.rikka.shizuku.provider.**（ShizukuProvider，Manifest 引用，AGP 已 keep，双保险）
+-keep class moe.shizuku.** { *; }
+-keep class rikka.shizuku.** { *; }
+-dontwarn moe.shizuku.**
+-dontwarn rikka.shizuku.**
+
 # ---- 4) 保留注解与泛型签名（Room / Gson 反射与 TypeToken 需要） ----
 -keepattributes *Annotation*
 -keepattributes Signature

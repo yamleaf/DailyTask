@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 坐标采集靶心（feat_shiziku）：瞄准镜风格 —— 外红环 + 准星十字线 + 中心实心红点 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 外圈：红色圆环 -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#33FF3B30" />
+            <stroke
+                android:width="3dp"
+                android:color="#FFFF3B30" />
+        </shape>
+    </item>
+
+    <!-- 准星：水平线 -->
+    <item
+        android:left="10dp"
+        android:right="10dp">
+        <shape android:shape="rectangle">
+            <size android:height="2dp" />
+            <solid android:color="#D9FF3B30" />
+        </shape>
+    </item>
+
+    <!-- 准星：垂直线 -->
+    <item
+        android:top="10dp"
+        android:bottom="10dp">
+        <shape android:shape="rectangle">
+            <size android:width="2dp" />
+            <solid android:color="#D9FF3B30" />
+        </shape>
+    </item>
+
+    <!-- 中心：实心红点 -->
+    <item
+        android:left="19dp"
+        android:top="19dp"
+        android:right="19dp"
+        android:bottom="19dp">
+        <shape android:shape="oval">
+            <solid android:color="#FFFF3B30" />
+        </shape>
+    </item>
+</layer-list>
