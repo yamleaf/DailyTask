@@ -36,10 +36,14 @@ object CoordinateCaptureOverlay {
         initialX: Int = -1,
         initialY: Int = -1,
         initialRange: Int = 0,
-        onCancel: () -> Unit = {}
+        onCancel: () -> Unit = {},
+        twoPoint: Boolean = false,
+        onTwoPointConfirm: ((sx: Int, sy: Int, ex: Int, ey: Int, range: Int) -> Unit)? = null
     ) {
         if (!Settings.canDrawOverlays(context)) { onCancel(); return }
         dismiss()
+        // 两阶段（滑动采集）：null=待选起点，已定=待选终点
+        var startPoint: Pair<Int, Int>? = null
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val screenW = context.resources.displayMetrics.widthPixels
         val screenH = context.resources.displayMetrics.heightPixels
@@ -84,6 +88,21 @@ object CoordinateCaptureOverlay {
                 cornerRadius = dp(context, 10).toFloat()
                 setColor(Color.argb(150, 0, 0, 0))
             }
+        }
+        // 阶段提示（两点模式显示：第几次/起点已定请选终点）
+        val stageHint = TextView(context).apply {
+            gravity = Gravity.CENTER
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            maxLines = 2
+            isSingleLine = false
+            setPadding(dp(context, 10), dp(context, 2), dp(context, 10), dp(context, 2))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(context, 8).toFloat()
+                setColor(Color.argb(160, 0, 0, 0))
+            }
+            visibility = if (twoPoint) View.VISIBLE else View.GONE
+            text = if (twoPoint) "第 1 步：拖动准星定起点，点确认" else ""
         }
         fun refreshRange() {
             val range = RANGE_LEVELS[levelIndex]
@@ -150,6 +169,10 @@ object CoordinateCaptureOverlay {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setBackgroundColor(Color.TRANSPARENT)
+            addView(stageHint, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(context, 4) })
             addView(rangeRow)
             addView(btnRow, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -158,9 +181,9 @@ object CoordinateCaptureOverlay {
         }
         // 先填充范围文字，确保「- 范围 Xpx +」渲染完整
         refreshRange()
-        // 控制窗固定尺寸：行内宽度已知（- 32 + 6 + 范围 90 + 6 + + 32 = 166dp），180dp 足够容纳完整内容
-        val ctrlW = dp(context, 180)
-        val ctrlH = dp(context, 84)
+        // 控制窗固定尺寸：两点模式需容纳阶段提示（较长文字），统一加宽到 240dp
+        val ctrlW = dp(context, if (twoPoint) 240 else 180)
+        val ctrlH = dp(context, if (twoPoint) 112 else 84)
 
         fun overlayParams(w: Int, h: Int, title: String, allowOffscreen: Boolean): WindowManager.LayoutParams =
             WindowManager.LayoutParams(
@@ -259,8 +282,21 @@ object CoordinateCaptureOverlay {
             val cx = stageX + stageW / 2
             val cy = stageY + stageH / 2
             val range = RANGE_LEVELS[levelIndex]
-            dismiss()
-            onConfirm(cx, cy, range)
+            if (twoPoint) {
+                if (startPoint == null) {
+                    // 第一次：记录起点，切到第二步不动窗口，等用户拖到终点
+                    startPoint = cx to cy
+                    stageHint.text = "第 2 步：拖动准星定终点 → 确认"
+                    rangeInfo.text = "起点($cx,$cy)"
+                    return@setOnClickListener
+                }
+                val (sx, sy) = startPoint!!
+                dismiss()
+                onTwoPointConfirm?.invoke(sx, sy, cx, cy, range)
+            } else {
+                dismiss()
+                onConfirm(cx, cy, range)
+            }
         }
 
         refreshRange()

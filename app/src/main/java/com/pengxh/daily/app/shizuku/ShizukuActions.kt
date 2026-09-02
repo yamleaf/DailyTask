@@ -127,25 +127,46 @@ object ShizukuActions {
         var codeFilled = 0
 
         for ((index, step) in steps.withIndex()) {
-            if (step.type != ShizukuStepType.CODE_CAPTURE && step.type != ShizukuStepType.RESULT_CHECK && !step.hasCoord) {
+            if (step.type == ShizukuStepType.SWIPE) {
+                if (!step.hasCoord || !step.hasEndpoint) return "$tag·失败：第 ${index + 1} 步滑动未配置起点/终点"
+            } else if (step.type != ShizukuStepType.CODE_CAPTURE && step.type != ShizukuStepType.RESULT_CHECK && !step.hasCoord) {
                 return "$tag·失败：第 ${index + 1} 步未配置坐标"
             }
-            // 到自己的步骤，先延迟自己的 delay（0 用默认：第 1 步 5s，其余 3s；可配 1~30s）
-            // 多格验证码逐格填入时：从第二个验证码输入格开始默认 1s，避免逐格等待过久
-            val stepDelay = if (step.delay in 1..30) {
-                step.delay
-            } else if (step.type == ShizukuStepType.CODE_INPUT && codeFilled > 0) {
+            // 到自己的步骤，先实现基础延迟（秒）：
+            //  - 有延迟范围配置（min~max）：在范围内按 0.1s 步进随机，如 0-5→0~5s、3-5→3~5s、1-1→固定 1s
+            //  - 未配置：默认第 1 步 5s、其余 3s；多格验证码第 2+ 格默认 1s
+            val defaultDelay = if (step.type == ShizukuStepType.CODE_INPUT && codeFilled > 0) {
                 1
             } else if (index == 0) {
                 5
             } else {
                 3
             }
-            delay(stepDelay * 1000L)
-            Log.d(TAG, "step[${index + 1}] delay=${stepDelay}s type=${step.type} coord=(${step.x},${step.y}) range=${step.range}")
+            val base: Double = if (step.hasDelay) {
+                val lo = step.delayMin.coerceAtLeast(0)
+                val hi = step.delayMax.coerceAtLeast(lo)
+                if (hi <= lo) {
+                    lo.toDouble()
+                } else {
+                    // 在 lo~hi 之间按 0.1s 步进随机取一个值（如 3-5 → 3.0~5.0 步进 0.1）
+                    val steps = (hi - lo) * 10
+                    (lo + (Math.random() * (steps + 1)).toInt() / 10.0)
+                }
+            } else {
+                defaultDelay.toDouble()
+            }
+            // 基础停顿：每次操作前追加 0.5~2s 随机停留，模拟人阅读/找按钮的自然节奏
+            val pause = 500 + (Math.random() * 1500).toInt()
+            val waitMs = (base * 1000).toInt() + pause
+            delay(waitMs.toLong())
+            Log.d(TAG, "step[${index + 1}] wait=${waitMs}ms(type=${step.type}, coords=(${step.x},${step.y}), range=${step.range})")
             when (step.type) {
                 ShizukuStepType.CLICK -> {
                     if (!ShizukuShell.tap(step.x, step.y, step.range)) return "$tag·失败：第 ${index + 1} 步点击失败"
+                }
+
+                ShizukuStepType.SWIPE -> {
+                    if (!ShizukuShell.gesture(step.x, step.y, step.x2, step.y2)) return "$tag·失败：第 ${index + 1} 步滑动失败"
                 }
 
                 ShizukuStepType.PWD_INPUT -> {

@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
@@ -48,6 +49,10 @@ class AdvancedSettingsActivity : AppCompatActivity() {
     // 坐标采集（可拖动十字光标 + 范围可视化 + 自动回跳回填）挂起状态
     private var pendingCaptureCallback: ((Int, Int, Int) -> Unit)? = null
     private var pendingCaptureCoord: Triple<Int, Int, Int>? = null
+
+    // 滑动采集（两点模式）挂起状态：起点(sx,sy) + 终点(ex,ey)
+    private var pendingSwipeCallback: ((Int, Int, Int, Int) -> Unit)? = null
+    private var pendingSwipeCoord: Pair<Pair<Int, Int>, Pair<Int, Int>>? = null
 
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
         refreshShizukuState()
@@ -100,6 +105,15 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             pendingCaptureCoord = null
             pendingCaptureCallback = null
             cb(coord.first, coord.second, coord.third)
+        }
+        // 滑动采集确认后回跳：起点 + 终点一起回填
+        val swipe = pendingSwipeCoord
+        val scb = pendingSwipeCallback
+        if (swipe != null && scb != null) {
+            pendingSwipeCoord = null
+            pendingSwipeCallback = null
+            val (s, e) = swipe
+            scb(s.first, s.second, e.first, e.second)
         }
     }
 
@@ -244,52 +258,67 @@ class AdvancedSettingsActivity : AppCompatActivity() {
     }
 
     /** 本步延迟滑块选择（1~30s）：胶囊「延迟 s」点击弹出，拖动滑块即时预览 */
-    private fun showDelaySlider(current: Int, onResult: (Int) -> Unit) {
-        val valueTv = TextView(this).apply {
-            text = "${current} 秒"
-            textSize = 28f
+    /** 延迟范围设置：min~max 秒（0.1s 步进随机；相同=固定），如 0-5/1-1/3-5 */
+    private fun showDelayRangeDialog(currentMin: Int, currentMax: Int, onResult: (Int, Int) -> Unit) {
+        val minEt = EditText(this).apply {
+            hint = "最小秒（0）"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (currentMin > 0) currentMin.toString() else "")
+            textSize = 16f
             gravity = Gravity.CENTER
-            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
         }
-        val seek = SeekBar(this).apply {
-            max = 29
-            progress = (current - 1).coerceIn(0, 29)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                    valueTv.text = "${p + 1} 秒"
-                }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
+        val maxEt = EditText(this).apply {
+            hint = "最大秒（5）"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (currentMax > 0) currentMax.toString() else "")
+            textSize = 16f
+            gravity = Gravity.CENTER
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            addView(minEt, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@AdvancedSettingsActivity).apply {
+                text = "~"
+                textSize = 16f
+                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+                setPadding(dp(12), 0, dp(12), 0)
             })
+            addView(maxEt, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(8), dp(4), 0)
-            addView(valueTv)
-            addView(seek, LinearLayout.LayoutParams(
+            addView(TextView(this@AdvancedSettingsActivity).apply {
+                text = "本步执行前等待秒数范围（0.1s 步进随机）：\n· 0-5 → 0~5 秒内随机\n· 1-1 → 固定 1 秒\n· 3-5 → 3~5 秒内随机\n留空 = 默认（第 1 步 5s、其余 3s）"
+                textSize = 12f
+                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+                setLineSpacing(dp(3).toFloat(), 1f)
+            })
+            addView(row, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(8) })
+            ).apply { topMargin = dp(10) })
         }
         UnifiedDialogKit.showForm(
             ctx = this,
             contentView = box,
             title = "本步执行延迟",
-            message = "到本步后先等待该秒数再执行（1~30 秒）",
             positiveText = "确定",
             negativeText = "取消",
             onConfirm = {
-                onResult(seek.progress + 1)
+                val min = minEt.text.toString().trim().toIntOrNull() ?: 0
+                val max = maxEt.text.toString().trim().toIntOrNull()?.coerceAtLeast(min) ?: min
+                onResult(min, max)
                 true
             }
         )
     }
 
-/** 步骤编辑器：每步一张卡片，卡片头为「类型标签」+ 删除，卡片内为「坐标 + 点选」。
-     *  新步骤插入在「添加步骤」按钮之前；执行器全坐标点选。
-     */
+// 步骤编辑器：全屏（近屏宽）内嵌操作——每步卡片 1-2 行，添加步骤按钮就地插入，不弹窗
     private fun showStepEditor(title: String, current: List<ShizukuStep>, onSave: (List<ShizukuStep>) -> Unit) {
-        val typeLabels = arrayOf("点击坐标", "密码输入", "验证码输入", "验证信息采集", "结果判定")
+        val typeLabels = arrayOf("点击坐标", "手势滑动", "密码输入", "验证码输入", "验证信息采集", "结果判定")
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -308,6 +337,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         fun addRow(step: ShizukuStep) {
             lateinit var row: StepRow
             lateinit var coordArea: LinearLayout
+            lateinit var endpointArea: LinearLayout
             lateinit var keywordArea: LinearLayout
             // 卡片头类型：胶囊样式（文字 + ▾ 下拉符），点击弹单选，与「点选/延迟」胶囊风格统一
             val typeTv = TextView(this@AdvancedSettingsActivity).apply {
@@ -330,11 +360,12 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                 ) { which ->
                     row.type = ShizukuStepType.entries[which]
                     typeTv.text = "${typeLabels[which]} ▾"
-                    // 坐标区仅点击/密码/验证码输入需要；关键字区仅验证信息采集需要；结果判定两者皆无
                     val needCoord = row.type == ShizukuStepType.CLICK ||
+                        row.type == ShizukuStepType.SWIPE ||
                         row.type == ShizukuStepType.PWD_INPUT ||
                         row.type == ShizukuStepType.CODE_INPUT
                     coordArea.visibility = if (needCoord) View.VISIBLE else View.GONE
+                    endpointArea.visibility = if (row.type == ShizukuStepType.SWIPE) View.VISIBLE else View.GONE
                     keywordArea.visibility = if (row.type == ShizukuStepType.CODE_CAPTURE) View.VISIBLE else View.GONE
                 }
             }
@@ -364,6 +395,85 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                 minWidth = dp(40)
                 textSize = 12f
             }
+            // 滑动终点（SWIPE 专用）：X2/Y2 + 终点点选
+            val x2Edit = EditText(this@AdvancedSettingsActivity).apply {
+                hint = "X2"
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText(if (step.x2 >= 0) step.x2.toString() else "")
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                minWidth = dp(40)
+                textSize = 12f
+            }
+            val y2Edit = EditText(this@AdvancedSettingsActivity).apply {
+                hint = "Y2"
+                inputType = InputType.TYPE_CLASS_NUMBER
+                setText(if (step.y2 >= 0) step.y2.toString() else "")
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                minWidth = dp(40)
+                textSize = 12f
+            }
+            // 终点点选按钮：打开打卡App → 十字光标点选目标点 → 回填 X2/Y2
+            val collect2 = TextView(this@AdvancedSettingsActivity).apply {
+                text = "终点"
+                textSize = 12f
+                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+                gravity = Gravity.CENTER
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+                }
+                setOnClickListener {
+                    val curX = x2Edit.text.toString().toIntOrNull() ?: -1
+                    val curY = y2Edit.text.toString().toIntOrNull() ?: -1
+                    startCoordinateCapture(
+                        initialX = if (curX >= 0) curX else -1,
+                        initialY = if (curY >= 0) curY else -1,
+                        initialRange = 0
+                    ) { x, y, _ ->
+                        x2Edit.setText(x.toString())
+                        y2Edit.setText(y.toString())
+                    }
+                }
+            }
+            // 起点「点选」按钮：打开打卡App → 十字光标点选 → 回填 X/Y/范围
+            val collect = TextView(this@AdvancedSettingsActivity).apply {
+                text = "点选"
+                textSize = 13f
+                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+                gravity = Gravity.CENTER
+                setPadding(dp(12), dp(6), dp(12), dp(6))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(12).toFloat()
+                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+                }
+                setOnClickListener {
+                    val curX = xEdit.text.toString().toIntOrNull() ?: -1
+                    val curY = yEdit.text.toString().toIntOrNull() ?: -1
+                    if (row.type == ShizukuStepType.SWIPE) {
+                        // 滑动采集模式：起始十字 → 确认 → 自动切终点十字 → 再确认，一次性回填起终点
+                        startSwipeCapture(
+                            initialSx = if (curX >= 0) curX else -1,
+                            initialSy = if (curY >= 0) curY else -1
+                        ) { sx, sy, ex, ey ->
+                            xEdit.setText(sx.toString())
+                            yEdit.setText(sy.toString())
+                            x2Edit.setText(ex.toString())
+                            y2Edit.setText(ey.toString())
+                        }
+                    } else {
+                        startCoordinateCapture(
+                            initialX = if (curX >= 0) curX else -1,
+                            initialY = if (curY >= 0) curY else -1,
+                            initialRange = row.range
+                        ) { x, y, r ->
+                            xEdit.setText(x.toString())
+                            yEdit.setText(y.toString())
+                            row.range = r
+                        }
+                    }
+                }
+            }
             // CODE_CAPTURE 专用关键字（空=使用内置匹配规则）
             val kw1Edit = EditText(this@AdvancedSettingsActivity).apply {
                 hint = "收件人关键字"
@@ -385,8 +495,11 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             }
             // 随机点击范围（编辑器不显示，仅在点选悬浮窗内可视化调节；此处保存该行范围）
             row = StepRow(
-                typeTv, step.type, remarkEdit, xEdit, yEdit, kw1Edit, kw2Edit,
-                if (step.delay > 0) step.delay else 0,
+                typeTv, step.type, remarkEdit,
+                xEdit, yEdit, x2Edit, y2Edit, collect, collect2,
+                kw1Edit, kw2Edit,
+                if (step.delayMin > 0) step.delayMin else 0,
+                if (step.delayMax > 0) step.delayMax else 0,
                 if (step.range > 0) step.range else 0
             )
             // 本步执行延迟（秒）：默认第 1 步 5s、其余 3s；第 2 个及以后的验证码输入格默认 1s；0=用默认
@@ -397,7 +510,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                 else -> 3
             }
             val delayTv = TextView(this@AdvancedSettingsActivity).apply {
-                text = "延迟 ${if (row.delay > 0) row.delay else defaultDelay}s"
+                text = if (row.delayMax > 0) "延迟 ${row.delayMin}-${row.delayMax}s" else "延迟 0-${defaultDelay}s"
                 textSize = 13f
                 setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
                 gravity = Gravity.CENTER
@@ -407,30 +520,14 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                     setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
                 }
             }
-            delayTv.setOnClickListener { showDelaySlider(if (row.delay > 0) row.delay else defaultDelay) { row.delay = it; delayTv.text = "延迟 ${row.delay}s" } }
-            // 点选按钮（文字胶囊）：打开打卡App → 十字光标点选 + 范围可视化 → 回填 X/Y/范围（已有坐标默认定位）
-            val collect = TextView(this@AdvancedSettingsActivity).apply {
-                text = "点选"
-                textSize = 13f
-                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(6), dp(12), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
-                }
-                setOnClickListener {
-                    val curX = xEdit.text.toString().toIntOrNull() ?: -1
-                    val curY = yEdit.text.toString().toIntOrNull() ?: -1
-                    startCoordinateCapture(
-                        initialX = if (curX >= 0) curX else -1,
-                        initialY = if (curY >= 0) curY else -1,
-                        initialRange = row.range
-                    ) { x, y, r ->
-                        xEdit.setText(x.toString())
-                        yEdit.setText(y.toString())
-                        row.range = r
-                    }
+            delayTv.setOnClickListener {
+                showDelayRangeDialog(
+                    if (row.delayMax > 0) row.delayMin else 0,
+                    if (row.delayMax > 0) row.delayMax else defaultDelay
+                ) { min, max ->
+                    row.delayMin = min
+                    row.delayMax = max
+                    delayTv.text = if (max > 0) "延迟 ${min}-${max}s" else "延迟 0-${defaultDelay}s"
                 }
             }
             val remove = TextView(this@AdvancedSettingsActivity).apply {
@@ -466,6 +563,23 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { leftMargin = dp(4) })
             }
+            // 终点区（SWIPE 专用）：终点坐标 + 终点点选
+            endpointArea = LinearLayout(this@AdvancedSettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                val label = TextView(this@AdvancedSettingsActivity).apply {
+                    text = "终点"
+                    textSize = 12f
+                    setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+                }
+                addView(label)
+                addView(x2Edit)
+                addView(y2Edit)
+                addView(collect2, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = dp(4) })
+            }
             // 关键字区（验证信息采集）：收件人关键字 + 内容关键字，空=内置规则
             keywordArea = LinearLayout(this@AdvancedSettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -473,22 +587,35 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                 addView(kw1Edit)
                 addView(kw2Edit)
             }
-            // 卡片体：坐标区 | 关键字区 + 延迟（按类型切换可见性）
+            // 卡片体：第一行起点/坐标区 + 关键字区 + 延迟（紧凑）；终点区（SWIPE）独立第二行
             val body = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(coordArea, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(keywordArea, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(delayTv, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                orientation = LinearLayout.VERTICAL
+                val row1 = LinearLayout(this@AdvancedSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(coordArea, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ))
+                    addView(keywordArea, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(delayTv, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { leftMargin = dp(4) })
+                }
+                addView(row1)
+                addView(endpointArea, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { leftMargin = dp(4) })
+                ).apply { topMargin = dp(6) })
             }
             // 按当前类型初始化区域可见性
             val needCoord = row.type == ShizukuStepType.CLICK ||
+                row.type == ShizukuStepType.SWIPE ||
                 row.type == ShizukuStepType.PWD_INPUT ||
                 row.type == ShizukuStepType.CODE_INPUT
             coordArea.visibility = if (needCoord) View.VISIBLE else View.GONE
+            endpointArea.visibility = if (row.type == ShizukuStepType.SWIPE) View.VISIBLE else View.GONE
             keywordArea.visibility = if (row.type == ShizukuStepType.CODE_CAPTURE) View.VISIBLE else View.GONE
             // 整张卡片
             val card = LinearLayout(this@AdvancedSettingsActivity).apply {
@@ -529,28 +656,46 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         effective.forEach { addRow(it) }
         if (current.isEmpty() && effective.isEmpty()) addRow(ShizukuStep())
 
+        // 步骤多时内容超出屏幕：包进 ScrollView 并限制高度（约屏高 75%）
+        val scroll = ScrollView(this).apply {
+            isFillViewport = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (resources.displayMetrics.heightPixels * 0.75).toInt()
+            )
+            addView(container)
+        }
+
         UnifiedDialogKit.showForm(
             ctx = this,
-            contentView = container,
+            contentView = scroll,
             title = "$title 步骤",
-            message = "点击/密码/验证码输入类需点选坐标；验证信息采集可设收件人/内容关键字（空=内置规则）；验证码多格请逐格添加卡片。",
+            message = "点击/密码/验证码输入类需点选坐标；滑动类需点选起点与终点；验证信息采集可设收件人/内容关键字（空=内置规则）；验证码多格请逐格添加卡片。",
             positiveText = "保存",
             negativeText = "取消",
+            fullWidth = true,
             onConfirm = {
                 val steps = rows.mapNotNull { row ->
                     val x = row.xEdit.text.toString().toIntOrNull() ?: -1
                     val y = row.yEdit.text.toString().toIntOrNull() ?: -1
+                    val x2 = row.x2Edit.text.toString().toIntOrNull() ?: -1
+                    val y2 = row.y2Edit.text.toString().toIntOrNull() ?: -1
                     val remark = row.remarkEdit.text.toString().trim()
                     // 关键字保留原样（含首尾空格）：便于「到 」「发送 」这类带空格精确匹配，避免误识别
                     val kw1 = row.kw1Edit.text.toString()
                     val kw2 = row.kw2Edit.text.toString()
                     val needCoord = row.type == ShizukuStepType.CLICK ||
+                        row.type == ShizukuStepType.SWIPE ||
                         row.type == ShizukuStepType.PWD_INPUT ||
                         row.type == ShizukuStepType.CODE_INPUT
                     if (needCoord && (x < 0 || y < 0)) {
                         return@mapNotNull null
                     }
-                    ShizukuStep(row.type, remark, x, y, row.range, row.delay, kw1, kw2)
+                    if (row.type == ShizukuStepType.SWIPE && (x2 < 0 || y2 < 0)) {
+                        return@mapNotNull null
+                    }
+                    ShizukuStep(row.type, remark, x, y, x2, y2, row.range, row.delayMin, row.delayMax, kw1, kw2)
                 }
                 if (steps.isEmpty()) {
                     UnifiedDialogKit.showWarning(this, "未保存", "请至少为一步配置有效内容（点击/输入类需点选坐标）")
@@ -569,19 +714,25 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         val remarkEdit: EditText,
         val xEdit: EditText,
         val yEdit: EditText,
+        val x2Edit: EditText,
+        val y2Edit: EditText,
+        val collect: TextView,
+        val collect2: TextView,
         val kw1Edit: EditText,
         val kw2Edit: EditText,
-        var delay: Int,
+        var delayMin: Int,
+        var delayMax: Int,
         var range: Int
     )
 
     /** 步骤类型 → 下拉索引 */
     private fun typeIndex(type: ShizukuStepType): Int = when (type) {
         ShizukuStepType.CLICK -> 0
-        ShizukuStepType.PWD_INPUT -> 1
-        ShizukuStepType.CODE_INPUT -> 2
-        ShizukuStepType.CODE_CAPTURE -> 3
-        ShizukuStepType.RESULT_CHECK -> 4
+        ShizukuStepType.SWIPE -> 1
+        ShizukuStepType.PWD_INPUT -> 2
+        ShizukuStepType.CODE_INPUT -> 3
+        ShizukuStepType.CODE_CAPTURE -> 4
+        ShizukuStepType.RESULT_CHECK -> 5
     }
 
     /**
@@ -626,6 +777,46 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             initialRange = initialRange,
             onCancel = {
                 pendingCaptureCallback = null
+            }
+        )
+    }
+
+    /** 滑动采集（两点模式）：开起始十字 → 确认记起点 → 自动切终点十字 → 再确认 → 回跳回填起点+终点 */
+    private fun startSwipeCapture(
+        initialSx: Int = -1,
+        initialSy: Int = -1,
+        onResult: (sx: Int, sy: Int, ex: Int, ey: Int) -> Unit
+    ) {
+        pendingSwipeCallback = onResult
+        // 打开目标打卡 App
+        val pkg = Constant.getTargetApp()
+        val intent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            setPackage(pkg)
+        }
+        val info = packageManager.queryIntentActivities(intent, 0).firstOrNull()
+        if (info != null) {
+            intent.component = ComponentName(info.activityInfo.packageName, info.activityInfo.name)
+            runCatching { startActivity(intent) }
+        }
+        // 两点模式：第一次确认记起点、再拖到终点确认 → 自动回跳回填
+        CoordinateCaptureOverlay.startCapture(
+            context = this,
+            onConfirm = { _: Int, _: Int, _: Int -> },
+            twoPoint = true,
+            onTwoPointConfirm = { sx, sy, ex, ey, _ ->
+                pendingSwipeCoord = (sx to sy) to (ex to ey)
+                runCatching {
+                    startActivity(Intent(this@AdvancedSettingsActivity, AdvancedSettingsActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    })
+                }
+            },
+            initialX = if (initialSx >= 0) initialSx else -1,
+            initialY = if (initialSy >= 0) initialSy else -1,
+            onCancel = {
+                pendingSwipeCallback = null
             }
         )
     }

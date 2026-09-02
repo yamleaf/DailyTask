@@ -129,6 +129,40 @@ object ShizukuShell {
         return exec("input text '$escaped'") != null
     }
 
+    /**
+     * 弧线滑动：起点 (x1,y1) → 终点 (x2,y2)，用二次贝塞尔插值分段 `input swipe` 逼近，
+     * 中间轨迹带弧度更接近人手，**终点精确落在 (x2,y2) 不偏**。
+     * @param segments 分段数（默认 6，越多越平滑）；每段固定 60ms，总时长 ~segments*60ms
+     */
+    suspend fun gesture(x1: Int, y1: Int, x2: Int, y2: Int, segments: Int = 6): Boolean {
+        // 控制点：起点与终点连线垂直方向的随机偏移，让弧度方向每次略有不同
+        val dx = x2 - x1
+        val dy = y2 - y1
+        val dist = Math.hypot(dx.toDouble(), dy.toDouble()).coerceAtLeast(1.0)
+        // 垂直偏移幅值 = 距离的 10%~25%，方向随机（上/下）
+        val amp = dist * (0.10 + Math.random() * 0.15)
+        val ctrlX = (x1 + x2) / 2 + ((-dy / dist) * amp * (if (Math.random() < 0.5) -1.0 else 1.0)).toInt()
+        val ctrlY = (y1 + y2) / 2 + ((dx / dist) * amp * (if (Math.random() < 0.5) -1.0 else 1.0)).toInt()
+        // 首段从起点出发、末段收在终点，中间按二次贝塞尔插值
+        var prevX = x1
+        var prevY = y1
+        val sb = StringBuilder()
+        for (i in 1..segments) {
+            val t = i.toDouble() / segments
+            val mt = 1 - t
+            val ix = (mt * mt * x1 + 2 * mt * t * ctrlX + t * t * x2).toInt()
+            val iy = (mt * mt * y1 + 2 * mt * t * ctrlY + t * t * y2).toInt()
+            if (i == segments) { // 末段强制终点精确
+                sb.append("input swipe $prevX $prevY $x2 $y2 60; ")
+            } else {
+                sb.append("input swipe $prevX $prevY $ix $iy 60; ")
+                prevX = ix; prevY = iy
+            }
+        }
+        sb.append("echo done")
+        return exec(sb.toString()) != null
+    }
+
     /** 截图字节流（PNG，经 /data/local/tmp 中转） */
     suspend fun screenshotBytes(): ByteArray? = withContext(Dispatchers.IO) {
         val shoot = newProcess(arrayOf("sh", "-c", "screencap -p /data/local/tmp/sz_s.png")) ?: return@withContext null
