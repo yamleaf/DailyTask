@@ -1,4 +1,5 @@
-[submodule "protocol"]
+﻿[submodule "protocol"]
 	path = protocol
 	url = git@github.com:yamleaf/DailyProtocol.git
-	branch = feat_shiziku
+	branch = master
+
