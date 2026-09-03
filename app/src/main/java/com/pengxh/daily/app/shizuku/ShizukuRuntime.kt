@@ -73,6 +73,23 @@ object ShizukuRuntime {
     fun newProcess(cmd: Array<String>): Any? =
         officialNewProcess(cmd) ?: customNewProcess(cmd)
 
+    /**
+     * 发起权限请求（按当前生效通道路由）：
+     *  - 自定义通道：反射调用自定义 Stub 的 requestPermission（descriptor 一致，server 端才能通过
+     *    enforceInterface 校验；若走官方 Shizuku.requestPermission 会因 descriptor 不匹配被 server
+     *    抛 SecurityException 而无响应）
+     *  - 官方通道：官方 rikka.shizuku 库
+     */
+    fun requestPermission(requestCode: Int): Boolean = when (activeChannel()) {
+        "shizuku-custom" -> customRequestPermission(requestCode)
+        "shizuku-official" -> runCatching {
+            val binder = Shizuku.getBinder() ?: return false
+            moe.shizuku.server.IShizukuService.Stub.asInterface(binder).requestPermission(requestCode)
+            true
+        }.onFailure { Log.w(TAG, "官方 Shizuku requestPermission 失败: ${it.message}") }.getOrDefault(false)
+        else -> false
+    }
+
     /** 读取远程进程 stdout 全部文本（官方/自定义 IRemoteProcess 均可用 getInputStream） */
     fun readOutput(process: Any): String? = runCatching {
         val pfd = process.javaClass.getMethod("getInputStream").invoke(process) as ParcelFileDescriptor
@@ -142,4 +159,13 @@ object ShizukuRuntime {
             ).invoke(service, cmd, null, null)
         }.onFailure { Log.w(TAG, "自定义 Shizuku 反射调用失败: ${it.message}") }.getOrNull()
     }
+
+    /** 自定义通道发权限请求：反射自定义 Stub 的 requestPermission（descriptor 一致才能通过 server 校验） */
+    private fun customRequestPermission(requestCode: Int): Boolean = runCatching {
+        val binder = customBinder() ?: return false
+        val stub = Class.forName("$customPkg.server.IShizukuService\$Stub")
+        val service = stub.getMethod("asInterface", IBinder::class.java).invoke(null, binder)
+        service.javaClass.getMethod("requestPermission", Integer.TYPE).invoke(service, requestCode)
+        true
+    }.onFailure { Log.w(TAG, "自定义 Shizuku requestPermission 反射失败: ${it.message}") }.getOrDefault(false)
 }
