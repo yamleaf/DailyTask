@@ -280,23 +280,31 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             null -> GrantRow("自启动", "原生无需")
         }
 
-        // 通知监听
+        // 通知监听（Android 12+ 权威机制：系统以二进制 v2 字段为准，直接 settings put 只写
+        // 字符串缓存，会「已授权未连接」且杀进程/重启后丢失。优先用系统正式命令 allow_listener
+        //（更新 v2 + 触发绑定，持久且连接）；命令在 root/Custom shizuku 下可用，官方 shell 模式
+        // 静默失败，回退 settings put + requestRebind）
+        val listenerComponent = "$pkg/com.pengxh.daily.app.service.NotificationMonitorService"
         if (!ctx.notificationEnable()) {
             runCatching {
-                ShizukuShell.exec(
-                    "settings put secure enabled_notification_listeners " +
-                        "$pkg/com.pengxh.daily.app.service.NotificationMonitorService; echo done"
-                )
+                ShizukuShell.exec("cmd notification allow_listener $listenerComponent; echo done")
             }
             delay(400)
-            // adb 只写入 secure 设置（已授权）；运行中进程不会自动重绑服务（未连接），
-            // 主动 requestRebind 让系统立即绑定 NotificationListenerService
-            runCatching {
-                NotificationListenerService.requestRebind(
-                    ComponentName(ctx, NotificationMonitorService::class.java)
-                )
+            if (!ctx.notificationEnable()) {
+                runCatching {
+                    ShizukuShell.exec(
+                        "settings put secure enabled_notification_listeners $listenerComponent; echo done"
+                    )
+                }
+                delay(300)
+                // 运行中进程不会自动重绑服务（未连接），主动 requestRebind 让系统立即绑定
+                runCatching {
+                    NotificationListenerService.requestRebind(
+                        ComponentName(ctx, NotificationMonitorService::class.java)
+                    )
+                }
+                delay(300)
             }
-            delay(300)
             rows += GrantRow(
                 "通知监听",
                 if (ctx.notificationEnable()) "已通过 adb 授权" else "授权失败，需手动"
