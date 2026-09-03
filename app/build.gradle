@@ -49,6 +49,24 @@ def customPackageId = {
     return v
 }()
 
+// 自定义 Shizuku 包名：CI 手动触发（workflow_dispatch 输入 custom_shizuku_pkg）或本机
+// ./gradlew assembleRelease -PcustomShizukuPkg=<包名> 传入后，启用「自定义 shizuku」双通道：
+//   1) BuildConfig.CUSTOM_SHIZUKU_PKG 写入包名，运行时按该包反射加载配套 shizuku 接口（官方优先、自定义兜底）；
+//   2) 期望自定义 api 的 jar/aar 通过 -PcustomShizukuLib=<路径> 追加依赖（留空则不引入，仅桩函数）。
+// 未传/留空时：不启用自定义通道，仅官方 shizuku；CUSTOM_SHIZUKU_PKG=''，走桩逻辑（无额外代码/依赖）。
+def customShizukuPkg = {
+    def v = project.findProperty('customShizukuPkg')?.toString()?.trim() ?: ''
+    if (!v) return ''
+    if (!(v ==~ /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/)) {
+        throw new GradleException("自定义 Shizuku 包名格式非法: '${v}'（需合法包名，如 com.abc.helper）")
+    }
+    println "> 自定义 Shizuku 包名已启用: ${v}"
+    return v
+}()
+
+// 自定义 Shizuku api 库（jar/aar），由配套改名工程编译产出；留空则不引入（仅桩）。
+def customShizukuLib = project.findProperty('customShizukuLib')?.toString()?.trim() ?: ''
+
 // 构建时间（分钟精度，与 versionCode 的 2 分钟粒度相称，避免秒级变动导致无谓重编）
 def cnTz = TimeZone.getTimeZone('Asia/Shanghai')
 def cnFormat = { String pattern, Date date ->
@@ -95,6 +113,13 @@ android {
         buildConfigField 'String', 'GIT_SHA', "\"$gitShort\""
         buildConfigField 'String', 'BUILD_TIME', "\"$buildTime\""
         buildConfigField 'String', 'BASELINE_VERSION', "\"$baselineVersion\""
+
+        // 自定义 Shizuku 包名（'' = 未启用，走桩函数）；非空时 ShizukuManager 启用自定义通道
+        buildConfigField 'String', 'CUSTOM_SHIZUKU_PKG', "\"$customShizukuPkg\""
+
+        // 自定义 Shizuku 权限：-PcustomShizukuPkg 指定时注入实际权限名（自定义 server 以此识别 DT 为客户端并推 binder）；
+        // 未指定时用无害的 INTERNET 占位（重复声明系统允许），避免空权限名导致清单非法。
+        manifestPlaceholders = [customShizukuPermission: (customShizukuPkg ? "${customShizukuPkg}.manager.permission.API_V23" : 'android.permission.INTERNET')]
 
         def isAlphaBuild = System.getenv('BUILD_FLAVOR') != 'release'
         if (isAlphaBuild) {
@@ -266,4 +291,9 @@ dependencies {
     // Shizuku（feat_shiziku）：以 shell 权限执行 uiautomator/input/screencap，替代无障碍实现点击与屏幕信息获取
     implementation 'dev.rikka.shizuku:api:13.1.5'
     implementation 'dev.rikka.shizuku:provider:13.1.5'
+    // 自定义 Shizuku api（配套改名工程产物）：留空不引入，仅官方通道
+    if (customShizukuLib) {
+        println "> 引入自定义 Shizuku api 库: ${customShizukuLib}"
+        implementation files(customShizukuLib)
+    }
 }

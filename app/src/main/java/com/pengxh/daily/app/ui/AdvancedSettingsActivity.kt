@@ -2,8 +2,16 @@ package com.pengxh.daily.app.ui
 
 import android.content.ComponentName
 import android.content.Intent
+import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -20,14 +28,23 @@ import androidx.core.content.ContextCompat
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.UiInsets
 import com.pengxh.daily.app.databinding.ActivityAdvancedSettingsBinding
+import com.pengxh.daily.app.extensions.isAutostartGranted
+import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.shizuku.CoordinateCaptureOverlay
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore
+import androidx.lifecycle.lifecycleScope
 import com.pengxh.daily.app.shizuku.ShizukuLoginMethod
 import com.pengxh.daily.app.shizuku.ShizukuManager
+import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.shizuku.ShizukuStep
 import com.pengxh.daily.app.shizuku.ShizukuStepType
+import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.Constant
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
 /**
@@ -40,7 +57,8 @@ import rikka.shizuku.Shizuku
  *
  * 安全约定：
  *  - 密码仅在「密码缓存」对话框输入时录入；保存后不回显明文，再次进入只能重新填写覆盖。
- *  - 密码登录 / 验证码登录步骤分开配置；未配置自动使用内置默认（按目标 App）。
+ *  - 密码登录 / 验证码登录步骤分开配置；步骤一律**按采集的坐标执行**（逐机不同，无内置默认），
+ *    未配置时执行器直接反馈「步骤未配置」，需在高级设置里「从当前屏幕采集坐标」。
  */
 class AdvancedSettingsActivity : AppCompatActivity() {
 
@@ -69,6 +87,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         Shizuku.addRequestPermissionResultListener(permissionListener)
 
         binding.btnShizukuAuth.setOnClickListener { ShizukuManager.requestPermission(this) }
+        binding.layoutQuickGrant.setOnClickListener { quickGrant() }
         binding.layoutLoginMethod.setOnClickListener { if (editable()) showMethodDialog() }
         binding.layoutPassword.setOnClickListener { if (editable()) showPasswordDialog() }
         binding.layoutPwdSteps.setOnClickListener {
@@ -125,14 +144,14 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     private fun editable(): Boolean = ShizukuManager.isGranted()
 
-    /** 刷新 Shizuku 服务胶囊（运行时状态）+ 配置区可编辑性 */
+    /** 刷新 Shizuku 服务明细（行式）+ 配置区可编辑性 */
     private fun refreshShizukuState() {
         val available = ShizukuManager.isAvailable()
         val granted = ShizukuManager.isGranted()
-        binding.txtShizukuStatus.text = "服务：${if (available) "可用" else "不可用"}"
-        binding.txtShizukuStatus.setTextColor(statusColor(available))
-        binding.txtShizukuAuth.text = "授权：${if (granted) "已授权" else "未授权"}"
-        binding.txtShizukuAuth.setTextColor(statusColor(granted))
+        binding.txtShizukuChannel.text = ShizukuManager.channelLabel()
+        binding.txtShizukuChannel.setTextColor(statusColor(available))
+        binding.txtShizukuAuthSource.text = ShizukuManager.grantSource()
+        binding.txtShizukuAuthSource.setTextColor(statusColor(granted))
         binding.btnShizukuAuth.visibility = if (available && !granted) View.VISIBLE else View.GONE
         // 高级功能：Shizuku 已授权即生效，配置区始终随授权状态可编辑
         val on = ShizukuManager.isGranted()
@@ -140,12 +159,169 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         binding.cardAuth.alpha = if (on) 1f else 0.45f
         binding.cardPunch.alpha = if (on) 1f else 0.45f
         refreshConfig()
+        refreshEnv()
+    }
+
+    /** 环境明细（Shizuku 服务 / 开发者选项 / 无线调试 / ADB 状态），经 shizuku getprop 异步刷新 */
+    private fun refreshEnv() {
+        lifecycleScope.launch {
+            val env = ShizukuManager.environment(this@AdvancedSettingsActivity)
+            binding.txtShizukuServer.text = env.shizukuServer
+            binding.txtDevOpt.text = env.devOpt
+            binding.txtWirelessAdb.text = env.wirelessAdb
+            binding.txtAdbStatus.text = env.adbUsb
+        }
     }
 
     private fun statusColor(ok: Boolean): Int = if (ok) {
         ContextCompat.getColor(this, R.color.md_success)
     } else {
         ContextCompat.getColor(this, R.color.md_warning)
+    }
+
+    /** 一键授权：检测悬浮窗/通知/自启动/电池白名单/通知监听，未授权项尝试用 Shizuku(adb) 授权 */
+    private fun quickGrant() {
+        val ctx = this
+        if (!ShizukuManager.isGranted()) {
+            UnifiedDialogKit.showConfirm(
+                ctx,
+                "Shizuku 未就绪",
+                "一键授权需要通过 Shizuku 执行 adb 授权，请先完成 Shizuku 授权。",
+                confirmText = "去授权",
+                cancelText = "取消",
+                onConfirm = { ShizukuManager.requestPermission(ctx) }
+            )
+            return
+        }
+        UnifiedDialogKit.showConfirm(
+            ctx,
+            "一键授权",
+            "将检测以下权限，未授权项尝试通过 Shizuku(adb) 自动授权：\n\n悬浮窗 / 通知 / 自启动 / 电池白名单 / 通知监听",
+            confirmText = "开始",
+            cancelText = "取消",
+            cancelable = false,
+            onConfirm = {
+                binding.txtQuickGrantResult.text = "授权中…"
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val rows = grantViaAdb(ctx)
+                    withContext(Dispatchers.Main) {
+                        binding.txtQuickGrantResult.text =
+                            if (rows.all { it.status.startsWith("已") }) "已全部授权" else "部分未授权"
+                        showGrantResult(rows)
+                    }
+                }
+                true
+            }
+        )
+    }
+
+    private data class GrantRow(val name: String, val status: String)
+
+    private suspend fun grantViaAdb(ctx: Context): List<GrantRow> {
+        val pkg = ctx.packageName
+        val rows = mutableListOf<GrantRow>()
+
+        // 悬浮窗
+        if (!Settings.canDrawOverlays(ctx)) {
+            runCatching {
+                ShizukuShell.exec("cmd appops set $pkg SYSTEM_ALERT_WINDOW allow 2>/dev/null; appops set $pkg SYSTEM_ALERT_WINDOW allow 2>/dev/null; echo done")
+            }
+            delay(400)
+            rows += GrantRow(
+                "悬浮窗",
+                if (Settings.canDrawOverlays(ctx)) "已通过 adb 授权" else "授权失败，需手动"
+            )
+        } else {
+            rows += GrantRow("悬浮窗", "已授权")
+        }
+
+        // 通知（Android 13+ 运行时权限）
+        val notifGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!notifGranted) {
+            runCatching {
+                ShizukuShell.exec("pm grant $pkg android.permission.POST_NOTIFICATIONS; echo done")
+            }
+            delay(300)
+            rows += GrantRow(
+                "通知",
+                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+                ) "已通过 adb 授权" else "授权失败，需手动"
+            )
+        } else {
+            rows += GrantRow("通知", "已授权")
+        }
+
+        // 电池白名单
+        val pm = ctx.getSystemService(PowerManager::class.java)
+        if (!pm.isIgnoringBatteryOptimizations(pkg)) {
+            runCatching {
+                ShizukuShell.exec("dumpsys deviceidle whitelist +$pkg; echo done")
+            }
+            delay(400)
+            rows += GrantRow(
+                "电池白名单",
+                if (pm.isIgnoringBatteryOptimizations(pkg)) "已通过 adb 授权" else "授权失败，需手动"
+            )
+        } else {
+            rows += GrantRow("电池白名单", "已授权")
+        }
+
+        // 自启动（仅 MIUI/HyperOS 有公开 appops，可尝试自动授权；其余原生视为无需）
+        val autostart = isAutostartGranted()
+        rows += when (autostart) {
+            true -> GrantRow("自启动", "已授权")
+            false -> {
+                runCatching { ShizukuShell.exec("appops set $pkg AUTO_START allow; echo done") }
+                GrantRow("自启动", if (isAutostartGranted() == true) "已通过 adb 授权" else "授权失败，需手动")
+            }
+            null -> GrantRow("自启动", "原生无需")
+        }
+
+        // 通知监听
+        if (!ctx.notificationEnable()) {
+            runCatching {
+                ShizukuShell.exec(
+                    "settings put secure enabled_notification_listeners " +
+                        "$pkg/com.pengxh.daily.app.service.NotificationMonitorService; echo done"
+                )
+            }
+            delay(400)
+            // adb 只写入 secure 设置（已授权）；运行中进程不会自动重绑服务（未连接），
+            // 主动 requestRebind 让系统立即绑定 NotificationListenerService
+            runCatching {
+                NotificationListenerService.requestRebind(
+                    ComponentName(ctx, NotificationMonitorService::class.java)
+                )
+            }
+            delay(300)
+            rows += GrantRow(
+                "通知监听",
+                if (ctx.notificationEnable()) "已通过 adb 授权" else "授权失败，需手动"
+            )
+        } else {
+            rows += GrantRow("通知监听", "已授权")
+        }
+
+        return rows
+    }
+
+    private fun showGrantResult(rows: List<GrantRow>) {
+        val lines = rows.joinToString("\n") { "• ${it.name}：${it.status}" }
+        val allOk = rows.all { it.status.startsWith("已") }
+        if (allOk) {
+            UnifiedDialogKit.showSuccess(this, "一键授权完成", lines, cancelText = null)
+        } else {
+            UnifiedDialogKit.showConfirm(
+                this,
+                "一键授权结果",
+                lines,
+                confirmText = "知道了",
+                cancelText = null
+            )
+        }
     }
 
     /** 登录配置与身份验证配置可同时编辑（密码登录 / 验证码登录不互斥；步骤分别维护） */
@@ -823,7 +999,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     private fun refreshRowNumbers(editors: List<EditText>) {
         editors.forEachIndexed { i, e ->
-            e.hint = "第 ${i + 1} 步按钮文字"
+            e.hint = "第 ${i + 1} 步备注（仅标签，不参与定位）"
         }
     }
 

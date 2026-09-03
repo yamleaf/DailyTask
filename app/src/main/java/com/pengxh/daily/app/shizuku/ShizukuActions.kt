@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -26,11 +27,13 @@ import java.io.FileOutputStream
  * 流程（两种模式一致）：
  *   1. 前置校验（Shizuku 就绪 + 配置完整）→ 不满足则 alert 反馈并跳过
  *   2. 打开目标打卡 App
- *   3. dump 判定页面类型：不是目标页 → 退回 DT 主界面 + alert「跳过」
- *   4. 按配置步骤逐一点击（每步 dump → 按按钮文字定位 → input tap）
- *   5. 验证码模式：页面出现验证码输入框 → alert 请求控制端 → 等待配置超时 → 回填
- *   6. 完成/失败/超时 → 退回主界面 + alert 反馈结果
+ *   3. 按配置步骤逐一执行（**纯坐标点选**：点击/滑动/密码/验证码回填都按采集的坐标执行，
+ *      不做 dump 文字查找定位）
+ *   4. 验证码模式：页面出现验证码输入框 → alert 请求控制端 → 等待配置超时 → 回填
+ *   5. 完成/失败/超时 → 退回主界面 + alert 反馈结果
  *
+ * 并发安全：登录/验证/模拟打卡共用 [actionMutex]，同一时刻仅一个动作在跑；
+ * 系统动画经 ShizukuShell.disableAnimations/restoreAnimations 成对管理，finally 必恢复。
  * 所有异常均 runCatching 兜底，绝不影响打卡主流程。
  */
 object ShizukuActions {
@@ -40,6 +43,13 @@ object ShizukuActions {
     private const val MODE_LOGIN = "login"
     private const val MODE_VERIFY = "verify"
     private const val MODE_PUNCH = "punch"
+
+    /**
+     * 动作互斥锁：登录 / 身份验证 / 模拟打卡共用同一套 shell 点击通道，
+     * 并发执行会互相干扰（A 的点击落到 B 的页面上），故同一时刻只允许一个动作在跑。
+     * 占用时直接反馈「跳过」而不是排队等待——排队会让控制端在数十秒内收不到任何反馈。
+     */
+    private val actionMutex = Mutex()
 
     /** 控制端下发「手动登录」后调用 */
     fun runManualLogin(context: Context, scope: CoroutineScope) {
@@ -69,6 +79,20 @@ object ShizukuActions {
         }
         Log.d(TAG, "Shizuku $tag 动作开始 mode=$mode")
 
+        if (!actionMutex.tryLock()) {
+            feedback(resultType, "跳过：已有 Shizuku 操作正在执行，请稍后再试")
+            return
+        }
+        try {
+            runFlow(context, mode, resultType, tag)
+        } finally {
+            // 无论成败/异常都恢复系统动画并释放锁：绝不能把用户设备的动画永久置 0
+            runCatching { ShizukuShell.restoreAnimations() }
+            actionMutex.unlock()
+        }
+    }
+
+    private suspend fun runFlow(context: Context, mode: String, resultType: String, tag: String) {
         // 1. 前置校验：Shizuku 就绪 + 高级功能开启 + 对应配置完整
         if (!ShizukuManager.isAvailable() || !ShizukuManager.isGranted()) {
             feedback(resultType, "跳过：Shizuku 未就绪，请先在被控端高级设置中授权")
@@ -87,7 +111,20 @@ object ShizukuActions {
             feedback(resultType, "跳过：${tag}步骤未配置")
             return
         }
+        // 「结果判定」会 return 结束整个流程，放在中间会静默吞掉后续步骤——直接拒绝并给出位置提示
+        val resultCheckIdx = steps.indexOfFirst { it.type == ShizukuStepType.RESULT_CHECK }
+        if (resultCheckIdx >= 0 && resultCheckIdx != steps.lastIndex) {
+            feedback(
+                resultType,
+                "跳过：结果判定必须是最后一步（当前在第 ${resultCheckIdx + 1}/${steps.size} 步）"
+            )
+            return
+        }
         Log.d(TAG, "Shizuku 步骤: $steps")
+
+        // 1.4 临时关闭系统动画（转场动画会打乱 uiautomator/input 时序）；
+        //     恢复动作在 execute() 的 finally 中，异常/超时路径同样保证执行
+        ShizukuShell.disableAnimations()
 
         // 1.5 亮屏 + 退出锁屏（息屏时点击无效）；息屏才亮屏、锁屏界面才上滑，避免亮屏未锁时多余手势
         val km = context.getSystemService(KeyguardManager::class.java)
@@ -295,6 +332,7 @@ object ShizukuActions {
                     file.absolutePath,
                     force = true
                 )
+                pruneResultShots(file)
             }
         }
         feedback(
@@ -308,6 +346,20 @@ object ShizukuActions {
             delay(500)
         }
         return null
+    }
+
+    /**
+     * 只保留最近 3 张结果截图，删除更旧的（避免长期运行堆积占用存储）。
+     * 注意：仅删除「非本次」的旧文件——本次截图可能正被异步邮件发送读取，不能删。
+     */
+    private fun pruneResultShots(keep: File) {
+        runCatching {
+            val dir = keep.parentFile ?: return
+            dir.listFiles { f -> f.name.startsWith("sz_result_") && f.name.endsWith(".png") }
+                ?.sortedByDescending { it.lastModified() }
+                ?.drop(3)
+                ?.forEach { runCatching { it.delete() } }
+        }
     }
 
     /** 请求控制端下发验证码并等待，超时返回 null（等待期间持续消费总线） */

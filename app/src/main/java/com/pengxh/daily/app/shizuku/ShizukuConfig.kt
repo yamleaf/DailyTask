@@ -12,14 +12,14 @@ enum class ShizukuLoginMethod { PASSWORD, VERIFY_CODE }
 
 /**
  * 步骤类型：
- *  - CLICK：直接点击指定坐标（坐标优先，秒级；无坐标回退文字查找）
+ *  - CLICK：直接点击指定坐标（**纯坐标，无文字查找回退**）
  *  - SWIPE：弧线滑动（起点 x/y → 终点 x2/y2）；轨迹用贝塞尔分段插值接近真实手滑，终点精确不偏离
- *  - PWD_INPUT：向指定坐标输入框回填密码（无坐标则文字/首输入框回退）
- *  - CODE_INPUT：向指定坐标输入框回填短信验证码（无坐标则文字/首输入框回退）
+ *  - PWD_INPUT：向指定坐标输入框回填密码（须先点选聚焦坐标；中文经剪贴板粘贴输入）
+ *  - CODE_INPUT：向指定坐标输入框回填短信验证码（同样支持中文/符号，走剪贴板粘贴）
  *  - CODE_CAPTURE：钉钉等需「通知用户发短信」的采集步骤：
  *       优先识别短信内容+收件人上报控制端 → 用户发送后确认 FIELD_SMS_SENT；
  *       识别失败回退截图（screenshot）经消息渠道发送给用户，由用户自行发送短信。
- *  - RESULT_CHECK：结果判定（截图回传人工确认，作为最后一个步骤）：
+ *  - RESULT_CHECK：结果判定（截图回传人工确认，**只能作为最后一个步骤**）：
  *       截图经消息渠道（邮箱/企微附件）回传用户 → alert 请求控制端人工确认；
  *       用户看截图后点「成功/失败」→ FIELD_RESULT_CONFIRM 回传 → 判定登录/验证成败。
  */
@@ -27,11 +27,14 @@ enum class ShizukuStepType { CLICK, SWIPE, PWD_INPUT, CODE_INPUT, CODE_CAPTURE, 
 
 /**
  * 登录/验证操作的一步（feat_shiziku）。
- * 坐标 >=0 时执行器优先直接点击/回填（秒级，不依赖 dump）；无坐标时才按 buttonText 走 uiautomator 查找。
+ * **纯坐标执行**：所有点击/输入类步骤都必须有坐标（执行器对无坐标步骤直接判失败）；
+ * [buttonText] 仅为「步骤备注/标签」，用于在设置界面标识这一步是干什么的（如「点登录」「填密码」），
+ * **不参与任何查找定位**——识别按钮统一靠采集的坐标，逐机不同，需在高级设置里「从当前屏幕采集坐标」。
  * SWIPE 类型：x/y 为起点，x2/y2 为终点（均须 >=0）。
  */
 data class ShizukuStep(
     val type: ShizukuStepType = ShizukuStepType.CLICK,
+    /** 步骤备注/标签（仅展示用，不参与点击定位；JSON 字段 t 保持兼容） */
     val buttonText: String = "",
     val x: Int = -1,
     val y: Int = -1,

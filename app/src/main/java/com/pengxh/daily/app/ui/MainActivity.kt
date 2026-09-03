@@ -84,6 +84,7 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     companion object {
         private const val USAGE_NOTICE_ACK_VERSION_KEY = "usage_notice_ack_version"
+        private const val KEY_FIRST_LAUNCH_DONE = "first_launch_done"
 
         const val EXTRA_TAB = "extra_tab"
         const val TAB_TASK = "tab_task"
@@ -130,6 +131,9 @@ class MainActivity : KotlinBaseActivity<ActivityMainBinding>() {
 
     /** 首次启动弹窗是否已在展示中（防止 onResume 重复触发） */
     private var firstLaunchDialogShowing = false
+
+    /** 首次启动悬浮窗授权页是否已拉起（仅一次，避免 onResume 反复跳转） */
+    private var firstLaunchOverlayLaunched = false
 
     /** 权限列表弹窗各行状态视图：Pair(授权检查函数, 状态TextView)，供系统设置返回后刷新 */
     private val permissionStatusRows = mutableListOf<Pair<() -> Boolean, TextView>>()
@@ -358,23 +362,29 @@ private fun applyTabFromIntent(intent: Intent?) {
             IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        // 悬浮窗权限硬门禁（最高优先级）：未授权直接跳系统授权页；返回仍未授权会在
-        // 下次前台再次拉起，不授权不允许进入主界面。「暂停使用」状态下不强制。
-        // 必须先于首次启动引导流程执行，保证卸载重装后第一眼是系统授权页而非主界面。
-        if (!Settings.canDrawOverlays(this)) {
-            if (!KeepAliveReceiver.isPaused()) {
+        // 首次启动：先跳悬浮窗授权页（仅一次），无论用户是否授权成功都进入主界面，
+        // 随后由 handleFirstLaunch 依次弹「使用须知 → 权限授权」；授权弹窗关闭后（见
+        // showPermissionListDialog onConfirm）检查悬浮窗权限，缺失则弹警告弹窗。
+        // 「暂停使用」状态下不强制跳授权页。
+        val firstLaunch = !SaveKeyValues.loadBoolean(KEY_FIRST_LAUNCH_DONE, false)
+        if (firstLaunch) {
+            if (!Settings.canDrawOverlays(this) && !firstLaunchOverlayLaunched && !KeepAliveReceiver.isPaused()) {
+                firstLaunchOverlayLaunched = true
                 overlayPermissionLauncher.launch(
                     Intent(
                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:$packageName")
                     )
                 )
-                return
+                return // 等用户从授权页返回后再走主流程
             }
-            "悬浮窗权限未开启，部分功能可能无法正常使用".show(this)
+            SaveKeyValues.saveBoolean(KEY_FIRST_LAUNCH_DONE, true)
+            handleFirstLaunch()
+            return
         }
-        // 关键基础权限（自启动/悬浮窗/电池白名单/通知）缺失：冷启动弹使用须知+权限列表；
-        // 权限满足后跨版本不再打扰，同会话内不重复弹
+        // 后续启动：不再用悬浮窗硬门禁阻断进入（允许用户进入 App 后自行处理）；
+        // 悬浮窗缺失时由下方 hasMissingCriticalPermissions 触发使用须知/权限列表引导，
+        // 权限弹窗关闭后（showPermissionListDialog onConfirm）仍会检查悬浮窗并弹警告。
         if (hasMissingCriticalPermissions()) {
             if (firstLaunchDialogShowing) {
                 // 从系统授权页返回：仅刷新各行授权状态，不重建弹窗
@@ -1048,6 +1058,17 @@ private fun applyTabFromIntent(intent: Intent?) {
                 // 完成引导不写任何持久化标记：下次冷启动按「关键权限是否缺失」重新判定。
                 // 使用须知语义保持——仅点「不再提醒」才持久关闭，点「知道了」下版本/缺权限时仍会提示。
                 permissionStatusRows.clear()
+                // 授权弹窗关闭后检查悬浮窗权限：缺失则警告，避免用户误以为能正常拉起目标应用
+                if (!Settings.canDrawOverlays(ctx)) {
+                    UnifiedDialogKit.showWarning(
+                        ctx,
+                        "悬浮窗权限未开启",
+                        "悬浮窗权限未授权，可能无法正常拉起目标应用。\n请到系统设置中开启悬浮窗权限，或稍后在高级设置里使用「一键授权」。",
+                        confirmText = "知道了",
+                        cancelText = null,
+                        cancelable = false
+                    )
+                }
                 true
             }
         )
