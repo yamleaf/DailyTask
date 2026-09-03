@@ -290,7 +290,7 @@ object CoordinateCaptureOverlay {
                     rangeInfo.text = "起点($cx,$cy)"
                     return@setOnClickListener
                 }
-                val (sx, sy) = startPoint!!
+                val (sx, sy) = startPoint
                 dismiss()
                 onTwoPointConfirm?.invoke(sx, sy, cx, cy, range)
             } else {

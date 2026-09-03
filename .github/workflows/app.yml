@@ -1,4 +1,4 @@
-name: Build Alpha（AI优化版本）
+name: Build Apk
 
 on:
   push:
@@ -73,7 +73,7 @@ jobs:
     needs: rate-check
     # rate-check 永远会跑并输出 allowed：push 走限流/manual 直接放行
     if: needs.rate-check.outputs.allowed == 'true'
-    name: Build APK(alpha自动版本)
+    name: Start Build
     runs-on: ubuntu-latest
 
     # alpha 构建：注入环境变量，build.gradle 据此生成
@@ -175,6 +175,10 @@ jobs:
             echo "未定义签名 Secret，使用仓库内置默认签名"
           fi
 
+      - name: Compute git short hash
+        run: |
+          echo "GIT_HASH_SHORT=${GITHUB_SHA:0:8}" >> "$GITHUB_ENV"
+
       # ===== 自定义 Shizuku（可选）：仅在 workflow_dispatch 传了 shizuku_pkg 时执行 =====
       # 拉取 yamleaf/Shizuku alpha → rename 改名 → 编 manager release + api jar，
       # 产物导出到 CUSTOM_SHIZUKU_* 环境变量供下方 DT Build 使用。
@@ -185,14 +189,21 @@ jobs:
         run: |
           bash scripts/build_custom_shizuku.sh
 
-      - name: Upload custom Shizuku artifacts (optional)
+      - name: Upload custom Shizuku manager (optional)
         if: inputs.shizuku_pkg != ''
         uses: actions/upload-artifact@v4
         with:
-          name: custom_shizuku_${{ inputs.shizuku_pkg }}_${{ github.run_number }}
-          path: |
-            custom_shizuku_artifacts/*.apk
-            custom_shizuku_artifacts/*.jar
+          name: shizuku-custom_${{ env.CUSTOM_SHIZUKU_ART_NAME }}
+          path: custom_shizuku_artifacts/*.zip
+          retention-days: 10
+          if-no-files-found: error
+
+      - name: Upload custom Shizuku api jar (optional)
+        if: inputs.shizuku_pkg != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: shizuku-custom-api_${{ env.CUSTOM_SHIZUKU_ART_NAME }}
+          path: custom_shizuku_artifacts/*.jar
           retention-days: 10
           if-no-files-found: error
 
@@ -238,12 +249,12 @@ jobs:
           EOF
 
       # ===== 上传加密后的 7z 到 artifact（不再上传明文 APK）=====
-      # 名称带 run_number 后缀：每次构建独立、可并存，便于"保留最近 30 次"；
+      # 名称带 git 短哈希：每次构建独立、可并存，便于识别来源 commit；
       # retention-days 作为兜底，防止清理步骤偶发未执行时无限堆积。
       - name: Upload encrypted release APK (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: dailyTask_alpha_release_${{ github.run_number }}
+          name: dailyTask_alpha_release_${{ env.GIT_HASH_SHORT }}
           path: dailyTask_release_*.7z
           retention-days: 10
 

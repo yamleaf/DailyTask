@@ -71,6 +71,11 @@
 -keep class org.eclipse.paho.client.mqttv3.** { *; }
 -dontwarn org.eclipse.paho.client.mqttv3.**
 
+# reactor-blockhound：依赖（如 reactor-core）携带的 META-INF/services 引用 BlockHoundIntegration，
+# 但该类不在运行时 classpath，R8 提示「Unexpected reference to missing service class」。无害，抑制即可。
+-dontwarn reactor.blockhound.**
+-dontwarn reactor.blockhound.integration.BlockHoundIntegration
+
 # ---- 2) Room：实体、DAO、数据库（保留类与成员，避免字段/方法被混淆或裁剪） ----
 -keep class com.pengxh.daily.app.sqlite.bean.** { *; }
 -keep class com.pengxh.daily.app.sqlite.dao.** { *; }
