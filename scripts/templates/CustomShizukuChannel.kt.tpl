@@ -49,7 +49,7 @@ object CustomShizukuChannel : ShizukuChannel {
 
     override fun activeChannel(): String = if (binderDescriptor() == descriptor) "shizuku-custom" else "不可用"
 
-    override fun grantSource(): String = if (isGranted()) "自定义 shizuku 授权" else "未授权"
+    override fun grantSource(): String = if (isGranted()) "Shizuku-Custom 授权" else "未授权"
 
     override fun serverProcessName(): String =
         if (isAvailable()) "${customPkg.substringAfterLast('.')}_server" else "未知"
