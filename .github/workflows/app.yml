@@ -193,7 +193,7 @@ jobs:
         if: inputs.shizuku_pkg != ''
         uses: actions/upload-artifact@v4
         with:
-          name: shizuku-custom_${{ env.CUSTOM_SHIZUKU_ART_NAME }}
+          name: ${{ env.CUSTOM_SHIZUKU_ART_NAME }}
           path: custom_shizuku_artifacts/*.zip
           retention-days: 10
           if-no-files-found: error
@@ -202,7 +202,7 @@ jobs:
         if: inputs.shizuku_pkg != ''
         uses: actions/upload-artifact@v4
         with:
-          name: shizuku-custom-api_${{ env.CUSTOM_SHIZUKU_ART_NAME }}
+          name: ${{ env.CUSTOM_SHIZUKU_ART_NAME }}-api-jar
           path: custom_shizuku_artifacts/*.jar
           retention-days: 10
           if-no-files-found: error
