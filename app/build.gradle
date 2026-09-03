@@ -67,6 +67,43 @@ def customShizukuPkg = {
 // 自定义 Shizuku api 库（jar/aar），由配套改名工程编译产出；留空则不引入（仅桩）。
 def customShizukuLib = project.findProperty('customShizukuLib')?.toString()?.trim() ?: ''
 
+// ===== 自定义 Shizuku 通道实现生成 =====
+// 双通道：把 scripts/templates/CustomShizukuChannel.kt.tpl 中 __CUSTOM_PKG__ 替换为真实包名，
+//         产出 CustomShizukuChannel.kt（零反射直调自定义 AIDL，见接口 ShizukuChannel）；
+// 官方单通道：拷贝 CustomShizukuChannel.stub.tpl（桩实现，isAvailable=false）。
+// 产物统一落到 build/generated/shizuku，并在下方 sourceSets 注册为源码目录。
+def tplDir = rootProject.file('scripts/templates')
+def generatedShizukuDir = file("${buildDir}/generated/shizuku")
+def genPkgDir = file("${generatedShizukuDir}/src/main/java")
+def customChannelOutput = new File(genPkgDir, 'com/pengxh/daily/app/shizuku/CustomShizukuChannel.kt')
+def generateCustomChannel = tasks.register('generateCustomShizukuChannel') {
+    outputs.file(customChannelOutput)
+    if (customShizukuPkg) {
+        def tpl = new File(tplDir, 'CustomShizukuChannel.kt.tpl')
+        doLast {
+            def content = tpl.getText('UTF-8').replace('__CUSTOM_PKG__', customShizukuPkg)
+            customChannelOutput.parentFile.mkdirs()
+            customChannelOutput.setText(content, 'UTF-8')
+            println "> 生成自定义通道实现: ${customShizukuPkg}"
+        }
+        inputs.file(tpl)
+    } else {
+        def stub = new File(tplDir, 'CustomShizukuChannel.stub.tpl')
+        doLast {
+            customChannelOutput.parentFile.mkdirs()
+            stub.withInputStream { s -> customChannelOutput.withOutputStream { o -> s.transferTo(o) } }
+            println "> 生成自定义通道桩实现（官方单通道）"
+        }
+        inputs.file(stub)
+    }
+    // 包名变化时强制重生成
+    inputs.property('customShizukuPkg', customShizukuPkg)
+}
+
+// 生成目录注册为源码目录，且先于编译执行。
+// 注：srcDir 注册放在 android{ } 块内（见下方 sourceSets 配置），此处仅挂依赖。
+tasks.named('preBuild').configure { dependsOn(generateCustomChannel) }
+
 // 构建时间（分钟精度，与 versionCode 的 2 分钟粒度相称，避免秒级变动导致无谓重编）
 def cnTz = TimeZone.getTimeZone('Asia/Shanghai')
 def cnFormat = { String pattern, Date date ->
@@ -79,6 +116,14 @@ def buildTime = cnFormat('yyyy-MM-dd HH:mm', new Date())
 android {
     namespace = 'com.pengxh.daily.app'
     compileSdk = 37
+
+    // 自定义 Shizuku 通道实现由脚本在编译前生成到 build/generated/shizuku，注册为源码目录
+    sourceSets {
+        main {
+            java.srcDir("$buildDir/generated/shizuku/src/main/java")
+            kotlin.srcDir("$buildDir/generated/shizuku/src/main/java")
+        }
+    }
 
     lint {
         disable 'NewerVersionAvailable'

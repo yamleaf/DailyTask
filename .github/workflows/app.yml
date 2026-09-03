@@ -18,7 +18,7 @@ on:
         required: false
         default: ''
       shizuku_pkg:
-        description: '自定义 Shizuku 包名（留空=不启用自定义 shizuku，仅官方通道；非空如 com.abc.helper=启用自定义 shizuku，自动拉取 Shizuku alpha 改名并编译 manager release + api jar，DT 编双通道）'
+        description: '自定义 Shizuku 包名（留空=不启用自定义 shizuku，仅官方通道；非空如 com.exmple.custom.shizuku=启用自定义 shizuku，自动拉取 Shizuku alpha 改名并编译 manager release + api jar，DT 编双通道）'
         required: false
         default: ''
 

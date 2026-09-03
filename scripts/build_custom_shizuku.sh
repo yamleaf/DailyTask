@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build custom Shizuku (manager release APK + api jar) inside DT CI.
 # Usage (only run when a shizuku package is provided):
-#   SHIZUKU_PKG=com.abc.helper bash scripts/build_custom_shizuku.sh
+#   SHIZUKU_PKG=com.exmple.custom.shizuku bash scripts/build_custom_shizuku.sh
 #
 # Steps:
 #   1. clone https://github.com/yamleaf/Shizuku.git alpha branch

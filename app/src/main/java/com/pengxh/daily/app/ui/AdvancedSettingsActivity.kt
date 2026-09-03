@@ -279,7 +279,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
                     runCatching { ShizukuShell.exec("appops set $pkg AUTO_START allow; echo done") }
                     GrantRow("自启动", if (isAutostartGranted() == true) "已通过 adb 授权" else "授权失败，需手动")
                 }
-                else -> GrantRow("自启动", "原生无需")
             }
         }
 
