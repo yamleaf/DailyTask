@@ -10,6 +10,7 @@ import android.os.Environment
 import androidx.room.Room.databaseBuilder
 import com.google.android.material.color.DynamicColors
 import com.pengxh.daily.app.sqlite.DailyTaskDataBase
+import com.pengxh.daily.app.shizuku.ShizukuRuntime
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
@@ -78,6 +79,7 @@ class DailyTaskApplication : Application() {
         processStartAtMs = System.currentTimeMillis()
         SaveKeyValues.initialize(this)
         AppRuntimeConfig.refreshFromStore()
+        ShizukuRuntime.init(this)
         // 前台「无操作」自动进入伪息屏：由基类（KotlinBaseActivity）经桥接器回调，
         // 统一驱动所有前台页面（任务页 / 远程页 / 设置页等），延迟复用「息屏分组」配置。
         ForegroundIdleBridge.onResume = { IdlePseudoMaskController.startIdleMask(it) }

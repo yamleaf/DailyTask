@@ -1,9 +1,11 @@
 package com.pengxh.daily.app.shizuku
 
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.pengxh.daily.app.BuildConfig
 import rikka.shizuku.Shizuku
 
@@ -21,6 +23,12 @@ object ShizukuRuntime {
 
     private const val TAG = "ShizukuRuntime"
     private val customPkg: String = BuildConfig.CUSTOM_SHIZUKU_PKG
+    private var appContext: Context? = null
+
+    /** 由 Application 在启动时注入，供自定义通道做真实权限判断（checkSelfPermission） */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
 
     /** Shizuku 服务是否在线（官方优先，自定义兜底） */
     fun isAvailable(): Boolean = officialAvailable() || customAvailable()
@@ -47,7 +55,7 @@ object ShizukuRuntime {
     fun grantSource(): String = when {
         !isGranted() -> "未授权"
         activeChannel() == "shizuku-custom" -> "自定义 shizuku(root 放行)"
-        activeChannel() == "shizuku-official" -> "Shizuku 官方授权"
+        activeChannel() == "shizuku-official" -> "Shizuku 授权"
         else -> "已授权"
     }
 
@@ -102,10 +110,19 @@ object ShizukuRuntime {
         return officialAvailable() && customBinder() != null
     }
 
+    /**
+     * 自定义通道是否已真实授权：仅收到 binder 不算，还必须拿到配套 shizuku 的
+     * `<customPkg>.manager.permission.API_V23` 运行时权限（server 端 newProcess 的
+     * checkCallingPermission 强制要求，见 ShizukuService.checkCallerPermission）。
+     * 未授权时界面「申请授权」按钮应出现、相关卡片置灰，授权后方可执行。
+     */
     private fun customGranted(): Boolean {
         if (!customEnabled()) return false
-        // 与我们编译的配套 shizuku 约定：能收到其推送的 binder 即视为已就绪（root/adb 模式无额外权限位）
-        return officialAvailable() && customBinder() != null
+        if (!officialAvailable()) return false
+        if (customBinder() == null) return false
+        val ctx = appContext ?: return false
+        return ContextCompat.checkSelfPermission(ctx, "$customPkg.manager.permission.API_V23") ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     /** 自定义 shizuku 推送到 DT 的 binder：复用官方 Shizuku.getBinder()（同一 provider 槽） */

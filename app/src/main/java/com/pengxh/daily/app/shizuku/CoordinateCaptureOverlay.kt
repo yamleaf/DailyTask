@@ -283,14 +283,15 @@ object CoordinateCaptureOverlay {
             val cy = stageY + stageH / 2
             val range = RANGE_LEVELS[levelIndex]
             if (twoPoint) {
-                if (startPoint == null) {
+                val point = startPoint
+                if (point == null) {
                     // 第一次：记录起点，切到第二步不动窗口，等用户拖到终点
                     startPoint = cx to cy
                     stageHint.text = "第 2 步：拖动准星定终点 → 确认"
                     rangeInfo.text = "起点($cx,$cy)"
                     return@setOnClickListener
                 }
-                val (sx, sy) = startPoint
+                val (sx, sy) = point
                 dismiss()
                 onTwoPointConfirm?.invoke(sx, sy, cx, cy, range)
             } else {

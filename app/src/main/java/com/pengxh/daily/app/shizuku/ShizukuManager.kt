@@ -57,7 +57,9 @@ object ShizukuManager {
     fun requestPermission(activity: Activity) {
         if (!isAvailable()) return
         if (!isGranted()) {
-            // 官方通道需弹窗授权；自定义通道（root/adb）收到 binder 即就绪，无需弹窗
+            // 官方/自定义通道均通过 rikka.shizuku 的 requestPermission 发起授权：
+            // 自定义通道下该调用经同一 provider 槽路由到自定义 server 的 requestPermission，
+            // 由其唤起自定义 shizuku 的授权确认，授予 <customPkg>.manager.permission.API_V23。
             runCatching { Shizuku.requestPermission(REQUEST_PERMISSION_CODE) }
         }
     }
