@@ -24,9 +24,10 @@ mkdir -p "$ART"
 
 echo "==> [custom-shizuku] pkg=$PKG"
 
-# ---- 1. clone alpha ----
+# ---- 1. clone alpha (含 submodule: api/ 指向 Shizuku-API，manifest.gradle.kts 等在其内) ----
+# submodule 默认递归克隆完整历史较慢，加 --shallow-submodules 只取对应 commit 的浅克隆即可。
 rm -rf "$SRC" "$CUSTOM"
-git clone --depth 1 --branch alpha https://github.com/yamleaf/Shizuku.git "$SRC"
+git clone --depth 1 --recurse-submodules --shallow-submodules --branch alpha https://github.com/yamleaf/Shizuku.git "$SRC"
 
 # ---- 2. rename ----
 bash "$SRC/rename_shizuku.sh" "$SRC" "$CUSTOM" "$PKG"
