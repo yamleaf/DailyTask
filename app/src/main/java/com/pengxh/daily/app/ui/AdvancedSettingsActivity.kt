@@ -269,48 +269,34 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             rows += GrantRow("电池白名单", "已授权")
         }
 
-        // 自启动（仅 MIUI/HyperOS 有公开 appops，可尝试自动授权；其余原生视为无需）
+        // 自启动：仅 MIUI/HyperOS 等有公开自启动开关（appops 10008）的 ROM 才显示并尝试授权；
+        // 原生/无开关 ROM 隐藏该项，避免「原生无需」干扰全部已授权的判定（不再出现部分授权误报）。
         val autostart = isAutostartGranted()
-        rows += when (autostart) {
-            true -> GrantRow("自启动", "已授权")
-            false -> {
-                runCatching { ShizukuShell.exec("appops set $pkg AUTO_START allow; echo done") }
-                GrantRow("自启动", if (isAutostartGranted() == true) "已通过 adb 授权" else "授权失败，需手动")
+        if (autostart != null) {
+            rows += when (autostart) {
+                true -> GrantRow("自启动", "已授权")
+                false -> {
+                    runCatching { ShizukuShell.exec("appops set $pkg AUTO_START allow; echo done") }
+                    GrantRow("自启动", if (isAutostartGranted() == true) "已通过 adb 授权" else "授权失败，需手动")
+                }
+                else -> GrantRow("自启动", "原生无需")
             }
-            null -> GrantRow("自启动", "原生无需")
         }
 
-        // 通知监听（Android 12+ 权威机制：系统以二进制 v2 字段为准，直接 settings put 只写
-        // 字符串缓存，会「已授权未连接」且杀进程/重启后丢失。优先用系统正式命令 allow_listener
-        //（更新 v2 + 触发绑定，持久且连接）；命令在 root/Custom shizuku 下可用，官方 shell 模式
-        // 静默失败，回退 settings put + requestRebind）
+        // 通知监听：尝试用系统正式命令 allow_listener 授权（更新 v2 权威字段 + 触发绑定，持久且连接）。
+        // Android 12+ 仅 settings put 会「已授权未连接」且杀进程/重启后丢失，回退不可靠故不再回退；
+        // allow_listener 在 root/Custom shizuku 下可用、官方 shell 模式静默失败——失败则整项从一键授权移除。
         val listenerComponent = "$pkg/com.pengxh.daily.app.service.NotificationMonitorService"
-        if (!ctx.notificationEnable()) {
+        if (ctx.notificationEnable()) {
+            rows += GrantRow("通知监听", "已授权")
+        } else {
             runCatching {
                 ShizukuShell.exec("cmd notification allow_listener $listenerComponent; echo done")
             }
             delay(400)
-            if (!ctx.notificationEnable()) {
-                runCatching {
-                    ShizukuShell.exec(
-                        "settings put secure enabled_notification_listeners $listenerComponent; echo done"
-                    )
-                }
-                delay(300)
-                // 运行中进程不会自动重绑服务（未连接），主动 requestRebind 让系统立即绑定
-                runCatching {
-                    NotificationListenerService.requestRebind(
-                        ComponentName(ctx, NotificationMonitorService::class.java)
-                    )
-                }
-                delay(300)
+            if (ctx.notificationEnable()) {
+                rows += GrantRow("通知监听", "已通过 adb 授权")
             }
-            rows += GrantRow(
-                "通知监听",
-                if (ctx.notificationEnable()) "已通过 adb 授权" else "授权失败，需手动"
-            )
-        } else {
-            rows += GrantRow("通知监听", "已授权")
         }
 
         return rows
