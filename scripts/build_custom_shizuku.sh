@@ -54,13 +54,13 @@ bash "$SRC/rename_shizuku.sh" "$SRC" "$CUSTOM" "$PKG"
 MANAGER_APK="$(ls "$CUSTOM/manager/build/outputs/apk/release/"*release.apk 2>/dev/null | head -1 || true)"
 if [[ -z "$MANAGER_APK" ]]; then echo "manager release APK not found" >&2; exit 1; fi
 
-# 产物命名：shizuku-custom-<git短哈希>.zip（git 短哈希取 Shizuku 源码 HEAD，浅克隆即可稳定拿到；
-# rename 副本不含 .git，故从 $SRC 读取）
+# 产物命名：shizuku-custom-<git短哈希>.apk（git 短哈希取 Shizuku 源码 HEAD，浅克隆即可稳定拿到；
+# rename 副本不含 .git，故从 $SRC 读取）。直接产出 APK，不再预压 zip——
+# GitHub artifact 下载会自动套一层 zip，预压缩会造成双重压缩。
 GIT_SHORT="$(git -C "$SRC" rev-parse --short=8 HEAD)"
-ZIP_NAME="shizuku-custom-${GIT_SHORT}.zip"
-APK_BASENAME="$(basename "$MANAGER_APK")"
-(cd "$CUSTOM/manager/build/outputs/apk/release" && zip -q "$ART/$ZIP_NAME" "$APK_BASENAME")
-echo "==> [custom-shizuku] manager zip -> $ART/$ZIP_NAME"
+CUSTOM_APK_NAME="shizuku-custom-${GIT_SHORT}.apk"
+cp "$MANAGER_APK" "$ART/$CUSTOM_APK_NAME"
+echo "==> [custom-shizuku] manager apk -> $ART/$CUSTOM_APK_NAME"
 
 # ---- 4. build the custom api jar from renamed server AIDL ----
 AIDL_BT="$(ls -d "$ANDROID_HOME"/build-tools/*/aidl 2>/dev/null | sort -V | tail -1)"
@@ -85,7 +85,7 @@ echo "==> [custom-shizuku] api jar -> $ART/shizuku-custom-api.jar"
 {
   echo "CUSTOM_SHIZUKU_PKG=$PKG"
   echo "CUSTOM_SHIZUKU_LIB=$ART/shizuku-custom-api.jar"
-  echo "CUSTOM_SHIZUKU_MANAGER=$ART/$ZIP_NAME"
-  echo "CUSTOM_SHIZUKU_ART_NAME=${ZIP_NAME%.zip}"
+  echo "CUSTOM_SHIZUKU_MANAGER=$ART/$CUSTOM_APK_NAME"
+  echo "CUSTOM_SHIZUKU_ART_NAME=${CUSTOM_APK_NAME%.apk}"
 } >> "$GITHUB_ENV"
 echo "==> [custom-shizuku] done"

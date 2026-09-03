@@ -210,6 +210,17 @@ android {
             minifyEnabled = true
             shrinkResources = true
             proguardFiles 'proguard-rules.pro'
+            // 自定义 Shizuku 通道：AIDL 接口类仅被 ShizukuRuntime 反射(Class.forName)引用，R8
+            // 静态分析看不到引用会裁剪，运行时 ClassNotFound 导致「去授权/执行」失败。按 customShizukuPkg
+            // 动态生成 keep 规则（jar 中的 <pkg>.server.** 反射入口），追加到 release 混淆配置。
+            if (customShizukuLib && customShizukuPkg) {
+                def genRules = new File("${project.buildDir}/custom_shizuku_rules.pro")
+                genRules.parentFile.mkdirs()
+                genRules.text = "# auto-gen for custom shizuku channel (reflection kept)\n" +
+                    "-keep class ${customShizukuPkg}.server.** { *; }\n" +
+                    "-dontwarn ${customShizukuPkg}.**\n"
+                proguardFiles genRules
+            }
             signingConfig = signingConfigs.release
         }
     }

@@ -194,7 +194,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.CUSTOM_SHIZUKU_ART_NAME }}
-          path: custom_shizuku_artifacts/*.zip
+          path: custom_shizuku_artifacts/*.apk
           retention-days: 10
           if-no-files-found: error
 
@@ -351,8 +351,8 @@ jobs:
           body: ${{ steps.gh_release_info.outputs.body }}
           files: |
             dailyTask_release_*.7z
-            # 启用自定义 shizuku 时，把其 manager APK（zip）与 api jar 一并发布；未启用则通配符匹配不到、不影响
-            custom_shizuku_artifacts/*.zip
+            # 启用自定义 shizuku 时，把其 manager APK 与 api jar 一并发布；未启用则通配符匹配不到、不影响
+            custom_shizuku_artifacts/*.apk
             custom_shizuku_artifacts/*.jar
 
       # 自动构建成功：把当前时间戳写入 GitHub Actions Cache（rate-check 据此限流）。
