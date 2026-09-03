@@ -351,6 +351,9 @@ jobs:
           body: ${{ steps.gh_release_info.outputs.body }}
           files: |
             dailyTask_release_*.7z
+            # 启用自定义 shizuku 时，把其 manager APK（zip）与 api jar 一并发布；未启用则通配符匹配不到、不影响
+            custom_shizuku_artifacts/*.zip
+            custom_shizuku_artifacts/*.jar
 
       # 自动构建成功：把当前时间戳写入 GitHub Actions Cache（rate-check 据此限流）。
       # 不用 git commit，避免每次自动编译都产生一条 [ci skip] 噪音提交污染仓库历史。
