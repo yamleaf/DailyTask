@@ -123,11 +123,8 @@ object ShizukuConfigStore {
     private const val KEY_AUTH_WAIT = "shizuku_auth_wait_sec"
     private const val KEY_PUNCH_STEPS = "shizuku_punch_steps"
     private const val KEY_OP_NAME_1 = "shizuku_op_name_1"
-    private const val KEY_OP_NAME_2 = "shizuku_op_name_2"
     private const val KEY_CUSTOM_1_STEPS = "shizuku_custom_1_steps"
-    private const val KEY_CUSTOM_2_STEPS = "shizuku_custom_2_steps"
     private const val DEFAULT_OP_NAME_1 = "操作1"
-    private const val DEFAULT_OP_NAME_2 = "操作2"
 
     // ---- 高级功能：Shizuku 已授权即默认开启，无独立开关 ----
     fun isEnabled(): Boolean = ShizukuManager.isGranted()
@@ -220,20 +217,11 @@ object ShizukuConfigStore {
         return n.ifBlank { DEFAULT_OP_NAME_1 }
     }
     fun setOpName1(name: String) = SaveKeyValues.saveString(KEY_OP_NAME_1, name.trim())
-    fun opName2(): String {
-        val n = SaveKeyValues.loadString(KEY_OP_NAME_2, DEFAULT_OP_NAME_2)
-        return n.ifBlank { DEFAULT_OP_NAME_2 }
-    }
-    fun setOpName2(name: String) = SaveKeyValues.saveString(KEY_OP_NAME_2, name.trim())
 
-    // ---- 自定义操作1/2 步骤（坐标逐机采集，无内置默认）----
+    // ---- 自定义操作1 步骤（坐标逐机采集，无内置默认）----
     fun custom1Steps(): List<ShizukuStep> =
         decodeSteps(SaveKeyValues.loadString(KEY_CUSTOM_1_STEPS, ""))
     fun setCustom1Steps(steps: List<ShizukuStep>) = SaveKeyValues.saveString(KEY_CUSTOM_1_STEPS, encodeSteps(steps))
-
-    fun custom2Steps(): List<ShizukuStep> =
-        decodeSteps(SaveKeyValues.loadString(KEY_CUSTOM_2_STEPS, ""))
-    fun setCustom2Steps(steps: List<ShizukuStep>) = SaveKeyValues.saveString(KEY_CUSTOM_2_STEPS, encodeSteps(steps))
 
     // ---- 验证码等待超时（秒，10~600）----
     fun verifyWaitSeconds(): Int = SaveKeyValues.loadInt(KEY_VERIFY_WAIT, 120)
@@ -257,11 +245,8 @@ object ShizukuConfigStore {
         addProperty("verifyWait", verifyWaitSeconds())
         addProperty("authWait", authWaitSeconds())
         addProperty("opName1", opName1())
-        addProperty("opName2", opName2())
         addProperty("custom1Steps", custom1Steps().size)
-        addProperty("custom2Steps", custom2Steps().size)
         addProperty("custom1StepsLabel", stepsLabel(custom1Steps()))
-        addProperty("custom2StepsLabel", stepsLabel(custom2Steps()))
     }
 
     /** 控制端镜像下发应用（FIELD_SHIZUKU_CONFIG）：仅接受非密码字段；步骤由被控端本地维护 */

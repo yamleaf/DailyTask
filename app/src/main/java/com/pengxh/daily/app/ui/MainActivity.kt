@@ -31,6 +31,8 @@ import androidx.core.view.WindowCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.transition.MaterialFadeThrough
+import java.io.File
+import java.io.FileOutputStream
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.R
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
@@ -45,6 +47,8 @@ import com.pengxh.daily.app.service.ForegroundRunningService
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.service.NotificationMonitorService
+import com.pengxh.daily.app.shizuku.ShizukuManager
+import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.ConfigImportSignal
@@ -583,7 +587,21 @@ private fun applyTabFromIntent(intent: Intent?) {
                         !ProjectionSession.isStateActive()
                                 && AutoProjectionAccessibilityService.canTakeScreenshot(this@MainActivity)
                     }
-                    val imagePath = if (useAccessibility) {
+                    // Shizuku 截图优先（免 MediaProjection 授权/无障碍，screencap 直接抓屏）；失败回退现有链路
+                    val shizukuPath = if (ShizukuManager.isAvailable() && ShizukuManager.isGranted()) {
+                        val bytes = ShizukuShell.screenshotBytes()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            runCatching {
+                                val dir = getExternalFilesDir(null) ?: cacheDir
+                                val f = File(dir, "sz_manual_${System.currentTimeMillis()}.png")
+                                FileOutputStream(f).use { it.write(bytes) }
+                                f.absolutePath
+                            }.getOrNull()
+                        } else null
+                    } else null
+                    val imagePath = if (!shizukuPath.isNullOrEmpty()) {
+                        shizukuPath
+                    } else if (useAccessibility) {
                         AutoProjectionAccessibilityService.requestScreenshot()?.await()
                     } else {
                         CaptureImageService.requestCaptureScreen().await()
@@ -601,7 +619,9 @@ private fun applyTabFromIntent(intent: Intent?) {
                         MessageDispatcher.sendAttachmentMessage(
                             "截屏状态通知",
                             StatusReporter.buildScreenshotResultHtml(true, "截图已发送，请查看附件"),
-                            imagePath
+                            imagePath,
+                            onSuccess = { runCatching { File(imagePath).delete() } },
+                            onFailure = { runCatching { File(imagePath).delete() } }
                         )
                     }
                     } finally {

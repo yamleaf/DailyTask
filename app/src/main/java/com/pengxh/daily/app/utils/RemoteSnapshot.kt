@@ -456,11 +456,8 @@ object RemoteSnapshot {
         add("sz_verifyWait", "验证码超时（秒）", "int", sz.get("verifyWait").asInt, writable = false)
         add("sz_authWait", "身份验证超时（秒）", "int", sz.get("authWait").asInt, writable = false)
         add("sz_opName1", "操作1名称", "string", sz.get("opName1").asString, writable = false)
-        add("sz_opName2", "操作2名称", "string", sz.get("opName2").asString, writable = false)
         add("sz_custom1Steps", "操作1步骤", "int", sz.get("custom1Steps").asInt, writable = false)
-        add("sz_custom2Steps", "操作2步骤", "int", sz.get("custom2Steps").asInt, writable = false)
         add("sz_custom1StepsLabel", "-", "string", sz.get("custom1StepsLabel").asString, writable = false)
-        add("sz_custom2StepsLabel", "-", "string", sz.get("custom2StepsLabel").asString, writable = false)
         return arr
     }
 

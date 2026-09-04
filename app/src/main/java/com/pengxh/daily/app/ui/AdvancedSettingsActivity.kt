@@ -33,7 +33,6 @@ import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.shizuku.CoordinateCaptureOverlay
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore
 import androidx.lifecycle.lifecycleScope
-import com.pengxh.daily.app.shizuku.ShizukuLoginMethod
 import com.pengxh.daily.app.shizuku.ShizukuManager
 import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.shizuku.ShizukuStep
@@ -100,8 +99,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         binding.btnShizukuAuth.setOnClickListener { ShizukuManager.requestPermission(this) }
         binding.btnRefreshShizukuState.setOnClickListener { refreshShizukuState() }
         binding.layoutQuickGrant.setOnClickListener { quickGrant() }
-        binding.layoutOp1Name.setOnClickListener { if (editable()) showOpNameDialog(1) }
-        binding.layoutOp2Name.setOnClickListener { if (editable()) showOpNameDialog(2) }
+        binding.layoutOp1Name.setOnClickListener { if (editable()) showOpNameDialog() }
         OpCard.entries.forEach { card ->
             cardAddButton(card).setOnClickListener { if (editable()) addStep(card) }
         }
@@ -320,7 +318,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     private fun refreshConfig() {
         binding.txtOp1Name.text = ShizukuConfigStore.opName1()
-        binding.txtOp2Name.text = ShizukuConfigStore.opName2()
     }
 
     private fun stepsLabel(steps: List<ShizukuStep>): String {
@@ -379,8 +376,8 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         )
     }
 
-    private fun showOpNameDialog(which: Int) {
-        val current = if (which == 1) ShizukuConfigStore.opName1() else ShizukuConfigStore.opName2()
+    private fun showOpNameDialog() {
+        val current = ShizukuConfigStore.opName1()
         val input = EditText(this).apply {
             hint = "请输入操作名称"
             inputType = InputType.TYPE_CLASS_TEXT
@@ -401,11 +398,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             negativeText = "取消",
             onConfirm = {
                 val name = input.text.toString().trim()
-                if (which == 1) {
-                    ShizukuConfigStore.setOpName1(name)
-                } else {
-                    ShizukuConfigStore.setOpName2(name)
-                }
+                ShizukuConfigStore.setOpName1(name)
                 refreshConfig()
                 true
             }
@@ -474,7 +467,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     private enum class OpCard(val title: String) {
         PWD_LOGIN("密码登录"), VERIFY_LOGIN("验证码登录"), AUTH("身份验证"),
-        PUNCH("模拟打卡"), CUSTOM_1("操作1"), CUSTOM_2("操作2")
+        PUNCH("模拟打卡"), CUSTOM_1("操作1")
     }
 
     private val cardStepRows = mutableMapOf<OpCard, MutableList<StepRow>>()
@@ -485,7 +478,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         OpCard.AUTH -> binding.cardAuth
         OpCard.PUNCH -> binding.cardPunch
         OpCard.CUSTOM_1 -> binding.cardCustom1
-        OpCard.CUSTOM_2 -> binding.cardCustom2
     }
 
     private fun cardContainer(card: OpCard): LinearLayout = when (card) {
@@ -494,7 +486,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         OpCard.AUTH -> binding.containerAuthSteps
         OpCard.PUNCH -> binding.containerPunchSteps
         OpCard.CUSTOM_1 -> binding.containerCustom1Steps
-        OpCard.CUSTOM_2 -> binding.containerCustom2Steps
     }
 
     private fun cardAddButton(card: OpCard): TextView = when (card) {
@@ -503,7 +494,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         OpCard.AUTH -> binding.btnAddAuthStep
         OpCard.PUNCH -> binding.btnAddPunchStep
         OpCard.CUSTOM_1 -> binding.btnAddCustom1Step
-        OpCard.CUSTOM_2 -> binding.btnAddCustom2Step
     }
 
     private fun loadSteps(card: OpCard): List<ShizukuStep> = when (card) {
@@ -512,7 +502,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         OpCard.AUTH -> ShizukuConfigStore.authSteps()
         OpCard.PUNCH -> ShizukuConfigStore.punchSteps()
         OpCard.CUSTOM_1 -> ShizukuConfigStore.custom1Steps()
-        OpCard.CUSTOM_2 -> ShizukuConfigStore.custom2Steps()
     }
 
     private fun saveSteps(card: OpCard, steps: List<ShizukuStep>) = when (card) {
@@ -521,7 +510,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         OpCard.AUTH -> ShizukuConfigStore.setAuthSteps(steps)
         OpCard.PUNCH -> ShizukuConfigStore.setPunchSteps(steps)
         OpCard.CUSTOM_1 -> ShizukuConfigStore.setCustom1Steps(steps)
-        OpCard.CUSTOM_2 -> ShizukuConfigStore.setCustom2Steps(steps)
     }
 
     private fun populateAllStepCards() {

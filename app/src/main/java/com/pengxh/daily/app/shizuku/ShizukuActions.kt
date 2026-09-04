@@ -45,7 +45,6 @@ object ShizukuActions {
     private const val MODE_PUNCH = "punch"
     private const val MODE_VERIFY_LOGIN = "verify_login"
     private const val MODE_CUSTOM_1 = "custom_1"
-    private const val MODE_CUSTOM_2 = "custom_2"
 
     /**
      * 动作互斥锁：登录 / 身份验证 / 模拟打卡共用同一套 shell 点击通道，
@@ -79,16 +78,11 @@ object ShizukuActions {
         scope.launch { execute(context, MODE_CUSTOM_1) }
     }
 
-    /** 控制端下发「自定义操作2」后调用 */
-    fun runCustomAction2(context: Context, scope: CoroutineScope) {
-        scope.launch { execute(context, MODE_CUSTOM_2) }
-    }
-
     private suspend fun execute(context: Context, mode: String) {
         val resultType = when (mode) {
             MODE_LOGIN, MODE_VERIFY_LOGIN -> Protocol.ALERT_TYPE_LOGIN_RESULT
             MODE_VERIFY -> Protocol.ALERT_TYPE_VERIFY_RESULT
-            MODE_CUSTOM_1, MODE_CUSTOM_2 -> Protocol.ALERT_TYPE_CUSTOM_RESULT
+            MODE_CUSTOM_1 -> Protocol.ALERT_TYPE_CUSTOM_RESULT
             else -> Protocol.ALERT_TYPE_SIMULATE_PUNCH_RESULT
         }
         val tag = when (mode) {
@@ -96,7 +90,6 @@ object ShizukuActions {
             MODE_VERIFY_LOGIN -> "验证码登录"
             MODE_VERIFY -> "身份验证"
             MODE_CUSTOM_1 -> ShizukuConfigStore.opName1()
-            MODE_CUSTOM_2 -> ShizukuConfigStore.opName2()
             else -> "模拟打卡"
         }
         Log.d(TAG, "Shizuku $tag 动作开始 mode=$mode")
@@ -130,7 +123,6 @@ object ShizukuActions {
             MODE_VERIFY -> ShizukuConfigStore.authSteps()
             MODE_PUNCH -> ShizukuConfigStore.punchSteps()
             MODE_CUSTOM_1 -> ShizukuConfigStore.custom1Steps()
-            MODE_CUSTOM_2 -> ShizukuConfigStore.custom2Steps()
             else -> ShizukuConfigStore.punchSteps()
         }
         if (steps.isEmpty()) {
@@ -172,7 +164,7 @@ object ShizukuActions {
             MODE_LOGIN -> ShizukuConfigStore.verifyWaitSeconds()
             MODE_VERIFY_LOGIN -> ShizukuConfigStore.verifyWaitSeconds()
             MODE_VERIFY -> ShizukuConfigStore.authWaitSeconds()
-            MODE_CUSTOM_1, MODE_CUSTOM_2 -> ShizukuConfigStore.verifyWaitSeconds()
+            MODE_CUSTOM_1 -> ShizukuConfigStore.verifyWaitSeconds()
             else -> ShizukuConfigStore.verifyWaitSeconds()
         }
         val result = executeSteps(context, steps, tag, waitSeconds)
