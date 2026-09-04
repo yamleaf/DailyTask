@@ -1002,9 +1002,12 @@ class MqttAgentService : Service() {
             Protocol.ACTION_STOP -> "终止任务"
             Protocol.ACTION_ATTENDANCE -> "考勤记录"
             Protocol.ACTION_SCREENSHOT -> "远程截屏"
-            Protocol.ACTION_MANUAL_LOGIN -> "手动登录"
+            Protocol.ACTION_MANUAL_LOGIN -> "密码登录"
+            Protocol.ACTION_VERIFY_LOGIN -> "验证码登录"
             Protocol.ACTION_IDENTITY_VERIFY -> "身份验证"
             Protocol.ACTION_SIMULATE_PUNCH -> "模拟打卡"
+            Protocol.ACTION_CUSTOM_1 -> "操作1"
+            Protocol.ACTION_CUSTOM_2 -> "操作2"
             else -> action
         }
         CommandHistoryRecorder.record("控制端", actionName)
@@ -1105,6 +1108,21 @@ class MqttAgentService : Service() {
                     Protocol.ACTION_SIMULATE_PUNCH -> {
                         // Shizuku 模拟打卡：独立执行器异步运行，结果经 alert 通道反馈（feat_shiziku）
                         ShizukuActions.runSimulatePunch(this@MqttAgentService, scope)
+                        "SUCCESS"
+                    }
+                    Protocol.ACTION_VERIFY_LOGIN -> {
+                        // Shizuku 验证码登录：独立执行器异步运行，结果经 alert 通道反馈
+                        ShizukuActions.runVerifyLogin(this@MqttAgentService, scope)
+                        "SUCCESS"
+                    }
+                    Protocol.ACTION_CUSTOM_1 -> {
+                        // Shizuku 自定义操作1：按自定义操作1步骤执行，结果经 alert 通道反馈
+                        ShizukuActions.runCustomAction1(this@MqttAgentService, scope)
+                        "SUCCESS"
+                    }
+                    Protocol.ACTION_CUSTOM_2 -> {
+                        // Shizuku 自定义操作2：按自定义操作2步骤执行，结果经 alert 通道反馈
+                        ShizukuActions.runCustomAction2(this@MqttAgentService, scope)
                         "SUCCESS"
                     }
                     else -> "UNKNOWN_ACTION"

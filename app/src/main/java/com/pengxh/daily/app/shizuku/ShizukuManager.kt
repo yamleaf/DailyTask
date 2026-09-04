@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.Settings
+import android.widget.Toast
 
 /**
  * Shizuku 运行时状态与授权管理（feat_shiziku，独立包）。
@@ -54,11 +55,17 @@ object ShizukuManager {
     }
 
     fun requestPermission(activity: Activity) {
-        if (!isAvailable()) return
+        if (!isAvailable()) {
+            Toast.makeText(activity, "Shizuku 服务不可用，请先启动 Shizuku", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (!isGranted()) {
             // 按当前生效通道路由：自定义通道反射调自定义 Stub.requestPermission（descriptor 匹配才能
             // 通过 server 校验），官方通道走 rikka.shizuku 官方库，均由对应 shizuku 唤起授权确认。
-            runCatching { ShizukuRuntime.requestPermission(REQUEST_PERMISSION_CODE) }
+            val ok = runCatching { ShizukuRuntime.requestPermission(REQUEST_PERMISSION_CODE) }.getOrDefault(false)
+            if (!ok) {
+                Toast.makeText(activity, "授权请求发起失败，请重启 Shizuku 服务后重试", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }

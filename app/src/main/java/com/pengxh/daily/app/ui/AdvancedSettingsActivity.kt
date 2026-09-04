@@ -41,6 +41,7 @@ import com.pengxh.daily.app.shizuku.ShizukuStepType
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.Constant
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -76,6 +77,14 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         refreshShizukuState()
     }
 
+    // 自动检测：Shizuku 服务上线/下线时刷新界面（无需用户手动点击刷新）
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        runOnUiThread { refreshShizukuState() }
+    }
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        runOnUiThread { refreshShizukuState() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityAdvancedSettingsBinding.inflate(layoutInflater)
@@ -85,33 +94,18 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         binding.toolbar.setNavigationOnClickListener { finish() }
 
         Shizuku.addRequestPermissionResultListener(permissionListener)
+        Shizuku.addBinderReceivedListener(binderReceivedListener)
+        Shizuku.addBinderDeadListener(binderDeadListener)
 
         binding.btnShizukuAuth.setOnClickListener { ShizukuManager.requestPermission(this) }
+        binding.btnRefreshShizukuState.setOnClickListener { refreshShizukuState() }
         binding.layoutQuickGrant.setOnClickListener { quickGrant() }
-        binding.layoutLoginMethod.setOnClickListener { if (editable()) showMethodDialog() }
-        binding.layoutPassword.setOnClickListener { if (editable()) showPasswordDialog() }
-        binding.layoutPwdSteps.setOnClickListener {
-            if (editable()) showStepEditor("密码登录", ShizukuConfigStore.pwdLoginSteps()) {
-                ShizukuConfigStore.setPwdLoginSteps(it); refreshConfig()
-            }
+        binding.layoutOp1Name.setOnClickListener { if (editable()) showOpNameDialog(1) }
+        binding.layoutOp2Name.setOnClickListener { if (editable()) showOpNameDialog(2) }
+        OpCard.entries.forEach { card ->
+            cardAddButton(card).setOnClickListener { if (editable()) addStep(card) }
         }
-        binding.layoutVerifySteps.setOnClickListener {
-            if (editable()) showStepEditor("验证码登录", ShizukuConfigStore.verifyLoginSteps()) {
-                ShizukuConfigStore.setVerifyLoginSteps(it); refreshConfig()
-            }
-        }
-        binding.layoutVerifyWait.setOnClickListener { if (editable()) showWaitDialog(isAuth = false) }
-        binding.layoutAuthWait.setOnClickListener { if (editable()) showWaitDialog(isAuth = true) }
-        binding.layoutAuthSteps.setOnClickListener {
-            if (editable()) showStepEditor("身份验证", ShizukuConfigStore.authSteps()) {
-                ShizukuConfigStore.setAuthSteps(it); refreshConfig()
-            }
-        }
-        binding.layoutPunchSteps.setOnClickListener {
-            if (editable()) showStepEditor("模拟打卡", ShizukuConfigStore.punchSteps()) {
-                ShizukuConfigStore.setPunchSteps(it); refreshConfig()
-            }
-        }
+        populateAllStepCards()
     }
 
     override fun onResume() {
@@ -138,8 +132,17 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         CoordinateCaptureOverlay.dismiss()
-        runCatching { Shizuku.removeRequestPermissionResultListener(permissionListener) }
+        runCatching {
+            Shizuku.removeRequestPermissionResultListener(permissionListener)
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+        }
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        saveAllSteps()
     }
 
     private fun editable(): Boolean = ShizukuManager.isGranted()
@@ -155,9 +158,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         binding.btnShizukuAuth.visibility = if (available && !granted) View.VISIBLE else View.GONE
         // 高级功能：Shizuku 已授权即生效，配置区始终随授权状态可编辑
         val on = ShizukuManager.isGranted()
-        binding.cardLogin.alpha = if (on) 1f else 0.45f
-        binding.cardAuth.alpha = if (on) 1f else 0.45f
-        binding.cardPunch.alpha = if (on) 1f else 0.45f
+        OpCard.entries.forEach { card -> cardRoot(card).alpha = if (on) 1f else 0.45f }
         refreshConfig()
         refreshEnv()
     }
@@ -317,17 +318,9 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** 登录配置与身份验证配置可同时编辑（密码登录 / 验证码登录不互斥；步骤分别维护） */
     private fun refreshConfig() {
-        val method = ShizukuConfigStore.loginMethod()
-        binding.txtLoginMethod.text = if (method == ShizukuLoginMethod.PASSWORD) "密码登录" else "验证码登录"
-        binding.txtPasswordStatus.text = if (ShizukuConfigStore.hasPassword()) "已设置" else "未设置"
-        binding.txtPwdSteps.text = stepsLabel(ShizukuConfigStore.pwdLoginSteps())
-        binding.txtVerifySteps.text = stepsLabel(ShizukuConfigStore.verifyLoginSteps())
-        binding.txtVerifyWait.text = "${ShizukuConfigStore.verifyWaitSeconds()} 秒"
-        binding.txtAuthWait.text = "${ShizukuConfigStore.authWaitSeconds()} 秒"
-        binding.txtAuthSteps.text = stepsLabel(ShizukuConfigStore.authSteps())
-        binding.txtPunchSteps.text = stepsLabel(ShizukuConfigStore.punchSteps())
+        binding.txtOp1Name.text = ShizukuConfigStore.opName1()
+        binding.txtOp2Name.text = ShizukuConfigStore.opName2()
     }
 
     private fun stepsLabel(steps: List<ShizukuStep>): String {
@@ -347,17 +340,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
     }
 
     // ═══════ 对话框（统一 UnifiedDialogKit 风格）═══════
-
-    private fun showMethodDialog() {
-        val items = listOf("密码登录", "验证码登录")
-        val current = if (ShizukuConfigStore.loginMethod() == ShizukuLoginMethod.PASSWORD) 0 else 1
-        UnifiedDialogKit.showSingleChoice(this, "登录方式", items, current) { which ->
-            ShizukuConfigStore.setLoginMethod(
-                if (which == 0) ShizukuLoginMethod.PASSWORD else ShizukuLoginMethod.VERIFY_CODE
-            )
-            refreshConfig()
-        }
-    }
 
     /**
      * 密码设置：密文经 SecurePrefs（Keystore AES256-GCM）保存。
@@ -397,12 +379,12 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         )
     }
 
-    private fun showWaitDialog(isAuth: Boolean) {
-        val current = if (isAuth) ShizukuConfigStore.authWaitSeconds() else ShizukuConfigStore.verifyWaitSeconds()
+    private fun showOpNameDialog(which: Int) {
+        val current = if (which == 1) ShizukuConfigStore.opName1() else ShizukuConfigStore.opName2()
         val input = EditText(this).apply {
-            hint = "10~600 秒"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText(current.toString())
+            hint = "请输入操作名称"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(current)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         val box = LinearLayout(this).apply {
@@ -413,19 +395,22 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         UnifiedDialogKit.showForm(
             ctx = this,
             contentView = box,
-            title = "验证码超时",
-            message = "等待控制端下发验证码，超时则退出本次操作",
+            title = "操作名称（空格可回复默认）",
+            message = "修改后，控制端总览页与本页将同步显示新名称",
             positiveText = "确定",
             negativeText = "取消",
             onConfirm = {
-                val sec = input.text.toString().toIntOrNull() ?: current
-                if (isAuth) ShizukuConfigStore.setAuthWaitSeconds(sec) else ShizukuConfigStore.setVerifyWaitSeconds(sec)
+                val name = input.text.toString().trim()
+                if (which == 1) {
+                    ShizukuConfigStore.setOpName1(name)
+                } else {
+                    ShizukuConfigStore.setOpName2(name)
+                }
                 refreshConfig()
                 true
             }
         )
     }
-
     /** 本步延迟滑块选择（1~30s）：胶囊「延迟 s」点击弹出，拖动滑块即时预览 */
     /** 延迟范围设置：min~max 秒（0.1s 步进随机；相同=固定），如 0-5/1-1/3-5 */
     private fun showDelayRangeDialog(currentMin: Int, currentMax: Int, onResult: (Int, Int) -> Unit) {
@@ -485,395 +470,570 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         )
     }
 
-// 步骤编辑器：全屏（近屏宽）内嵌操作——每步卡片 1-2 行，添加步骤按钮就地插入，不弹窗
-    private fun showStepEditor(title: String, current: List<ShizukuStep>, onSave: (List<ShizukuStep>) -> Unit) {
-        val typeLabels = arrayOf("点击坐标", "手势滑动", "密码输入", "验证码输入", "验证信息采集", "结果判定")
+    // ===================== 内联步骤编辑（6 个操作卡片，步骤展开在卡片中）=====================
 
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(8), dp(4), 0)
+    private enum class OpCard(val title: String) {
+        PWD_LOGIN("密码登录"), VERIFY_LOGIN("验证码登录"), AUTH("身份验证"),
+        PUNCH("模拟打卡"), CUSTOM_1("操作1"), CUSTOM_2("操作2")
+    }
+
+    private val cardStepRows = mutableMapOf<OpCard, MutableList<StepRow>>()
+
+    private fun cardRoot(card: OpCard) = when (card) {
+        OpCard.PWD_LOGIN -> binding.cardPwdLogin
+        OpCard.VERIFY_LOGIN -> binding.cardVerifyLogin
+        OpCard.AUTH -> binding.cardAuth
+        OpCard.PUNCH -> binding.cardPunch
+        OpCard.CUSTOM_1 -> binding.cardCustom1
+        OpCard.CUSTOM_2 -> binding.cardCustom2
+    }
+
+    private fun cardContainer(card: OpCard): LinearLayout = when (card) {
+        OpCard.PWD_LOGIN -> binding.containerPwdLoginSteps
+        OpCard.VERIFY_LOGIN -> binding.containerVerifyLoginSteps
+        OpCard.AUTH -> binding.containerAuthSteps
+        OpCard.PUNCH -> binding.containerPunchSteps
+        OpCard.CUSTOM_1 -> binding.containerCustom1Steps
+        OpCard.CUSTOM_2 -> binding.containerCustom2Steps
+    }
+
+    private fun cardAddButton(card: OpCard): TextView = when (card) {
+        OpCard.PWD_LOGIN -> binding.btnAddPwdLoginStep
+        OpCard.VERIFY_LOGIN -> binding.btnAddVerifyLoginStep
+        OpCard.AUTH -> binding.btnAddAuthStep
+        OpCard.PUNCH -> binding.btnAddPunchStep
+        OpCard.CUSTOM_1 -> binding.btnAddCustom1Step
+        OpCard.CUSTOM_2 -> binding.btnAddCustom2Step
+    }
+
+    private fun loadSteps(card: OpCard): List<ShizukuStep> = when (card) {
+        OpCard.PWD_LOGIN -> ShizukuConfigStore.pwdLoginSteps()
+        OpCard.VERIFY_LOGIN -> ShizukuConfigStore.verifyLoginSteps()
+        OpCard.AUTH -> ShizukuConfigStore.authSteps()
+        OpCard.PUNCH -> ShizukuConfigStore.punchSteps()
+        OpCard.CUSTOM_1 -> ShizukuConfigStore.custom1Steps()
+        OpCard.CUSTOM_2 -> ShizukuConfigStore.custom2Steps()
+    }
+
+    private fun saveSteps(card: OpCard, steps: List<ShizukuStep>) = when (card) {
+        OpCard.PWD_LOGIN -> ShizukuConfigStore.setPwdLoginSteps(steps)
+        OpCard.VERIFY_LOGIN -> ShizukuConfigStore.setVerifyLoginSteps(steps)
+        OpCard.AUTH -> ShizukuConfigStore.setAuthSteps(steps)
+        OpCard.PUNCH -> ShizukuConfigStore.setPunchSteps(steps)
+        OpCard.CUSTOM_1 -> ShizukuConfigStore.setCustom1Steps(steps)
+        OpCard.CUSTOM_2 -> ShizukuConfigStore.setCustom2Steps(steps)
+    }
+
+    private fun populateAllStepCards() {
+        OpCard.entries.forEach { card ->
+            val container = cardContainer(card)
+            container.removeAllViews()
+            val rows = mutableListOf<StepRow>()
+            // 先注册列表再逐个构建：buildStepRow 计算后续步骤默认延迟时能读到已添加的步骤
+            cardStepRows[card] = rows
+            loadSteps(card).forEach { step -> rows.add(buildStepRow(card, step)) }
+            refreshStepCapsules(card)
         }
-        val rows = mutableListOf<StepRow>()
+    }
 
-        // 「添加步骤」按钮先声明并加入容器末尾，新步骤都插在它前面（监听在 addRow 定义后绑定）
-        val addBtn = TextView(this).apply {
-            text = "＋ 添加步骤"
-            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
-            setPadding(0, dp(8), 0, dp(4))
-        }
-        container.addView(addBtn)
+    private fun addStep(card: OpCard) {
+        val row = buildStepRow(card, ShizukuStep())
+        cardStepRows.getOrPut(card) { mutableListOf() }.add(row)
+        refreshStepCapsules(card)
+        saveCardSteps(card)
+    }
 
-        fun addRow(step: ShizukuStep) {
-            lateinit var row: StepRow
-            lateinit var coordArea: LinearLayout
-            lateinit var endpointArea: LinearLayout
-            lateinit var keywordArea: LinearLayout
-            // 卡片头类型：胶囊样式（文字 + ▾ 下拉符），点击弹单选，与「点选/延迟」胶囊风格统一
-            val typeTv = TextView(this@AdvancedSettingsActivity).apply {
-                text = "${typeLabels[typeIndex(step.type)]} ▾"
-                textSize = 13f
-                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_secondary))
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(6), dp(12), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_secondaryContainer))
-                }
-            }
-            typeTv.setOnClickListener {
-                UnifiedDialogKit.showSingleChoice(
-                    this@AdvancedSettingsActivity,
-                    "步骤类型",
-                    typeLabels.toList(),
-                    typeIndex(row.type)
-                ) { which ->
-                    row.type = ShizukuStepType.entries[which]
-                    typeTv.text = "${typeLabels[which]} ▾"
-                    val needCoord = row.type == ShizukuStepType.CLICK ||
-                        row.type == ShizukuStepType.SWIPE ||
-                        row.type == ShizukuStepType.PWD_INPUT ||
-                        row.type == ShizukuStepType.CODE_INPUT
-                    coordArea.visibility = if (needCoord) View.VISIBLE else View.GONE
-                    endpointArea.visibility = if (row.type == ShizukuStepType.SWIPE) View.VISIBLE else View.GONE
-                    keywordArea.visibility = if (row.type == ShizukuStepType.CODE_CAPTURE) View.VISIBLE else View.GONE
-                }
-            }
-            // 备注（小字，默认为空时显示占位「备注」）
-            val remarkEdit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "备注"
-                setText(step.buttonText)
-                textSize = 11f
-                background = null
-                maxLines = 1
-                setPadding(dp(4), dp(4), dp(4), dp(4))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val xEdit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "X"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText(if (step.x >= 0) step.x.toString() else "")
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                minWidth = dp(40)
-                textSize = 12f
-            }
-            val yEdit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "Y"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText(if (step.y >= 0) step.y.toString() else "")
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                minWidth = dp(40)
-                textSize = 12f
-            }
-            // 滑动终点（SWIPE 专用）：X2/Y2 + 终点点选
-            val x2Edit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "X2"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText(if (step.x2 >= 0) step.x2.toString() else "")
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                minWidth = dp(40)
-                textSize = 12f
-            }
-            val y2Edit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "Y2"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText(if (step.y2 >= 0) step.y2.toString() else "")
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                minWidth = dp(40)
-                textSize = 12f
-            }
-            // 终点点选按钮：打开打卡App → 十字光标点选目标点 → 回填 X2/Y2
-            val collect2 = TextView(this@AdvancedSettingsActivity).apply {
-                text = "终点"
-                textSize = 12f
-                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(6), dp(12), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
-                }
-                setOnClickListener {
-                    val curX = x2Edit.text.toString().toIntOrNull() ?: -1
-                    val curY = y2Edit.text.toString().toIntOrNull() ?: -1
-                    startCoordinateCapture(
-                        initialX = if (curX >= 0) curX else -1,
-                        initialY = if (curY >= 0) curY else -1,
-                        initialRange = 0
-                    ) { x, y, _ ->
-                        x2Edit.setText(x.toString())
-                        y2Edit.setText(y.toString())
-                    }
-                }
-            }
-            // 起点「点选」按钮：打开打卡App → 十字光标点选 → 回填 X/Y/范围
-            val collect = TextView(this@AdvancedSettingsActivity).apply {
-                text = "点选"
-                textSize = 13f
-                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(6), dp(12), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
-                }
-                setOnClickListener {
-                    val curX = xEdit.text.toString().toIntOrNull() ?: -1
-                    val curY = yEdit.text.toString().toIntOrNull() ?: -1
-                    if (row.type == ShizukuStepType.SWIPE) {
-                        // 滑动采集模式：起始十字 → 确认 → 自动切终点十字 → 再确认，一次性回填起终点
-                        startSwipeCapture(
-                            initialSx = if (curX >= 0) curX else -1,
-                            initialSy = if (curY >= 0) curY else -1
-                        ) { sx, sy, ex, ey ->
-                            xEdit.setText(sx.toString())
-                            yEdit.setText(sy.toString())
-                            x2Edit.setText(ex.toString())
-                            y2Edit.setText(ey.toString())
-                        }
-                    } else {
-                        startCoordinateCapture(
-                            initialX = if (curX >= 0) curX else -1,
-                            initialY = if (curY >= 0) curY else -1,
-                            initialRange = row.range
-                        ) { x, y, r ->
-                            xEdit.setText(x.toString())
-                            yEdit.setText(y.toString())
-                            row.range = r
-                        }
-                    }
-                }
-            }
-            // CODE_CAPTURE 专用关键字（空=使用内置匹配规则）
-            val kw1Edit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "收件人关键字"
-                setText(step.kw1)
-                textSize = 12f
-                maxLines = 1
-                background = null
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            val kw2Edit = EditText(this@AdvancedSettingsActivity).apply {
-                hint = "内容关键字"
-                setText(step.kw2)
-                textSize = 12f
-                maxLines = 1
-                background = null
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            // 随机点击范围（编辑器不显示，仅在点选悬浮窗内可视化调节；此处保存该行范围）
-            row = StepRow(
-                typeTv, step.type, remarkEdit,
-                xEdit, yEdit, x2Edit, y2Edit, collect, collect2,
-                kw1Edit, kw2Edit,
-                if (step.delayMin > 0) step.delayMin else 0,
-                if (step.delayMax > 0) step.delayMax else 0,
-                if (step.range > 0) step.range else 0
-            )
-            // 本步执行延迟（秒）：默认第 1 步 5s、其余 3s；第 2 个及以后的验证码输入格默认 1s；0=用默认
-            val prevCodeInputs = rows.count { it.type == ShizukuStepType.CODE_INPUT }
-            val defaultDelay = when {
-                rows.isEmpty() -> 5
-                row.type == ShizukuStepType.CODE_INPUT && prevCodeInputs > 0 -> 1
-                else -> 3
-            }
-            val delayTv = TextView(this@AdvancedSettingsActivity).apply {
-                text = if (row.delayMax > 0) "延迟 ${row.delayMin}-${row.delayMax}s" else "延迟 0-${defaultDelay}s"
-                textSize = 13f
-                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
-                gravity = Gravity.CENTER
-                setPadding(dp(12), dp(6), dp(12), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(12).toFloat()
-                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
-                }
-            }
-            delayTv.setOnClickListener {
-                showDelayRangeDialog(
-                    if (row.delayMax > 0) row.delayMin else 0,
-                    if (row.delayMax > 0) row.delayMax else defaultDelay
-                ) { min, max ->
-                    row.delayMin = min
-                    row.delayMax = max
-                    delayTv.text = if (max > 0) "延迟 ${min}-${max}s" else "延迟 0-${defaultDelay}s"
-                }
-            }
-            val remove = TextView(this@AdvancedSettingsActivity).apply {
-                text = "✕"
-                textSize = 16f
-                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_error))
-                gravity = Gravity.CENTER
-                setPadding(dp(8), 0, dp(8), 0)
-            }
-
-            // 卡片头：类型（箭头紧贴）+ 备注小字 + 删除
-            val header = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(typeTv)
-                addView(remarkEdit)
-                addView(remove)
-            }
-            // 坐标区（点击/密码/验证码输入）：坐标 + X + Y + 点选
-            coordArea = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                val label = TextView(this@AdvancedSettingsActivity).apply {
-                    text = "坐标"
-                    textSize = 12f
-                    setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
-                }
-                addView(label)
-                addView(xEdit)
-                addView(yEdit)
-                addView(collect, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { leftMargin = dp(4) })
-            }
-            // 终点区（SWIPE 专用）：终点坐标 + 终点点选
-            endpointArea = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                val label = TextView(this@AdvancedSettingsActivity).apply {
-                    text = "终点"
-                    textSize = 12f
-                    setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
-                }
-                addView(label)
-                addView(x2Edit)
-                addView(y2Edit)
-                addView(collect2, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { leftMargin = dp(4) })
-            }
-            // 关键字区（验证信息采集）：收件人关键字 + 内容关键字，空=内置规则
-            keywordArea = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(kw1Edit)
-                addView(kw2Edit)
-            }
-            // 卡片体：第一行起点/坐标区 + 关键字区 + 延迟（紧凑）；终点区（SWIPE）独立第二行
-            val body = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                val row1 = LinearLayout(this@AdvancedSettingsActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(coordArea, LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ))
-                    addView(keywordArea, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                    addView(delayTv, LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply { leftMargin = dp(4) })
-                }
-                addView(row1)
-                addView(endpointArea, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(6) })
-            }
-            // 按当前类型初始化区域可见性
+    private fun collectSteps(card: OpCard): List<ShizukuStep> {
+        val rows = cardStepRows[card] ?: return emptyList()
+        return rows.mapNotNull { row ->
+            val x = row.xEdit.text.toString().trim().toIntOrNull() ?: -1
+            val y = row.yEdit.text.toString().trim().toIntOrNull() ?: -1
+            val x2 = row.x2Edit.text.toString().trim().toIntOrNull() ?: -1
+            val y2 = row.y2Edit.text.toString().trim().toIntOrNull() ?: -1
+            val remark = row.remarkEdit.text.toString().trim()
+            val kw1 = row.kw1Edit.text.toString()
+            val kw2 = row.kw2Edit.text.toString()
             val needCoord = row.type == ShizukuStepType.CLICK ||
                 row.type == ShizukuStepType.SWIPE ||
                 row.type == ShizukuStepType.PWD_INPUT ||
                 row.type == ShizukuStepType.CODE_INPUT
-            coordArea.visibility = if (needCoord) View.VISIBLE else View.GONE
-            endpointArea.visibility = if (row.type == ShizukuStepType.SWIPE) View.VISIBLE else View.GONE
-            keywordArea.visibility = if (row.type == ShizukuStepType.CODE_CAPTURE) View.VISIBLE else View.GONE
-            // 整张卡片
-            val card = LinearLayout(this@AdvancedSettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(8), dp(6), dp(8), dp(6))
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(14).toFloat()
-                    setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_surface))
-                    setStroke(dp(1), ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_outlineVariant))
-                }
-                addView(header)
-                addView(body, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(4) })
-            }
-            remove.setOnClickListener {
-                container.removeView(card)
-                rows.removeAll { it.typeTv === typeTv }
-            }
-            // 插入到「添加步骤」按钮之前
-            if (container.indexOfChild(addBtn) < 0) container.addView(addBtn)
-            container.addView(card, container.indexOfChild(addBtn))
-            rows.add(row)
+            if (needCoord && (x < 0 || y < 0)) return@mapNotNull null
+            if (row.type == ShizukuStepType.SWIPE && (x2 < 0 || y2 < 0)) return@mapNotNull null
+            ShizukuStep(row.type, remark, x, y, x2, y2, row.range, row.delayMin, row.delayMax, kw1, kw2, row.uid, row.codeWait)
         }
+    }
 
-        // addRow 定义完毕后再绑定「添加步骤」监听
-        addBtn.setOnClickListener { addRow(ShizukuStep()) }
+    private fun saveCardSteps(card: OpCard) {
+        saveSteps(card, collectSteps(card))
+    }
 
-        // 空步骤（未配置）时默认展示内置步骤，便于首次直接微调
-        val effective = if (current.isEmpty()) {
-            when {
-                title == "登录" || title == "密码登录" || title == "验证码登录" -> ShizukuConfigStore.loginSteps()
-                title == "模拟打卡" -> ShizukuConfigStore.punchSteps()
-                else -> ShizukuConfigStore.authSteps()
-            }
-        } else current
-        effective.forEach { addRow(it) }
-        if (current.isEmpty() && effective.isEmpty()) addRow(ShizukuStep())
+    private fun saveAllSteps() {
+        OpCard.entries.forEach { saveCardSteps(it) }
+    }
 
-        // 步骤多时内容超出屏幕：包进 ScrollView 并限制高度（约屏高 75%）
-        val scroll = ScrollView(this).apply {
-            isFillViewport = false
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (resources.displayMetrics.heightPixels * 0.75).toInt()
-            )
-            addView(container)
+    /** 按步骤类型刷新每步胶囊显隐与文案（密码：仅密码输入；超时：验证码输入/采集，连续验证码输入只有首个显示） */
+    private fun refreshStepCapsules(card: OpCard) {
+        val rows = cardStepRows[card] ?: return
+        rows.forEachIndexed { i, r ->
+            val isCodeInput = r.type == ShizukuStepType.CODE_INPUT
+            val isCodeType = isCodeInput || r.type == ShizukuStepType.CODE_CAPTURE
+            val prevCodeInput = i > 0 && rows[i - 1].type == ShizukuStepType.CODE_INPUT
+            r.pwdCapsule.visibility = if (r.type == ShizukuStepType.PWD_INPUT) View.VISIBLE else View.GONE
+            r.pwdCapsule.text = if (ShizukuConfigStore.hasStepPassword(r.uid)) "密码·已设" else "密码·未设"
+            // 连续多个验证码输入（多格验证码）只有第一个显示超时配置胶囊
+            r.waitCapsule.visibility =
+                if (isCodeType && !(isCodeInput && prevCodeInput)) View.VISIBLE else View.GONE
+            r.waitCapsule.text = if (r.codeWait > 0) "超时 ${r.codeWait}s" else "超时·默认"
         }
+    }
 
+    /** 本步独立密码设置（SecurePrefs 按 uid 加密存储；留空=清除并回退全局密码） */
+    private fun showStepPasswordDialog(uid: String, onChanged: () -> Unit) {
+        val has = ShizukuConfigStore.hasStepPassword(uid)
+        val input = EditText(this).apply {
+            hint = if (has) "已设置，重新输入将覆盖" else "请输入本步密码"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        val tip = TextView(this).apply {
+            text = "本步密码仅存于本机加密存储；留空保存 = 清除（执行时回退全局密码缓存）。"
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+            setPadding(0, 0, 0, dp(6))
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(8), dp(4), 0)
+            addView(input)
+            addView(tip)
+        }
         UnifiedDialogKit.showForm(
             ctx = this,
-            contentView = scroll,
-            title = "$title 步骤",
-            message = "点击/密码/验证码输入类需点选坐标；滑动类需点选起点与终点；验证信息采集可设收件人/内容关键字（空=内置规则）；验证码多格请逐格添加卡片。",
+            contentView = box,
+            title = "本步密码",
             positiveText = "保存",
             negativeText = "取消",
-            fullWidth = true,
             onConfirm = {
-                val steps = rows.mapNotNull { row ->
-                    val x = row.xEdit.text.toString().toIntOrNull() ?: -1
-                    val y = row.yEdit.text.toString().toIntOrNull() ?: -1
-                    val x2 = row.x2Edit.text.toString().toIntOrNull() ?: -1
-                    val y2 = row.y2Edit.text.toString().toIntOrNull() ?: -1
-                    val remark = row.remarkEdit.text.toString().trim()
-                    // 关键字保留原样（含首尾空格）：便于「到 」「发送 」这类带空格精确匹配，避免误识别
-                    val kw1 = row.kw1Edit.text.toString()
-                    val kw2 = row.kw2Edit.text.toString()
-                    val needCoord = row.type == ShizukuStepType.CLICK ||
-                        row.type == ShizukuStepType.SWIPE ||
-                        row.type == ShizukuStepType.PWD_INPUT ||
-                        row.type == ShizukuStepType.CODE_INPUT
-                    if (needCoord && (x < 0 || y < 0)) {
-                        return@mapNotNull null
-                    }
-                    if (row.type == ShizukuStepType.SWIPE && (x2 < 0 || y2 < 0)) {
-                        return@mapNotNull null
-                    }
-                    ShizukuStep(row.type, remark, x, y, x2, y2, row.range, row.delayMin, row.delayMax, kw1, kw2)
-                }
-                if (steps.isEmpty()) {
-                    UnifiedDialogKit.showWarning(this, "未保存", "请至少为一步配置有效内容（点击/输入类需点选坐标）")
-                    return@showForm false
-                }
-                onSave(steps)
+                ShizukuConfigStore.setStepPassword(uid, input.text.toString())
+                onChanged()
                 true
             }
         )
+    }
+
+    /** 本步独立验证码超时（秒）；留空=0=用该操作全局超时 */
+    private fun showStepTimeoutDialog(current: Int, onResult: (Int) -> Unit) {
+        val input = EditText(this).apply {
+            hint = "10~600，留空用默认"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (current > 0) current.toString() else "")
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        val tip = TextView(this).apply {
+            text = "本步等待验证码 / 短信发送确认的超时秒数；留空 = 用该操作的全局超时。"
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+            setPadding(0, 0, 0, dp(6))
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(8), dp(4), 0)
+            addView(input)
+            addView(tip)
+        }
+        UnifiedDialogKit.showForm(
+            ctx = this,
+            contentView = box,
+            title = "本步验证码超时",
+            positiveText = "确定",
+            negativeText = "取消",
+            onConfirm = {
+                val sec = input.text.toString().trim().toIntOrNull() ?: 0
+                onResult(sec.coerceIn(0, 600))
+                true
+            }
+        )
+    }
+
+    private fun buildStepRow(op: OpCard, step: ShizukuStep): StepRow {
+        val typeLabels = arrayOf("点击坐标", "手势滑动", "密码输入", "验证码输入", "验证信息采集", "结果判定")
+        val container = cardContainer(op)
+        lateinit var row: StepRow
+        lateinit var coordArea: LinearLayout
+        lateinit var endpointArea: LinearLayout
+        lateinit var keywordArea: LinearLayout
+        // 卡片头类型：胶囊样式（文字 + ▾ 下拉符），点击弹单选，与「点选/延迟」胶囊风格统一
+        val typeTv = TextView(this@AdvancedSettingsActivity).apply {
+            text = "${typeLabels[typeIndex(step.type)]} ▾"
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_secondary))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_secondaryContainer))
+            }
+        }
+        typeTv.setOnClickListener {
+            UnifiedDialogKit.showSingleChoice(
+                this@AdvancedSettingsActivity,
+                "步骤类型",
+                typeLabels.toList(),
+                typeIndex(row.type)
+            ) { which ->
+                row.type = ShizukuStepType.entries[which]
+                typeTv.text = "${typeLabels[which]} ▾"
+                val needCoord = row.type == ShizukuStepType.CLICK ||
+                    row.type == ShizukuStepType.SWIPE ||
+                    row.type == ShizukuStepType.PWD_INPUT ||
+                    row.type == ShizukuStepType.CODE_INPUT
+                coordArea.visibility = if (needCoord) View.VISIBLE else View.GONE
+                endpointArea.visibility = if (row.type == ShizukuStepType.SWIPE) View.VISIBLE else View.GONE
+                keywordArea.visibility = if (row.type == ShizukuStepType.CODE_CAPTURE) View.VISIBLE else View.GONE
+                refreshStepCapsules(op)
+                saveCardSteps(op)
+            }
+        }
+        // 备注（小字，默认为空时显示占位「备注」）
+        val remarkEdit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "备注"
+            setText(step.buttonText)
+            textSize = 11f
+            background = null
+            maxLines = 1
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val xEdit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "X"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (step.x >= 0) step.x.toString() else "")
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            minWidth = dp(40)
+            textSize = 12f
+        }
+        val yEdit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "Y"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (step.y >= 0) step.y.toString() else "")
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            minWidth = dp(40)
+            textSize = 12f
+        }
+        // 滑动终点（SWIPE 专用）：X2/Y2 + 终点点选
+        val x2Edit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "X2"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (step.x2 >= 0) step.x2.toString() else "")
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            minWidth = dp(40)
+            textSize = 12f
+        }
+        val y2Edit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "Y2"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setText(if (step.y2 >= 0) step.y2.toString() else "")
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            minWidth = dp(40)
+            textSize = 12f
+        }
+        // 终点点选按钮：打开打卡App → 十字光标点选目标点 → 回填 X2/Y2
+        val collect2 = TextView(this@AdvancedSettingsActivity).apply {
+            text = "终点"
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+            }
+            setOnClickListener {
+                val curX = x2Edit.text.toString().toIntOrNull() ?: -1
+                val curY = y2Edit.text.toString().toIntOrNull() ?: -1
+                startCoordinateCapture(
+                    initialX = if (curX >= 0) curX else -1,
+                    initialY = if (curY >= 0) curY else -1,
+                    initialRange = 0
+                ) { x, y, _ ->
+                    x2Edit.setText(x.toString())
+                    y2Edit.setText(y.toString())
+                    saveCardSteps(op)
+                }
+            }
+        }
+        // 起点「点选」按钮：打开打卡App → 十字光标点选 → 回填 X/Y/范围
+        val collect = TextView(this@AdvancedSettingsActivity).apply {
+            text = "点选"
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+            }
+            setOnClickListener {
+                val curX = xEdit.text.toString().toIntOrNull() ?: -1
+                val curY = yEdit.text.toString().toIntOrNull() ?: -1
+                if (row.type == ShizukuStepType.SWIPE) {
+                    // 滑动采集模式：起始十字 → 确认 → 自动切终点十字 → 再确认，一次性回填起终点
+                    startSwipeCapture(
+                        initialSx = if (curX >= 0) curX else -1,
+                        initialSy = if (curY >= 0) curY else -1
+                    ) { sx, sy, ex, ey ->
+                        xEdit.setText(sx.toString())
+                        yEdit.setText(sy.toString())
+                        x2Edit.setText(ex.toString())
+                        y2Edit.setText(ey.toString())
+                        saveCardSteps(op)
+                    }
+                } else {
+                    startCoordinateCapture(
+                        initialX = if (curX >= 0) curX else -1,
+                        initialY = if (curY >= 0) curY else -1,
+                        initialRange = row.range
+                    ) { x, y, r ->
+                        xEdit.setText(x.toString())
+                        yEdit.setText(y.toString())
+                        row.range = r
+                        saveCardSteps(op)
+                    }
+                }
+            }
+        }
+        // CODE_CAPTURE 专用关键字（空=使用内置匹配规则）
+        val kw1Edit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "收件人关键字"
+            setText(step.kw1)
+            textSize = 12f
+            maxLines = 1
+            background = null
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val kw2Edit = EditText(this@AdvancedSettingsActivity).apply {
+            hint = "内容关键字"
+            setText(step.kw2)
+            textSize = 12f
+            maxLines = 1
+            background = null
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        // 每步唯一标识：老数据无 uid 时按需生成（关联 SecurePrefs 中该步独立密码）
+        val uid = if (step.uid.isBlank()) UUID.randomUUID().toString() else step.uid
+        // 密码胶囊（点击设本步密码）——视图先建，点击回调引用 row（lateinit，随后即赋值）
+        val pwdCapsule = TextView(this@AdvancedSettingsActivity).apply {
+            text = "密码"
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+            }
+        }
+        pwdCapsule.setOnClickListener {
+            if (editable()) showStepPasswordDialog(row.uid) {
+                pwdCapsule.text = if (ShizukuConfigStore.hasStepPassword(row.uid)) "密码·已设" else "密码·未设"
+                saveCardSteps(op)
+            }
+        }
+        // 超时胶囊（点击设本步验证码超时）
+        val waitCapsule = TextView(this@AdvancedSettingsActivity).apply {
+            text = "超时"
+            textSize = 12f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+            }
+        }
+        waitCapsule.setOnClickListener {
+            if (editable()) showStepTimeoutDialog(row.codeWait) { sec ->
+                row.codeWait = sec
+                saveCardSteps(op)
+            }
+        }
+        // 随机点击范围（编辑器不显示，仅在点选悬浮窗内可视化调节；此处保存该行范围）
+        row = StepRow(
+            typeTv, step.type, remarkEdit,
+            xEdit, yEdit, x2Edit, y2Edit, collect, collect2,
+            kw1Edit, kw2Edit,
+            if (step.delayMin > 0) step.delayMin else 0,
+            if (step.delayMax > 0) step.delayMax else 0,
+            if (step.range > 0) step.range else 0,
+            uid,
+            if (step.codeWait > 0) step.codeWait else 0,
+            pwdCapsule,
+            waitCapsule
+        )
+        pwdCapsule.text = if (ShizukuConfigStore.hasStepPassword(row.uid)) "密码·已设" else "密码·未设"
+        waitCapsule.text = if (row.codeWait > 0) "超时 ${row.codeWait}s" else "超时·默认"
+        // 内联文本（备注/坐标/关键字）失焦即保存：改动不依赖离开页面
+        val focusSaver = View.OnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveCardSteps(op)
+        }
+        remarkEdit.onFocusChangeListener = focusSaver
+        xEdit.onFocusChangeListener = focusSaver
+        yEdit.onFocusChangeListener = focusSaver
+        x2Edit.onFocusChangeListener = focusSaver
+        y2Edit.onFocusChangeListener = focusSaver
+        kw1Edit.onFocusChangeListener = focusSaver
+        kw2Edit.onFocusChangeListener = focusSaver
+        // 本步执行延迟（秒）：默认第 1 步 5s、其余 3s；第 2 个及以后的验证码输入格默认 1s；0=用默认
+        val prevCodeInputs = cardStepRows[op]?.count { it.type == ShizukuStepType.CODE_INPUT } ?: 0
+        val defaultDelay = when {
+            cardStepRows[op].isNullOrEmpty() -> 5
+            row.type == ShizukuStepType.CODE_INPUT && prevCodeInputs > 0 -> 1
+            else -> 3
+        }
+        val delayTv = TextView(this@AdvancedSettingsActivity).apply {
+            text = if (row.delayMax > 0) "延迟 ${row.delayMin}-${row.delayMax}s" else "延迟 0-${defaultDelay}s"
+            textSize = 13f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primary))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_primaryContainer))
+            }
+        }
+        delayTv.setOnClickListener {
+            showDelayRangeDialog(
+                if (row.delayMax > 0) row.delayMin else 0,
+                if (row.delayMax > 0) row.delayMax else defaultDelay
+            ) { min, max ->
+                row.delayMin = min
+                row.delayMax = max
+                delayTv.text = if (max > 0) "延迟 ${min}-${max}s" else "延迟 0-${defaultDelay}s"
+                saveCardSteps(op)
+            }
+        }
+        val remove = TextView(this@AdvancedSettingsActivity).apply {
+            text = "✕"
+            textSize = 16f
+            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_error))
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+
+        // 卡片头：类型（箭头紧贴）+ 备注小字 + 删除
+        val header = LinearLayout(this@AdvancedSettingsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(typeTv)
+            addView(remarkEdit)
+            addView(remove)
+        }
+        // 坐标区（点击/密码/验证码输入）：坐标 + X + Y + 点选
+        coordArea = LinearLayout(this@AdvancedSettingsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val label = TextView(this@AdvancedSettingsActivity).apply {
+                text = "坐标"
+                textSize = 12f
+                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+            }
+            addView(label)
+            addView(xEdit)
+            addView(yEdit)
+            addView(collect, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(4) })
+        }
+        // 终点区（SWIPE 专用）：终点坐标 + 终点点选
+        endpointArea = LinearLayout(this@AdvancedSettingsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val label = TextView(this@AdvancedSettingsActivity).apply {
+                text = "终点"
+                textSize = 12f
+                setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
+            }
+            addView(label)
+            addView(x2Edit)
+            addView(y2Edit)
+            addView(collect2, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(4) })
+        }
+        // 关键字区（验证信息采集）：收件人关键字 + 内容关键字，空=内置规则
+        keywordArea = LinearLayout(this@AdvancedSettingsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(kw1Edit)
+            addView(kw2Edit)
+        }
+        // 卡片体：第一行起点/坐标区 + 关键字区 + 延迟（紧凑）；终点区（SWIPE）独立第二行
+        val body = LinearLayout(this@AdvancedSettingsActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            val row1 = LinearLayout(this@AdvancedSettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(coordArea, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+                addView(keywordArea, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(delayTv, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = dp(4) })
+                addView(pwdCapsule, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = dp(4) })
+                addView(waitCapsule, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = dp(4) })
+            }
+            addView(row1)
+            addView(endpointArea, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(6) })
+        }
+        // 按当前类型初始化区域可见性
+        val needCoord = row.type == ShizukuStepType.CLICK ||
+            row.type == ShizukuStepType.SWIPE ||
+            row.type == ShizukuStepType.PWD_INPUT ||
+            row.type == ShizukuStepType.CODE_INPUT
+        coordArea.visibility = if (needCoord) View.VISIBLE else View.GONE
+        endpointArea.visibility = if (row.type == ShizukuStepType.SWIPE) View.VISIBLE else View.GONE
+        keywordArea.visibility = if (row.type == ShizukuStepType.CODE_CAPTURE) View.VISIBLE else View.GONE
+        // 整张卡片
+        val card = LinearLayout(this@AdvancedSettingsActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat()
+                setColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_surface))
+                setStroke(dp(1), ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_outlineVariant))
+            }
+            addView(header)
+            addView(body, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(4) })
+        }
+        remove.setOnClickListener {
+            container.removeView(card)
+            cardStepRows[op]?.removeAll { it.typeTv === typeTv }
+            // 清理该步遗留的独立密码
+            ShizukuConfigStore.setStepPassword(uid, "")
+            refreshStepCapsules(op)
+            saveCardSteps(op)
+        }
+        container.addView(card)
+        return row
     }
 
     /** 步骤编辑器单行持有 */
@@ -891,7 +1051,11 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         val kw2Edit: EditText,
         var delayMin: Int,
         var delayMax: Int,
-        var range: Int
+        var range: Int,
+        var uid: String,
+        var codeWait: Int,
+        val pwdCapsule: TextView,
+        val waitCapsule: TextView
     )
 
     /** 步骤类型 → 下拉索引 */

@@ -43,6 +43,9 @@ object ShizukuActions {
     private const val MODE_LOGIN = "login"
     private const val MODE_VERIFY = "verify"
     private const val MODE_PUNCH = "punch"
+    private const val MODE_VERIFY_LOGIN = "verify_login"
+    private const val MODE_CUSTOM_1 = "custom_1"
+    private const val MODE_CUSTOM_2 = "custom_2"
 
     /**
      * 动作互斥锁：登录 / 身份验证 / 模拟打卡共用同一套 shell 点击通道，
@@ -66,15 +69,34 @@ object ShizukuActions {
         scope.launch { execute(context, MODE_PUNCH) }
     }
 
+    /** 控制端下发「验证码登录」后调用（独立按钮，走验证码登录步骤） */
+    fun runVerifyLogin(context: Context, scope: CoroutineScope) {
+        scope.launch { execute(context, MODE_VERIFY_LOGIN) }
+    }
+
+    /** 控制端下发「自定义操作1」后调用 */
+    fun runCustomAction1(context: Context, scope: CoroutineScope) {
+        scope.launch { execute(context, MODE_CUSTOM_1) }
+    }
+
+    /** 控制端下发「自定义操作2」后调用 */
+    fun runCustomAction2(context: Context, scope: CoroutineScope) {
+        scope.launch { execute(context, MODE_CUSTOM_2) }
+    }
+
     private suspend fun execute(context: Context, mode: String) {
         val resultType = when (mode) {
-            MODE_LOGIN -> Protocol.ALERT_TYPE_LOGIN_RESULT
+            MODE_LOGIN, MODE_VERIFY_LOGIN -> Protocol.ALERT_TYPE_LOGIN_RESULT
             MODE_VERIFY -> Protocol.ALERT_TYPE_VERIFY_RESULT
+            MODE_CUSTOM_1, MODE_CUSTOM_2 -> Protocol.ALERT_TYPE_CUSTOM_RESULT
             else -> Protocol.ALERT_TYPE_SIMULATE_PUNCH_RESULT
         }
         val tag = when (mode) {
-            MODE_LOGIN -> "登录"
-            MODE_VERIFY -> "验证"
+            MODE_LOGIN -> "密码登录"
+            MODE_VERIFY_LOGIN -> "验证码登录"
+            MODE_VERIFY -> "身份验证"
+            MODE_CUSTOM_1 -> ShizukuConfigStore.opName1()
+            MODE_CUSTOM_2 -> ShizukuConfigStore.opName2()
             else -> "模拟打卡"
         }
         Log.d(TAG, "Shizuku $tag 动作开始 mode=$mode")
@@ -103,8 +125,12 @@ object ShizukuActions {
             return
         }
         val steps = when (mode) {
-            MODE_LOGIN -> ShizukuConfigStore.loginSteps()
+            MODE_LOGIN -> ShizukuConfigStore.pwdLoginSteps()
+            MODE_VERIFY_LOGIN -> ShizukuConfigStore.verifyLoginSteps()
             MODE_VERIFY -> ShizukuConfigStore.authSteps()
+            MODE_PUNCH -> ShizukuConfigStore.punchSteps()
+            MODE_CUSTOM_1 -> ShizukuConfigStore.custom1Steps()
+            MODE_CUSTOM_2 -> ShizukuConfigStore.custom2Steps()
             else -> ShizukuConfigStore.punchSteps()
         }
         if (steps.isEmpty()) {
@@ -144,7 +170,9 @@ object ShizukuActions {
         // 3. 执行步骤（全坐标点选，无需 dump 判定页面）
         val waitSeconds = when (mode) {
             MODE_LOGIN -> ShizukuConfigStore.verifyWaitSeconds()
+            MODE_VERIFY_LOGIN -> ShizukuConfigStore.verifyWaitSeconds()
             MODE_VERIFY -> ShizukuConfigStore.authWaitSeconds()
+            MODE_CUSTOM_1, MODE_CUSTOM_2 -> ShizukuConfigStore.verifyWaitSeconds()
             else -> ShizukuConfigStore.verifyWaitSeconds()
         }
         val result = executeSteps(context, steps, tag, waitSeconds)
@@ -207,7 +235,9 @@ object ShizukuActions {
                 }
 
                 ShizukuStepType.PWD_INPUT -> {
-                    val pwd = ShizukuConfigStore.password()
+                    // 每步独立密码优先，未配置回退全局密码
+                    val pwd = ShizukuConfigStore.stepPassword(step.uid)
+                        .ifBlank { ShizukuConfigStore.password() }
                     if (pwd.isBlank()) return "$tag·失败：密码未配置"
                     if (!ShizukuShell.tap(step.x, step.y, step.range)) return "$tag·失败：第 ${index + 1} 步点击失败"
                     delay(300)
@@ -216,7 +246,9 @@ object ShizukuActions {
 
                 ShizukuStepType.CODE_INPUT -> {
                     if (code == null) {
-                        code = waitForVerifyCode(waitSeconds) ?: return "$tag·超时：等待验证码超时"
+                        // 每步独立超时优先，0 回退该操作全局超时
+                        val wait = if (step.codeWait > 0) step.codeWait else waitSeconds
+                        code = waitForVerifyCode(wait) ?: return "$tag·超时：等待验证码超时"
                     }
                     val full = code
                     // 多格逐位 / 单框整串
@@ -235,11 +267,13 @@ object ShizukuActions {
                 }
 
                 ShizukuStepType.CODE_CAPTURE -> {
-                    if (!captureSmsAndWaitSent(step, waitSeconds)) return "$tag·超时：等待短信发送确认超时"
+                    val wait = if (step.codeWait > 0) step.codeWait else waitSeconds
+                    if (!captureSmsAndWaitSent(step, wait)) return "$tag·超时：等待短信发送确认超时"
                 }
 
                 ShizukuStepType.RESULT_CHECK -> {
-                    val confirm = screenshotAndWaitConfirm(context, waitSeconds) ?: return "$tag·超时：等待结果确认超时"
+                    val wait = if (step.codeWait > 0) step.codeWait else waitSeconds
+                    val confirm = screenshotAndWaitConfirm(context, wait) ?: return "$tag·超时：等待结果确认超时"
                     return if (confirm == "success") "$tag·成功" else "$tag·失败：用户确认登录未成功"
                 }
             }

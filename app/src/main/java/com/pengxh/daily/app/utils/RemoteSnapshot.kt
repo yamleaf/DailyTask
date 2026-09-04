@@ -83,7 +83,7 @@ object RemoteSnapshot {
         if ("device" in sections) root.add("device", buildDevice(context))
         if ("runtime" in sections) root.add("runtime", buildRuntime(context))
         if ("calendar" in sections) root.add("calendar", buildCalendar())
-        if ("settings" in sections) root.add("settings", buildSettings())
+        if ("settings" in sections) root.add("settings", buildSettings(context))
         if ("statuses" in sections) root.add("statuses", buildStatuses(context))
         if ("tasks" in sections) root.add("tasks", buildTasks())
         if ("history" in sections) root.add("history", buildHistory())
@@ -335,7 +335,7 @@ object RemoteSnapshot {
     }
 
     // ===================== 可写设置 =====================
-    private fun buildSettings(): JsonArray {
+    private fun buildSettings(context: Context): JsonArray {
         val arr = JsonArray()
         fun add(key: String, label: String, type: String, value: Any, min: Int? = null, max: Int? = null, step: Int? = null, options: JsonArray? = null, writable: Boolean = true) {
             val o = JsonObject()
@@ -426,6 +426,21 @@ object RemoteSnapshot {
             if (com.pengxh.daily.app.shizuku.ShizukuManager.isAvailable()) "可用" else "不可用", writable = false)
         add("sz_granted", "授权状态", "string",
             if (com.pengxh.daily.app.shizuku.ShizukuManager.isGranted()) "已授权" else "未授权", writable = false)
+        add("sz_channel", "Shizuku 通道", "string",
+            com.pengxh.daily.app.shizuku.ShizukuManager.channelLabel(), writable = false)
+        add("sz_server", "Shizuku 服务", "string",
+            com.pengxh.daily.app.shizuku.ShizukuRuntime.serverProcessName(), writable = false)
+        add("sz_authSource", "授权来源", "string",
+            com.pengxh.daily.app.shizuku.ShizukuManager.grantSource(), writable = false)
+        add("sz_devOpt", "开发者选项", "string",
+            if (runCatching { android.provider.Settings.Global.getString(context.contentResolver, "development_settings_enabled") == "1" }.getOrDefault(false)) "已开启" else "已关闭",
+            writable = false)
+        add("sz_wirelessAdb", "无线调试", "string",
+            when (runCatching { android.provider.Settings.Global.getString(context.contentResolver, "adb_wifi_enabled") }.getOrNull()) { "1" -> "已开启"; "0" -> "已关闭"; else -> "N/A" },
+            writable = false)
+        add("sz_adbStatus", "ADB 状态", "string",
+            when (runCatching { android.provider.Settings.Global.getString(context.contentResolver, "adb_enabled") }.getOrNull()) { "1" -> "已开启"; "0" -> "已关闭"; else -> "N/A" },
+            writable = false)
         add("sz_enabled", "高级功能", "bool", sz.get("enabled").asBoolean, writable = false)
         add("sz_method", "登录方式", "string",
             if (sz.get("method").asString == "VERIFY_CODE") "验证码登录" else "密码登录", writable = false)
@@ -440,6 +455,12 @@ object RemoteSnapshot {
         add("sz_hasPassword", "密码状态", "bool", sz.get("hasPassword").asBoolean, writable = false)
         add("sz_verifyWait", "验证码超时（秒）", "int", sz.get("verifyWait").asInt, writable = false)
         add("sz_authWait", "身份验证超时（秒）", "int", sz.get("authWait").asInt, writable = false)
+        add("sz_opName1", "操作1名称", "string", sz.get("opName1").asString, writable = false)
+        add("sz_opName2", "操作2名称", "string", sz.get("opName2").asString, writable = false)
+        add("sz_custom1Steps", "操作1步骤", "int", sz.get("custom1Steps").asInt, writable = false)
+        add("sz_custom2Steps", "操作2步骤", "int", sz.get("custom2Steps").asInt, writable = false)
+        add("sz_custom1StepsLabel", "-", "string", sz.get("custom1StepsLabel").asString, writable = false)
+        add("sz_custom2StepsLabel", "-", "string", sz.get("custom2StepsLabel").asString, writable = false)
         return arr
     }
 

@@ -48,7 +48,11 @@ data class ShizukuStep(
     /** CODE_CAPTURE 专用：收件人关键字（空=内置手机号正则）；用于定位含收件人手机号的文本行 */
     val kw1: String = "",
     /** CODE_CAPTURE 专用：内容关键字（空=内置「验证码/短信」）；用于定位短信正文文本行 */
-    val kw2: String = ""
+    val kw2: String = "",
+    /** 本步唯一标识（每步独立密码经 SecurePrefs 以 shizuku_step_pwd_<uid> 关联，不进明文 JSON） */
+    val uid: String = "",
+    /** 本步自己的验证码超时（秒）；0=用该操作全局超时（verifyWait/authWait） */
+    val codeWait: Int = 0
 ) {
     val hasCoord: Boolean get() = x >= 0 && y >= 0
     /** SWIPE 需终点坐标；其余类型只看起点 */
@@ -75,6 +79,8 @@ data class ShizukuStep(
         }
         if (kw1.isNotBlank()) addProperty("k1", kw1)
         if (kw2.isNotBlank()) addProperty("k2", kw2)
+        if (uid.isNotBlank()) addProperty("uid", uid)
+        if (codeWait > 0) addProperty("cw", codeWait)
     }
 
     companion object {
@@ -91,7 +97,9 @@ data class ShizukuStep(
             delayMin = o.get("d1")?.asInt ?: (o.get("d")?.asInt ?: 0),
             delayMax = o.get("d2")?.asInt ?: (o.get("d")?.asInt ?: 0),
             kw1 = o.get("k1")?.asString ?: "",
-            kw2 = o.get("k2")?.asString ?: ""
+            kw2 = o.get("k2")?.asString ?: "",
+            uid = o.get("uid")?.asString ?: "",
+            codeWait = o.get("cw")?.asInt ?: 0
         )
     }
 }
@@ -114,6 +122,12 @@ object ShizukuConfigStore {
     private const val KEY_AUTH_STEPS = "shizuku_auth_steps"
     private const val KEY_AUTH_WAIT = "shizuku_auth_wait_sec"
     private const val KEY_PUNCH_STEPS = "shizuku_punch_steps"
+    private const val KEY_OP_NAME_1 = "shizuku_op_name_1"
+    private const val KEY_OP_NAME_2 = "shizuku_op_name_2"
+    private const val KEY_CUSTOM_1_STEPS = "shizuku_custom_1_steps"
+    private const val KEY_CUSTOM_2_STEPS = "shizuku_custom_2_steps"
+    private const val DEFAULT_OP_NAME_1 = "操作1"
+    private const val DEFAULT_OP_NAME_2 = "操作2"
 
     // ---- 高级功能：Shizuku 已授权即默认开启，无独立开关 ----
     fun isEnabled(): Boolean = ShizukuManager.isGranted()
@@ -131,6 +145,16 @@ object ShizukuConfigStore {
     fun password(): String = SecurePrefs.getString(KEY_PASSWORD)
     fun setPassword(p: String) = SecurePrefs.putString(KEY_PASSWORD, p)
     fun hasPassword(): Boolean = password().isNotBlank()
+
+    // ---- 每步独立密码（仅 SecurePrefs 加密存储，按步骤 uid 关联）----
+    private fun pwdKey(uid: String) = "shizuku_step_pwd_$uid"
+    fun stepPassword(uid: String): String =
+        if (uid.isBlank()) "" else SecurePrefs.getString(pwdKey(uid))
+    fun setStepPassword(uid: String, p: String) {
+        if (uid.isBlank()) return
+        if (p.isBlank()) SecurePrefs.remove(pwdKey(uid)) else SecurePrefs.putString(pwdKey(uid), p)
+    }
+    fun hasStepPassword(uid: String): Boolean = stepPassword(uid).isNotBlank()
 
     // ---- 步骤序列化 ----
     private fun encodeSteps(steps: List<ShizukuStep>): String =
@@ -190,6 +214,27 @@ object ShizukuConfigStore {
         decodeSteps(SaveKeyValues.loadString(KEY_PUNCH_STEPS, ""))
     fun setPunchSteps(steps: List<ShizukuStep>) = SaveKeyValues.saveString(KEY_PUNCH_STEPS, encodeSteps(steps))
 
+    // ---- 操作名称（4 个固化操作名固定；仅自定义操作1/2 可改名，留空回退默认）----
+    fun opName1(): String {
+        val n = SaveKeyValues.loadString(KEY_OP_NAME_1, DEFAULT_OP_NAME_1)
+        return n.ifBlank { DEFAULT_OP_NAME_1 }
+    }
+    fun setOpName1(name: String) = SaveKeyValues.saveString(KEY_OP_NAME_1, name.trim())
+    fun opName2(): String {
+        val n = SaveKeyValues.loadString(KEY_OP_NAME_2, DEFAULT_OP_NAME_2)
+        return n.ifBlank { DEFAULT_OP_NAME_2 }
+    }
+    fun setOpName2(name: String) = SaveKeyValues.saveString(KEY_OP_NAME_2, name.trim())
+
+    // ---- 自定义操作1/2 步骤（坐标逐机采集，无内置默认）----
+    fun custom1Steps(): List<ShizukuStep> =
+        decodeSteps(SaveKeyValues.loadString(KEY_CUSTOM_1_STEPS, ""))
+    fun setCustom1Steps(steps: List<ShizukuStep>) = SaveKeyValues.saveString(KEY_CUSTOM_1_STEPS, encodeSteps(steps))
+
+    fun custom2Steps(): List<ShizukuStep> =
+        decodeSteps(SaveKeyValues.loadString(KEY_CUSTOM_2_STEPS, ""))
+    fun setCustom2Steps(steps: List<ShizukuStep>) = SaveKeyValues.saveString(KEY_CUSTOM_2_STEPS, encodeSteps(steps))
+
     // ---- 验证码等待超时（秒，10~600）----
     fun verifyWaitSeconds(): Int = SaveKeyValues.loadInt(KEY_VERIFY_WAIT, 120)
     fun setVerifyWaitSeconds(v: Int) = SaveKeyValues.saveInt(KEY_VERIFY_WAIT, v.coerceIn(10, 600))
@@ -211,6 +256,12 @@ object ShizukuConfigStore {
         addProperty("hasPassword", hasPassword())
         addProperty("verifyWait", verifyWaitSeconds())
         addProperty("authWait", authWaitSeconds())
+        addProperty("opName1", opName1())
+        addProperty("opName2", opName2())
+        addProperty("custom1Steps", custom1Steps().size)
+        addProperty("custom2Steps", custom2Steps().size)
+        addProperty("custom1StepsLabel", stepsLabel(custom1Steps()))
+        addProperty("custom2StepsLabel", stepsLabel(custom2Steps()))
     }
 
     /** 控制端镜像下发应用（FIELD_SHIZUKU_CONFIG）：仅接受非密码字段；步骤由被控端本地维护 */
