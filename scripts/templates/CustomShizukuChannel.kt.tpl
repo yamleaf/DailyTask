@@ -31,6 +31,10 @@ object CustomShizukuChannel : ShizukuChannel {
     @Volatile
     private var appContext: Context? = null
 
+    /** 已成功 attach 的 binder（同上一个）；用于幂等 attach：同一 binder 只 attach 一次 */
+    @Volatile
+    private var attachedBinder: IBinder? = null
+
     /** 由 ShizukuRuntime.init 注入，供真实权限判断与 attach 参数使用 */
     fun init(context: Context?) {
         appContext = context?.applicationContext
@@ -54,12 +58,14 @@ object CustomShizukuChannel : ShizukuChannel {
     override fun serverProcessName(): String =
         if (isAvailable()) "${customPkg.substringAfterLast('.')}_server" else "未知"
 
-    /** 向自定义 server 注册为 attached client：attachApplication 成功后 requestPermission 才放行。 */
+    /** 向自定义 server 注册为 attached client（幂等：同一 binder 只 attach 一次，贴近官方 attach 语义）。
+     *  失败时清空缓存，下次调用会重试。 */
     override fun attach(): Boolean {
         if (binderDescriptor() != descriptor) return false
+        val binder = customBinder() ?: return false
+        if (binder === attachedBinder) return true // 已 attach 过同一 binder
         val ctx = appContext ?: return false // 未完成 init 注入（异常关闭时序）时放弃，避免传空包名
-        return runCatching {
-            val binder = customBinder() ?: return false
+        val ok = runCatching {
             val service = IShizukuService.Stub.asInterface(binder)
             val app = object : IShizukuApplication.Stub() {
                 override fun bindApplication(data: Bundle?) {}
@@ -75,11 +81,15 @@ object CustomShizukuChannel : ShizukuChannel {
             service.attachApplication(app, args)
             true
         }.onFailure { Log.w(TAG, "自定义 Shizuku attachApplication 失败", it) }.getOrDefault(false)
+        if (ok) attachedBinder = binder else attachedBinder = null
+        return ok
     }
 
     override fun requestPermission(requestCode: Int): Boolean {
         if (binderDescriptor() != descriptor) return false
-        attach() // 必须先成为 attached client，server 的 requestPermission 才能通过 requireClient
+        // 必须先成为 attached client，server 的 requestPermission 才能通过 requireClient；
+        // attach 失败直接返回 false，避免静默（上层据此提示用户）
+        if (!attach()) return false
         return runCatching {
             val binder = customBinder() ?: return false
             IShizukuService.Stub.asInterface(binder).requestPermission(requestCode)
