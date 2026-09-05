@@ -9,6 +9,7 @@ import android.util.Log
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.yample.mqttprotocol.Protocol
 import kotlinx.coroutines.CoroutineScope
@@ -348,7 +349,7 @@ object ShizukuActions {
 
     /**
      * 钉钉验证码登录（CODE_CAPTURE）：解析页面提取「短信发送内容 + 收件人」上报控制端（ALERT_TYPE_SMS_CAPTURE），
-     * 等待控制端确认「短信已发送」（FIELD_SMS_SENT），超时返回 false。
+     * 等待「短信已发送且生效」后返回 true，超时返回 false。
      *
      * 采集锚点三层递进，全部锚定「短信内容本身」，不猜 UI 布局：
      *  1) resource-id 精确锚定（当前钉钉页面结构）：
@@ -360,6 +361,13 @@ object ShizukuActions {
      *     - kw2 默认「钉钉登录」（短信正文前缀）→ 定位含该文本的节点取短信正文。
      *  3) 步骤配置可显式填 kw1/kw2 覆盖默认（接入号或短信模板变更时人工指定新关键字）。
      *  兜底仍全失时收件人走全文号码正则 1\d{10,}；正文标记「待人工填写」。
+     *
+     * 「已生效」判定（短信由控制端发出，钉钉服务器验证后本机自动登录跳转）：
+     *  - 进入采集时动态记录顶层 Activity（发送短信验证页）；验证页离开 = 短信生效、登录跳转，
+     *    等待期间周期自检，命中即自动继续（控制端忘点「已完成」也能走通）；
+     *  - 收到控制端「已完成」（FIELD_SMS_SENT）时先校验验证页是否已跳转：已跳转/无法判定即接受；
+     *    未跳转（短信疑似未生效/误点）则宽限等待跳转，仍未跳转忽略该确认继续等待；
+     *  - exec/解析顶层失败（null）时自检与校验自动降级，仅靠手动确认 + 超时（兼容旧行为）。
      */
     private suspend fun captureSmsAndWaitSent(step: ShizukuStep, waitSeconds: Int): Boolean {
         ShizukuVerifyCodeBus.reset()
@@ -399,17 +407,87 @@ object ShizukuActions {
             put("recipient", recipient ?: "待定")
         }
         feedback(Protocol.ALERT_TYPE_SMS_CAPTURE, json.toString())
+
+        // —— 短信生效自动信号（防控制端忘点「已完成」卡死 + 防误点提前执行）——
+        // 短信由控制端发出，钉钉服务器收到验证后被控端钉钉自动登录跳转 → 顶层 Activity
+        // 离开「发送短信验证页」即登录成功。进入采集时动态记录当前顶层（不硬编码页面类名），
+        // 等待期间周期自检 + 收到「已完成」时也先校验是否真的跳转。exec/解析失败（null）时
+        // 相应判定自动降级：自检跳过、手动确认直接接受（人工信号优先），不阻塞原流程。
+        val baselineTop = topResumedComponent()
+        if (baselineTop != null) {
+            LogFileManager.writeLog("短信采集：记录验证页顶层 $baselineTop，登录跳转将自动继续")
+        } else {
+            LogFileManager.writeLog("短信采集：无法读取顶层 Activity，将依赖控制端「已完成」确认")
+        }
+        var lastTopProbe = 0L
         val deadline = System.currentTimeMillis() + waitSeconds * 1000L
         while (System.currentTimeMillis() < deadline) {
-            if (ShizukuVerifyCodeBus.consumeSmsSent()) return true
+            // 控制端「已完成」确认：先校验验证页是否已跳转，防止短信未生效时误点导致后续步骤提前执行
+            if (ShizukuVerifyCodeBus.consumeSmsSent()) {
+                val still = if (baselineTop != null) topStill(baselineTop) else null
+                if (still != true) {
+                    // 已跳转 / 无法判定（exec 失败）→ 接受确认
+                    if (baselineTop != null && still == false) {
+                        LogFileManager.writeLog("短信采集：收到「已完成」且验证页已跳转 → 继续")
+                    }
+                    return true
+                }
+                // 验证页仍在：短信可能未送达/服务器未处理，短暂宽限再验，期间周期自检
+                LogFileManager.writeLog("短信采集：收到「已完成」但验证页未跳转（短信疑似未生效/误点），宽限等待跳转")
+                val graceEnd = System.currentTimeMillis() + SMS_GRACE_MS
+                while (System.currentTimeMillis() < graceEnd) {
+                    if (topStill(baselineTop) == false) return true
+                    delay(500)
+                }
+                LogFileManager.writeLog("短信采集：宽限后验证页仍未跳转，忽略该确认，继续等待")
+            }
+            // 周期自检：验证页离开 → 短信已生效、登录跳转 → 自动继续
+            val now = System.currentTimeMillis()
+            if (baselineTop != null && now - lastTopProbe >= TOP_PROBE_INTERVAL_MS) {
+                lastTopProbe = now
+                if (topStill(baselineTop) == false) {
+                    LogFileManager.writeLog("短信采集：检测到验证页已离开（短信生效、登录跳转）→ 自动继续")
+                    return true
+                }
+            }
             delay(500)
         }
         return false
     }
 
+    /**
+     * 当前顶层 resumed Activity 的 component（如 com.alibaba.android.rimet/.xxx.SendMsmVerifyV2Activity）。
+     * 经 `dumpsys activity activities` 解析；exec 失败或格式不识别返回 null（调用方按无法判定降级）。
+     */
+    private suspend fun topResumedComponent(): String? {
+        val out = ShizukuShell.exec(
+            "dumpsys activity activities 2>/dev/null | grep -m1 -E 'topResumedActivity|mResumedActivity'",
+            timeoutMs = TOP_DUMP_TIMEOUT_MS
+        ) ?: return null
+        return Regex(
+            """(?:topResumedActivity|mResumedActivity)[=:]\s*ActivityRecord\{[^}]*? u0\s+(\S+)"""
+        ).find(out)?.groupValues?.get(1)
+    }
+
+    /**
+     * 当前顶层是否仍是 baseline（尚未离开验证页）。
+     * @return true=仍在；false=已切换；null=exec/解析失败无法判定（调用方按场景降级）
+     */
+    private suspend fun topStill(baseline: String): Boolean? {
+        val cur = topResumedComponent() ?: return null
+        return cur == baseline
+    }
+
     /** 钉钉短信采集默认关键字（kw 未配置时兜底；短信模板由钉钉服务端下发，接入号/正文前缀稳定） */
     private const val DEFAULT_SMS_RECIPIENT_KW = "1069076"
     private const val DEFAULT_SMS_CONTENT_KW = "钉钉登录"
+
+    /** 短信生效自检：顶层 Activity 轮询间隔（ms）与单次 dumpsys 超时 */
+    private const val TOP_PROBE_INTERVAL_MS = 2000L
+    private const val TOP_DUMP_TIMEOUT_MS = 3000L
+
+    /** 收到「已完成」但验证页未跳转时的宽限等待（ms）：容忍短信送达/服务器处理延迟 */
+    private const val SMS_GRACE_MS = 5000L
 
     /**
      * 结果判定（RESULT_CHECK，作为最后一个步骤）：截图回传后立即收尾，不再等待控制端人工确认。
