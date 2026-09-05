@@ -275,7 +275,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             rows += when (autostart) {
                 true -> GrantRow("自启动", "已授权")
                 false -> {
-                    runCatching { ShizukuShell.exec("appops set $pkg AUTO_START allow; echo done") }
+                    runCatching { ShizukuShell.exec("appops set $pkg 10008 allow; echo done") }
                     GrantRow("自启动", if (isAutostartGranted() == true) "已通过 adb 授权" else "授权失败，需手动")
                 }
             }
