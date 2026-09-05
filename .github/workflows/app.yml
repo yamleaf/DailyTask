@@ -207,6 +207,33 @@ jobs:
           retention-days: 10
           if-no-files-found: error
 
+      # 自定义 Shizuku 的 R8 mapping：Shizuku 崩溃栈是混淆名（如 b50/g80/CN），
+      # 没有 mapping 无法反混淆定位。manager release 已开 minifyEnabled true，mapping 必然产出；
+      # 但 AGP 版本升级可能改变输出路径，故用 find 定位而非写死路径，避免路径变更导致漏传。
+      - name: Collect custom Shizuku R8 mapping (optional)
+        if: inputs.shizuku_pkg != ''
+        run: |
+          set -euo pipefail
+          mkdir -p custom_shizuku_artifacts
+          found="$(find shizuku-custom -type f -name 'mapping.txt' -path '*release*' 2>/dev/null | head -1 || true)"
+          if [[ -z "$found" ]]; then
+            echo "::warning::未找到 Shizuku R8 mapping.txt，混淆堆栈将无法反混淆"
+            echo "---- shizuku-custom 下 mapping 目录 ----"
+            find shizuku-custom -type d -name 'mapping' 2>/dev/null || true
+            exit 0
+          fi
+          echo "找到 mapping: $found"
+          cp "$found" custom_shizuku_artifacts/shizuku-mapping.txt
+
+      - name: Upload custom Shizuku R8 mapping (optional)
+        if: inputs.shizuku_pkg != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.CUSTOM_SHIZUKU_ART_NAME }}-mapping
+          path: custom_shizuku_artifacts/shizuku-mapping.txt
+          retention-days: 30
+          if-no-files-found: warn
+
       - name: Build release APK (alpha)
         env:
           # 经 env 传递再判空，避免 inputs 直接内插 shell 造成注入
