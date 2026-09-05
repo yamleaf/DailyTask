@@ -607,8 +607,19 @@ private fun applyTabFromIntent(intent: Intent?) {
                         CaptureImageService.requestCaptureScreen().await()
                     }
 
-                    // 回到主界面
-                    backToMainActivity()
+                    // 回到被控端主界面：手动截屏是控制端主动查看动作，会话结束应把 DT 拉回前台
+                    // （不复用 backToMainActivity()——其非打卡分支按「返回桌面」开关点 Home，会停在桌面）。
+                    // 也不带 EXTRA_MASK_COMMAND（会与 finally 的蒙层恢复竞态，伪息屏被异步指令摘除）；
+                    // 蒙层/保活恢复统一由下方 finally 依据截图前状态处理。
+                    runCatching {
+                        startActivity(Intent(this@MainActivity, MainActivity::class.java).apply {
+                            addFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            )
+                        })
+                    }
                     if (imagePath.isNullOrEmpty()) {
                         MessageDispatcher.sendMessage(
                             "截屏状态通知",
