@@ -333,9 +333,13 @@ object ShizukuActions {
                 }
 
                 ShizukuStepType.RESULT_CHECK -> {
-                    val wait = if (step.codeWait > 0) step.codeWait else waitSeconds
-                    val confirm = screenshotAndWaitConfirm(context, wait) ?: return "$tag·超时：等待结果确认超时"
-                    return if (confirm == "success") "$tag·成功" else "$tag·失败：用户确认登录未成功"
+                    // 方案 B：截图回传后立即收尾（不等待控制端人工确认——成败由用户查看
+                    // 邮件/企微截图自行判定），避免流程悬挂「执行中」，操作完即回空闲
+                    return if (captureAndSendResultShot(context)) {
+                        "$tag·完成（结果截图已回传邮箱/企微，请查看确认登录状态）"
+                    } else {
+                        "$tag·失败：结果截图获取失败，请人工检查登录状态"
+                    }
                 }
             }
         }
@@ -408,16 +412,18 @@ object ShizukuActions {
     private const val DEFAULT_SMS_CONTENT_KW = "钉钉登录"
 
     /**
-     * 结果判定（RESULT_CHECK，作为最后一个步骤）：截图回传人工确认。
+     * 结果判定（RESULT_CHECK，作为最后一个步骤）：截图回传后立即收尾，不再等待控制端人工确认。
      * 1) Shizuku 截图（screencap）保存到本地文件；
      * 2) 经消息渠道（邮箱附件/企微图片）回传用户——**不走 MQTT，避免大包浪费额度**；
-     * 3) alert 请求控制端人工确认（ALERT_TYPE_RESULT_SCREENSHOT，仅文本）；
-     * 4) 用户看截图后点「成功/失败」→ FIELD_RESULT_CONFIRM 回传 → 判定成败；
-     * 超时返回 null。
+     * 3) alert 通知控制端结果已回传（ALERT_TYPE_RESULT_SCREENSHOT，仅文本）；
+     * 4) 成败由用户查看邮件/企微截图自行判定，DT 不再 while 等待 FIELD_RESULT_CONFIRM——
+     *    避免截图已回传、无人点确认时流程悬挂在「执行中」状态。
+     * @return 截图是否成功回传（true=已回传可人工判定；false=截图失败，流程按失败收尾）
      */
-    private suspend fun screenshotAndWaitConfirm(context: Context, waitSeconds: Int): String? {
+    private suspend fun captureAndSendResultShot(context: Context): Boolean {
         ShizukuVerifyCodeBus.reset()
         val bytes = ShizukuShell.screenshotBytes()
+        var sent = false
         if (bytes != null && bytes.isNotEmpty()) {
             val file = runCatching {
                 val dir = context.getExternalFilesDir(null) ?: context.cacheDir
@@ -433,19 +439,15 @@ object ShizukuActions {
                     force = true
                 )
                 pruneResultShots(file)
+                sent = true
             }
         }
         feedback(
             Protocol.ALERT_TYPE_RESULT_SCREENSHOT,
-            if (bytes != null) "结果判定：截图已经邮箱/企微回传，请在控制端确认成功/失败"
-            else "结果判定：截图失败，请在控制端确认成功/失败"
+            if (sent) "结果判定：截图已经邮箱/企微回传，请查看附件确认登录是否成功"
+            else "结果判定：截图失败，请人工检查登录状态"
         )
-        val deadline = System.currentTimeMillis() + waitSeconds * 1000L
-        while (System.currentTimeMillis() < deadline) {
-            ShizukuVerifyCodeBus.consumeResultConfirm()?.let { return it }
-            delay(500)
-        }
-        return null
+        return sent
     }
 
     /**

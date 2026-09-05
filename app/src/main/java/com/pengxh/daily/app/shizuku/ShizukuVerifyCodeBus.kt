@@ -12,8 +12,10 @@ import kotlinx.coroutines.flow.asStateFlow
  * 另承载「短信已发送」信号（FIELD_SMS_SENT，钉钉验证码登录）：
  * 被控端采集短信内容+收件人上报后，控制端确认已发送 → dispatchSmsSent() → 执行器继续。
  *
- * 还承载「结果判定人工确认」（FIELD_RESULT_CONFIRM，结果判定步骤）：
- * 被控端截图回传后，控制端看截图点「成功/失败」→ dispatchResultConfirm("success"/"fail") → 执行器判定成败。
+ * 兼容字段「结果判定人工确认」（FIELD_RESULT_CONFIRM，已停用等待）：
+ * 历史版本 RESULT_CHECK 截图回传后等待控制端点「成功/失败」→ dispatchResultConfirm()；
+ * 现方案改为截图回传即收尾（人工查看邮件/企微截图判定），执行器不再 consumeResultConfirm()，
+ * 字段保留仅为兼容控制端旧交互可能下发的确认包（写入后由下次 reset() 清空，无副作用）。
  */
 object ShizukuVerifyCodeBus {
     private val _code = MutableStateFlow<String?>(null)
