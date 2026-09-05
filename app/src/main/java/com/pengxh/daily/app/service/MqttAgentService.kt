@@ -1088,11 +1088,11 @@ class MqttAgentService : Service() {
                         "SUCCESS"
                     }
                     Protocol.ACTION_SCREENSHOT -> {
-                        val nms = NotificationMonitorService.instance
-                        if (nms != null) {
-                            nms.performScreenshot()
-                            "SUCCESS"
-                        } else "SERVICE_UNAVAILABLE"
+                        // 通知监听权限未开启时 NLS 实例不存在（instance==null），但截屏能力
+                        // （Shizuku / 无障碍 14+ / 截屏服务）与通知监听权限无关——用 MQTT 服务自身
+                        // Context 驱动，避免误判 SERVICE_UNAVAILABLE；通知权限只影响 DT# 文本指令。
+                        NotificationMonitorService.executeRemoteScreenshot(this@MqttAgentService)
+                        "SUCCESS"
                     }
                     Protocol.ACTION_MANUAL_LOGIN -> {
                         // Shizuku 手动登录：独立执行器异步运行，结果经 alert 通道反馈（feat_shiziku）

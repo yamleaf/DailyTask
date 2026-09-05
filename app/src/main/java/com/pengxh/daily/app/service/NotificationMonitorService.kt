@@ -2,6 +2,7 @@
 
 import android.app.Notification
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -117,6 +118,62 @@ class NotificationMonitorService : NotificationListenerService() {
 
         /** 同步读取最近一次监听连接状态（供 RemoteSnapshot 快照使用） */
         fun isListenerConnected(): Boolean = _listenerState.replayCache.firstOrNull() == true
+
+        /**
+         * 遥控截屏驱动（Context 参数化，不依赖本服务实例）。
+         *
+         * 通知监听权限未开启时，系统不会创建 NotificationListenerService 实例（instance==null），
+         * 但 MQTT 通道的控制端指令不应被该权限绑架——截屏能力（Shizuku / 无障碍 14+ / 截屏服务）
+         * 与通知监听无关。故 MqttAgentService 在 instance==null 时直接以自身 Context 调用本方法，
+         * 只要任一截图通道就绪即可执行；通知权限只影响 DT# 文本指令（经通知转发触发）。
+         */
+        fun executeRemoteScreenshot(context: Context) {
+            if (KeepAliveReceiver.isPaused()) {
+                LogFileManager.writeLog("暂停使用中，忽略截屏指令")
+                return
+            }
+            LogFileManager.action("收到截屏指令")
+            // 手动截屏是控制端显式下发的指令：不依赖 resultSource 运行模式（通知监听/截屏/无障碍）。
+            // resultSource 只约束「自动打卡」的结果反馈方式，不应限制用户主动请求的截屏——
+            // 只要任一截图通道就绪（MediaProjection / 无障碍 14+ / Shizuku）即直接截取目标 App 图像。
+            val mediaProjectionReady = ProjectionSession.isStateActive()
+            val a11yScreenshotReady = AutoProjectionAccessibilityService.canTakeScreenshot(context)
+            // Shizuku screencap 兜底：免 MediaProjection 授权与系统无障碍，screencap 直接抓屏。
+            // 必须同时校验 isAvailable() && isGranted()：未安装（无 binder）/未授权（无 API_V23 权限）
+            // 时 ShizukuShell.screenshotBytes() 会返回 null，此时不能走此路。两个判断内部均用
+            // runCatching/空安全包裹，未安装或未授权都不会抛 NPE。
+            val shizukuScreenshotReady = ShizukuManager.isAvailable() && ShizukuManager.isGranted()
+            if (!(mediaProjectionReady || a11yScreenshotReady || shizukuScreenshotReady)) {
+                val failMsg = "无可用截图通道：截屏服务未开启、无障碍截屏不可用且 Shizuku 未授权或未安装，" +
+                    "请先在被控端高级设置完成 Shizuku 授权"
+                MessageDispatcher.sendMessage(
+                    "截屏状态通知",
+                    StatusReporter.buildScreenshotResultHtml(false, failMsg),
+                    appendMeta = false
+                )
+                return
+            }
+            val keptAwakeForShot = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(context)
+            val maskWasShowing = MaskOverlayHelper.isShowing()
+            if (maskWasShowing) {
+                MaskOverlayHelper.hide(context, MaskOverlayHelper.HideReason.TEMP_PUNCH)
+            }
+            // 供 MainActivity 截屏会话 finally 恢复
+            pendingScreenshotMaskRestore = maskWasShowing
+            pendingScreenshotKeepAwakeRelease = keptAwakeForShot
+            val opened = context.openApplication { emitMonitorEvent(MonitorEvent.AppOpenedForScreenshot) }
+            if (!opened) {
+                pendingScreenshotMaskRestore = false
+                pendingScreenshotKeepAwakeRelease = false
+                if (maskWasShowing) MaskOverlayHelper.show(context)
+                if (keptAwakeForShot) IdlePseudoMaskController.releaseKeepAwakeForPunch(context)
+                MessageDispatcher.sendMessage(
+                    "截屏状态通知",
+                    StatusReporter.buildScreenshotResultHtml(false, "目标应用未能启动"),
+                    appendMeta = false
+                )
+            }
+        }
     }
 
     private val kTag = "MonitorService"
@@ -579,52 +636,9 @@ val attendanceText = buildString {
 
     /** 截取目标应用画面（对应 DT#截屏 / 控制端动作 screenshot），经消息渠道回传 */
     fun performScreenshot() {
-        if (KeepAliveReceiver.isPaused()) {
-            LogFileManager.writeLog("暂停使用中，忽略截屏指令")
-            return
-        }
-        LogFileManager.action("收到截屏指令")
-        // 手动截屏是控制端显式下发的指令：不依赖 resultSource 运行模式（通知监听/截屏/无障碍）。
-        // resultSource 只约束「自动打卡」的结果反馈方式，不应限制用户主动请求的截屏——
-        // 只要任一截图通道就绪（MediaProjection / 无障碍 14+ / Shizuku）即直接截取目标 App 图像。
-        val mediaProjectionReady = ProjectionSession.isStateActive()
-        val a11yScreenshotReady = AutoProjectionAccessibilityService.canTakeScreenshot(this)
-        // Shizuku screencap 兜底：免 MediaProjection 授权与系统无障碍，screencap 直接抓屏。
-        // 必须同时校验 isAvailable() && isGranted()：未安装（无 binder）/未授权（无 API_V23 权限）
-        // 时 ShizukuShell.screenshotBytes() 会返回 null，此时不能走此路。两个判断内部均用
-        // runCatching/空安全包裹，未安装或未授权都不会抛 NPE。
-        val shizukuScreenshotReady = ShizukuManager.isAvailable() && ShizukuManager.isGranted()
-        val canProceed = mediaProjectionReady || a11yScreenshotReady || shizukuScreenshotReady
-        if (!canProceed) {
-            val failMsg = "无可用截图通道：截屏服务未开启、无障碍截屏不可用且 Shizuku 未授权或未安装，" +
-                "请先在被控端高级设置完成 Shizuku 授权"
-            MessageDispatcher.sendMessage(
-                "截屏状态通知",
-                StatusReporter.buildScreenshotResultHtml(false, failMsg),
-                appendMeta = false
-            )
-            return
-        }
-        val keptAwakeForShot = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(this)
-        val maskWasShowing = MaskOverlayHelper.isShowing()
-        if (maskWasShowing) {
-            MaskOverlayHelper.hide(this, MaskOverlayHelper.HideReason.TEMP_PUNCH)
-        }
-        // 供 MainActivity 截屏会话 finally 恢复
-        pendingScreenshotMaskRestore = maskWasShowing
-        pendingScreenshotKeepAwakeRelease = keptAwakeForShot
-        val opened = openApplication { emitMonitorEvent(MonitorEvent.AppOpenedForScreenshot) }
-        if (!opened) {
-            pendingScreenshotMaskRestore = false
-            pendingScreenshotKeepAwakeRelease = false
-            if (maskWasShowing) MaskOverlayHelper.show(this)
-            if (keptAwakeForShot) IdlePseudoMaskController.releaseKeepAwakeForPunch(this)
-            MessageDispatcher.sendMessage(
-                "截屏状态通知",
-                StatusReporter.buildScreenshotResultHtml(false, "目标应用未能启动"),
-                appendMeta = false
-            )
-        }
+        // 委托给不依赖实例的静态驱动：本服务（通知监听）被系统创建时两者等价；
+        // 通知监听未开启（instance==null）时 MqttAgentService 直接调 executeRemoteScreenshot 语义一致。
+        executeRemoteScreenshot(this)
     }
 
     /**
