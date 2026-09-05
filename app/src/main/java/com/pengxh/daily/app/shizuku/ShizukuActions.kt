@@ -435,7 +435,8 @@ object ShizukuActions {
                 // 验证页仍在：短信可能未送达/服务器未处理，短暂宽限再验，期间周期自检
                 LogFileManager.writeLog("短信采集：收到「已完成」但验证页未跳转（短信疑似未生效/误点），宽限等待跳转")
                 val graceEnd = System.currentTimeMillis() + SMS_GRACE_MS
-                while (System.currentTimeMillis() < graceEnd) {
+                // baselineTop 此处为 String?（编译器不跨变量推断 still==true ⇒ 非空），while 条件判空触发 smart cast
+                while (baselineTop != null && System.currentTimeMillis() < graceEnd) {
                     if (topStill(baselineTop) == false) return true
                     delay(500)
                 }
