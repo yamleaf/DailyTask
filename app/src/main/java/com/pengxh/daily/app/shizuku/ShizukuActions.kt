@@ -276,26 +276,39 @@ object ShizukuActions {
     /**
      * 钉钉验证码登录（CODE_CAPTURE）：解析页面提取「短信发送内容 + 收件人」上报控制端（ALERT_TYPE_SMS_CAPTURE），
      * 等待控制端确认「短信已发送」（FIELD_SMS_SENT），超时返回 false。
-     * 采集规则：
-     *  - uiautomator 常把整段短信聚合成一个节点（行间为 &#10; 或 \n），先把文本拆成行再逐行精配，
-     *    避免整段文本被当作内容误上报。
-     *  - 收件人：kw1 非空时按关键字定位「含关键字且含号码」的行再提取；空则全文号码正则 1\d{10,}
-     *    （覆盖 11 位手机号与钉钉 1069076... 等长号码，不截断）。
-     *  - 内容：kw2 非空时取含 kw2 的行（关键字原样匹配，空格参与，如「发送 」）；空则内置规则，
-     *    优先钉钉「发送 … 复制」正文行，再回退「验证码/发送至/发送到/短信」关键字。
+     * 采集规则（新版钉钉验证页优先按 resource-id 精确锚定，旧版/非钉钉页回退关键字）：
+     *  - 精确锚定：正文节点 rid 含 sms_up_tv_sms_token → text 即短信正文（如「钉钉登录#IWYYA」）；
+     *    收件人节点 rid 含 sms_up_tv_sms_target_mobile → text 即收件人（如 10690760295102）。
+     *    钉钉新版已把「发送 / 正文 / 复制 / 到 / 号码」拆成独立节点，纯文本匹配会把
+     *    页面标题等无关文本当正文（如「发送短信验证」），故 rid 命中即用、无需关键字。
+     *  - 收件人（无 rid）：kw1 非空时按关键字定位「含关键字且含号码」的行再提取；空则全文号码
+     *    正则 1\d{10,}（覆盖 11 位手机号与钉钉 1069076... 等长号码，不截断）。
+     *  - 内容（无 rid）：kw2 非空时取含 kw2 的行（关键字原样匹配，空格参与，如「发送 」）；
+     *    空则内置规则，优先钉钉「发送 … 复制」正文行，再回退「验证码/发送至/发送到/短信」关键字。
      *  - 关键字保留原样（含首尾空格）：onConfirm 不再 trim，方便「到 」/「发送 」这类精确匹配。
      */
     private suspend fun captureSmsAndWaitSent(step: ShizukuStep, waitSeconds: Int): Boolean {
         ShizukuVerifyCodeBus.reset()
         val xml = ShizukuShell.dumpUiXml() ?: return false
         val nodes = UiNodeParser.parse(xml)
+
+        // 精确锚定（钉钉新版验证页）：短信正文/收件人带专属 resource-id，文本已被拆成
+        // 独立节点（发送 / 钉钉登录#IWYYA / 复制 / 到 / 号码），纯文本关键字法会降级到
+        // 页面标题等无关文本（如把「发送短信验证」当正文）。故优先按 rid 精确取，
+        // 命中即用；未命中（旧版/非钉钉页/rid 变化）才回退下方 kw1/kw2 与内置规则。
+        fun ridText(idContains: String): String? = nodes.firstOrNull {
+            it.resourceId?.contains(idContains) == true
+        }?.text?.trim()?.takeIf { it.isNotBlank() }
+        val ridContent = ridText("sms_up_tv_sms_token")
+        val ridRecipient = ridText("sms_up_tv_sms_target_mobile")
+
         // 拆成文本行：兼容聚合节点（行间 &#10; / \n）与独立节点，去空白后逐行精配
         val lines = nodes.mapNotNull { it.text }
             .flatMap { it.replace("&#10;", "\n").split('\n', '\r') }
             .map { it.trim() }
             .filter { it.isNotBlank() }
         val phoneRegex = Regex("""1\d{10,}""")
-        val recipient = if (step.kw1.isNotBlank()) {
+        val recipient = ridRecipient ?: if (step.kw1.isNotBlank()) {
             lines.firstOrNull { it.contains(step.kw1) && phoneRegex.containsMatchIn(it) }
                 ?.let { phoneRegex.find(it)?.value }
                 ?: lines.firstOrNull { phoneRegex.containsMatchIn(it) }?.let { phoneRegex.find(it)?.value }
@@ -307,7 +320,7 @@ object ShizukuActions {
             .replace(Regex("""^发送\s+"""), "")
             .replace(Regex("""\s*(复制|Copy|点此复制|拷贝)\s*$"""), "")
             .trim()
-        val content = if (step.kw2.isNotBlank()) {
+        val content = ridContent ?: if (step.kw2.isNotBlank()) {
             lines.firstOrNull { it.contains(step.kw2) }?.let { contentFrom(it) }
                 ?.takeIf { it.isNotBlank() } ?: step.kw2
         } else {
