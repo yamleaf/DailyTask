@@ -175,16 +175,16 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         refreshEnv()
     }
 
-    /** 刷新 Shizuku 操作执行状态（空闲 / 执行中第 x/y 步）+ 终止按钮可用性 */
+    /** 刷新 Shizuku 操作执行状态（空闲 / 执行中第 x/y 步）；终止按钮仅执行中显示 */
     private fun refreshShizukuRunState() {
         val snap = ShizukuActions.progressSnapshot()
         if (snap == null) {
             binding.txtShizukuRunState.text = "空闲"
-            binding.btnShizukuStop.isEnabled = false
+            binding.btnShizukuStop.visibility = View.GONE
         } else {
             val (tag, step) = snap
             binding.txtShizukuRunState.text = "执行中：$tag · $step"
-            binding.btnShizukuStop.isEnabled = true
+            binding.btnShizukuStop.visibility = View.VISIBLE
         }
     }
 
