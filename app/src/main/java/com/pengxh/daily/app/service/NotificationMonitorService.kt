@@ -32,6 +32,7 @@ import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.ProjectionSession
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.service.MqttAgentService
+import com.pengxh.daily.app.shizuku.ShizukuManager
 import com.pengxh.daily.app.utils.StatusReporter
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.kt.lite.extensions.show
@@ -588,18 +589,24 @@ val attendanceText = buildString {
         )
         val mediaProjectionReady = ProjectionSession.isStateActive()
         val a11yScreenshotReady = AutoProjectionAccessibilityService.canTakeScreenshot(this)
-        // 截屏命令：优先 MediaProjection；无障碍模式即使文本反馈，只要有无障碍截屏能力也兜底截屏
+        // Shizuku screencap 兜底：免 MediaProjection 授权与系统无障碍，screencap 直接抓屏。
+        // 必须同时校验 isAvailable() && isGranted()：未安装（无 binder）/未授权（无 API_V23 权限）
+        // 时 ShizukuShell.screenshotBytes() 会返回 null，此时不能走此路。两个判断内部均用
+        // runCatching/空安全包裹，未安装或未授权都不会抛 NPE。
+        val shizukuScreenshotReady = ShizukuManager.isAvailable() && ShizukuManager.isGranted()
+        // 截屏命令：优先 MediaProjection；无障碍模式即使文本反馈，只要有无障碍截屏能力也兜底截屏；
+        // 二者皆不可用时，若 Shizuku 已就绪则经 screencap 兜底截屏。
         val canProceed = when (resultSource) {
-            0 -> false                                            // 通知监听模式不支持截屏
-            1 -> mediaProjectionReady || a11yScreenshotReady        // 截屏服务模式可走无障碍兜底
-            2 -> a11yScreenshotReady                                // 无障碍模式：有截屏能力即兜底
+            0 -> false                                            // 通知监听模式不支持截屏（即便 Shizuku 可用也保持原约束）
+            1 -> mediaProjectionReady || a11yScreenshotReady || shizukuScreenshotReady
+            2 -> a11yScreenshotReady || shizukuScreenshotReady
             else -> false
         }
         if (!canProceed) {
             val failMsg = when (resultSource) {
                 0 -> "当前为通知监听模式，不支持截屏"
                 2 -> "无障碍截屏不可用（需 Android 14+ 且已开启无障碍服务），将以文本反馈为主"
-                else -> "截屏服务未开启且无障碍截屏不可用，请检查设置"
+                else -> "截屏服务未开启、无障碍截屏不可用且 Shizuku 未授权或未安装，请先在被控端高级设置完成 Shizuku 授权"
             }
             MessageDispatcher.sendMessage(
                 "截屏状态通知",

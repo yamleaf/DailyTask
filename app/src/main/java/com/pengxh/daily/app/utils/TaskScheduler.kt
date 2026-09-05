@@ -7,6 +7,8 @@ import android.os.Looper
 import android.os.SystemClock
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
+import com.pengxh.daily.app.shizuku.ShizukuManager
+import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.extensions.openApplication
 import com.pengxh.daily.app.extensions.bringDailyTaskToFront
 import com.pengxh.daily.app.extensions.resolveExecutionTime
@@ -42,6 +44,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Calendar
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * 任务调度器
@@ -396,7 +400,8 @@ object TaskScheduler {
                 // 1) 已有预截图（打卡过程中的 MediaProjection 实截）→ 直接使用
                 // 2) 系统无障碍权限已开启（且 Android 14+）→ AccessibilityService.takeScreenshot
                 // 3) 截屏服务权限已授权（MediaProjection 处于 ACTIVE）→ CaptureImageService 兜底
-                // 4) 都没有可用权限 → 截屏失败，降级为文字提醒
+                // 4) Shizuku 已安装且已授权 → screencap 兜底（免 MediaProjection/无障碍）
+                // 5) 都没有可用权限 → 截屏失败，降级为文字提醒
                 var imagePath = ""
                 if (hasCaptured) {
                     imagePath = captureDeferred?.await() ?: ""
@@ -414,11 +419,15 @@ object TaskScheduler {
 
                 if (imagePath.isNotEmpty()) {
                     // force=true：超时兜底通知是关键告警，跳过去重，保证一定送达（防「什么都没收到」）
+                    // onSuccess/onFailure 均删除临时截屏文件：避免 MediaProjection/无障碍/Shizuku 兜底
+                    // 产生的图片长期堆积占用存储（imagePath 在此分支恒非空，删除安全）。
                     MessageDispatcher.sendAttachmentMessage(
                         "任务执行结果通知",
                         StatusReporter.buildTimeoutAlertHtml("任务执行结果", "截图见附件，请手动检查是否打卡成功"),
                         imagePath,
-                        force = true
+                        force = true,
+                        onSuccess = { runCatching { File(imagePath).delete() } },
+                        onFailure = { runCatching { File(imagePath).delete() } }
                     )
                     LogFileManager.writeLog("发送打卡超时截屏: $imagePath")
                 } else {
@@ -578,6 +587,7 @@ object TaskScheduler {
      * 超时兜底截屏：按「实际权限」优先级选择截屏方式，与 resultSource 配置无关。
      * 优先级 1：系统无障碍权限已开启且 Android 14+ → AccessibilityService.takeScreenshot
      * 优先级 2：截屏服务权限已授权（MediaProjection 处于 ACTIVE）→ CaptureImageService 兜底
+     * 优先级 3：Shizuku 已安装且已授权 → screencap 兜底（免 MediaProjection/无障碍）
      * 都没有可用权限 → 返回空串（截屏失败）
      */
     suspend fun tryFallbackScreenshot(): String {
@@ -598,8 +608,29 @@ object TaskScheduler {
             val deferred = CaptureImageService.requestCaptureScreen()
             return runCatching { withTimeout(8000) { deferred.await() } }.getOrNull() ?: ""
         }
+        // 优先级3：Shizuku screencap 兜底（免 MediaProjection 授权与系统无障碍，screencap 直接抓屏）。
+        // 必须校验 isAvailable() && isGranted()：未安装（无 binder）/未授权（无 API_V23 权限）时
+        // ShizukuShell.screenshotBytes() 会返回 null，已用 runCatching/空安全包裹，不会抛 NPE；
+        // 仅当确实拿到非空 PNG 字节并落盘成功才视为成功，否则回退文字反馈。
+        if (ShizukuManager.isAvailable() && ShizukuManager.isGranted()) {
+            LogFileManager.writeLog("超时兜底：走 Shizuku screencap 兜底")
+            val bytes = ShizukuShell.screenshotBytes()
+            if (bytes != null && bytes.isNotEmpty()) {
+                val path = runCatching {
+                    val dir = ctx.getExternalFilesDir(null) ?: ctx.cacheDir
+                    val f = File(dir, "sz_fallback_${System.currentTimeMillis()}.png")
+                    FileOutputStream(f).use { it.write(bytes) }
+                    f.absolutePath
+                }.getOrNull()
+                if (!path.isNullOrEmpty()) {
+                    LogFileManager.writeLog("超时兜底：Shizuku 截屏成功 path=$path")
+                    return path
+                }
+            }
+            LogFileManager.error("超时兜底：Shizuku 截屏失败（bytes 为空或写文件失败），回退文字反馈")
+        }
         // 都没有可用权限 → 截屏失败
-        LogFileManager.error("超时兜底：无障碍与截屏服务均不可用，截屏失败")
+        LogFileManager.error("超时兜底：无障碍、截屏服务与 Shizuku 均不可用，截屏失败")
         return ""
     }
 
