@@ -13,10 +13,13 @@ import com.pengxh.daily.app.utils.MessageDispatcher
 import com.yample.mqttprotocol.Protocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -52,6 +55,49 @@ object ShizukuActions {
      * 占用时直接反馈「跳过」而不是排队等待——排队会让控制端在数十秒内收不到任何反馈。
      */
     private val actionMutex = Mutex()
+
+    // ═══════ 执行状态跟踪（供 DT 本地「高级设置」页展示 / 手动终止）═══════
+    /** 当前正在执行的操作协程 Job；null=空闲。终止即 cancel，步骤/等待循环在 delay 处抛 CancellationException 中断 */
+    @Volatile
+    private var runningJob: Job? = null
+
+    /** 当前操作展示名（密码登录/身份验证/模拟打卡…），仅 runningJob 非空时有效 */
+    @Volatile
+    private var runningTag: String = ""
+
+    /** 当前执行到的步骤（1 起）；0=尚未进入步骤循环 */
+    @Volatile
+    private var currentStep: Int = 0
+
+    /** 当前操作总步骤数 */
+    @Volatile
+    private var totalSteps: Int = 0
+
+    /** 是否有 Shizuku 操作正在执行 */
+    val isRunning: Boolean get() = runningJob?.isActive == true
+
+    /**
+     * 执行进度快照（供 UI 轮询）：空闲返回 null；执行中返回 (操作名, "第x/y步")。
+     */
+    fun progressSnapshot(): Pair<String, String>? {
+        val job = runningJob
+        return if (job?.isActive == true) {
+            runningTag to if (totalSteps > 0) "第$currentStep/$totalSteps 步" else "启动中"
+        } else null
+    }
+
+    /**
+     * 手动终止当前执行：cancel 协程 Job，步骤循环 / 验证码等待 / 短信采集等待 / 结果确认等待
+     * 均在 delay 挂起点中断并抛 CancellationException → execute() 的 finally 恢复动画 + 释放互斥锁。
+     * 空闲/无执行时无操作（幂等）。
+     */
+    fun stopCurrent() {
+        val job = runningJob
+        if (job?.isActive == true) {
+            Log.d(TAG, "手动终止当前 Shizuku 操作: $runningTag")
+            job.cancel()
+        }
+    }
 
     /** 控制端下发「手动登录」后调用 */
     fun runManualLogin(context: Context, scope: CoroutineScope) {
@@ -98,12 +144,31 @@ object ShizukuActions {
             feedback(resultType, "跳过：已有 Shizuku 操作正在执行，请稍后再试")
             return
         }
+        // 登记当前执行状态（供「高级设置」页展示进度 + 手动终止）
+        runningJob = coroutineContext[Job]
+        runningTag = tag
+        currentStep = 0
+        totalSteps = 0
         try {
             runFlow(context, mode, resultType, tag)
+        } catch (e: CancellationException) {
+            // 手动终止（stopCurrent）：步骤/等待循环在 delay 处中断并抛 CancellationException。
+            // 仅在 runningJob 仍指向本协程（即确实是被 stopCurrent 终止）时反馈「已终止」；
+            // 宿主 scope 整体取消（如 MqttAgentService 销毁）不打扰反馈，随后统一按取消语义传播。
+            if (runningJob === coroutineContext[Job]) {
+                Log.d(TAG, "Shizuku $tag 动作被手动终止")
+                feedback(resultType, "$tag·已手动终止")
+            }
+            throw e
         } finally {
-            // 无论成败/异常都恢复系统动画并释放锁：绝不能把用户设备的动画永久置 0
+            // 无论成败/异常/手动终止都恢复系统动画并释放锁：绝不能把用户设备的动画永久置 0
             runCatching { ShizukuShell.restoreAnimations() }
             actionMutex.unlock()
+            // 清空执行状态（手动终止经 CancellationException 走 finally 同样清理）
+            runningJob = null
+            runningTag = ""
+            currentStep = 0
+            totalSteps = 0
         }
     }
 
@@ -129,6 +194,8 @@ object ShizukuActions {
             feedback(resultType, "跳过：${tag}步骤未配置")
             return
         }
+        // 供进度展示：步骤总数
+        totalSteps = steps.size
         // 「结果判定」会 return 结束整个流程，放在中间会静默吞掉后续步骤——直接拒绝并给出位置提示
         val resultCheckIdx = steps.indexOfFirst { it.type == ShizukuStepType.RESULT_CHECK }
         if (resultCheckIdx >= 0 && resultCheckIdx != steps.lastIndex) {
@@ -216,6 +283,8 @@ object ShizukuActions {
             val pause = 500 + (Math.random() * 1500).toInt()
             val waitMs = (base * 1000).toInt() + pause
             delay(waitMs.toLong())
+            // 供进度展示：当前执行到的步骤号（1 起）
+            currentStep = index + 1
             Log.d(TAG, "step[${index + 1}] wait=${waitMs}ms(type=${step.type}, coords=(${step.x},${step.y}), range=${step.range})")
             when (step.type) {
                 ShizukuStepType.CLICK -> {

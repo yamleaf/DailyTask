@@ -31,6 +31,7 @@ import com.pengxh.daily.app.databinding.ActivityAdvancedSettingsBinding
 import com.pengxh.daily.app.extensions.isAutostartGranted
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.shizuku.CoordinateCaptureOverlay
+import com.pengxh.daily.app.shizuku.ShizukuActions
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore
 import androidx.lifecycle.lifecycleScope
 import com.pengxh.daily.app.shizuku.ShizukuManager
@@ -43,6 +44,7 @@ import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -99,11 +101,23 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         binding.btnShizukuAuth.setOnClickListener { ShizukuManager.requestPermission(this) }
         binding.btnRefreshShizukuState.setOnClickListener { refreshShizukuState() }
         binding.layoutQuickGrant.setOnClickListener { quickGrant() }
+        binding.btnShizukuStop.setOnClickListener {
+            ShizukuActions.stopCurrent()
+            Toast.makeText(this, "已请求终止当前操作", Toast.LENGTH_SHORT).show()
+            refreshShizukuRunState()
+        }
         binding.layoutOp1Name.setOnClickListener { if (editable()) showOpNameDialog() }
         OpCard.entries.forEach { card ->
             cardAddButton(card).setOnClickListener { if (editable()) addStep(card) }
         }
         populateAllStepCards()
+        // 操作执行状态轮询：仅页面存活期间刷新，离开自动取消
+        lifecycleScope.launch {
+            while (isActive) {
+                refreshShizukuRunState()
+                delay(500)
+            }
+        }
     }
 
     override fun onResume() {
@@ -159,6 +173,19 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         OpCard.entries.forEach { card -> cardRoot(card).alpha = if (on) 1f else 0.45f }
         refreshConfig()
         refreshEnv()
+    }
+
+    /** 刷新 Shizuku 操作执行状态（空闲 / 执行中第 x/y 步）+ 终止按钮可用性 */
+    private fun refreshShizukuRunState() {
+        val snap = ShizukuActions.progressSnapshot()
+        if (snap == null) {
+            binding.txtShizukuRunState.text = "空闲"
+            binding.btnShizukuStop.isEnabled = false
+        } else {
+            val (tag, step) = snap
+            binding.txtShizukuRunState.text = "执行中：$tag · $step"
+            binding.btnShizukuStop.isEnabled = true
+        }
     }
 
     /** 环境明细（Shizuku 服务 / 开发者选项 / 无线调试 / ADB 状态），经 shizuku getprop 异步刷新 */
