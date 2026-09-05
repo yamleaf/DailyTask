@@ -276,63 +276,51 @@ object ShizukuActions {
     /**
      * 钉钉验证码登录（CODE_CAPTURE）：解析页面提取「短信发送内容 + 收件人」上报控制端（ALERT_TYPE_SMS_CAPTURE），
      * 等待控制端确认「短信已发送」（FIELD_SMS_SENT），超时返回 false。
-     * 采集规则（新版钉钉验证页优先按 resource-id 精确锚定，旧版/非钉钉页回退关键字）：
-     *  - 精确锚定：正文节点 rid 含 sms_up_tv_sms_token → text 即短信正文（如「钉钉登录#IWYYA」）；
-     *    收件人节点 rid 含 sms_up_tv_sms_target_mobile → text 即收件人（如 10690760295102）。
-     *    钉钉新版已把「发送 / 正文 / 复制 / 到 / 号码」拆成独立节点，纯文本匹配会把
-     *    页面标题等无关文本当正文（如「发送短信验证」），故 rid 命中即用、无需关键字。
-     *  - 收件人（无 rid）：kw1 非空时按关键字定位「含关键字且含号码」的行再提取；空则全文号码
-     *    正则 1\d{10,}（覆盖 11 位手机号与钉钉 1069076... 等长号码，不截断）。
-     *  - 内容（无 rid）：kw2 非空时取含 kw2 的行（关键字原样匹配，空格参与，如「发送 」）；
-     *    空则内置规则，优先钉钉「发送 … 复制」正文行，再回退「验证码/发送至/发送到/短信」关键字。
-     *  - 关键字保留原样（含首尾空格）：onConfirm 不再 trim，方便「到 」/「发送 」这类精确匹配。
+     *
+     * 采集锚点三层递进，全部锚定「短信内容本身」，不猜 UI 布局：
+     *  1) resource-id 精确锚定（当前钉钉页面结构）：
+     *     正文节点 rid 含 sms_up_tv_sms_token → text 即短信正文（钉钉登录#IWYYA）；
+     *     收件人节点 rid 含 sms_up_tv_sms_target_mobile → text 即收件人（10690760295102）。
+     *  2) 短信模板关键字兜底（rid 失效/版本变化时，靠短信模板内容定位——模板由钉钉服务端
+     *     下发，接入号与正文前缀极稳定，UI 怎么改布局都不影响）：
+     *     - kw1 默认「1069076」（钉钉上行接入号前缀）→ 定位含该号的节点取收件人号码；
+     *     - kw2 默认「钉钉登录」（短信正文前缀）→ 定位含该文本的节点取短信正文。
+     *  3) 步骤配置可显式填 kw1/kw2 覆盖默认（接入号或短信模板变更时人工指定新关键字）。
+     *  兜底仍全失时收件人走全文号码正则 1\d{10,}；正文标记「待人工填写」。
      */
     private suspend fun captureSmsAndWaitSent(step: ShizukuStep, waitSeconds: Int): Boolean {
         ShizukuVerifyCodeBus.reset()
         val xml = ShizukuShell.dumpUiXml() ?: return false
         val nodes = UiNodeParser.parse(xml)
 
-        // 精确锚定（钉钉新版验证页）：短信正文/收件人带专属 resource-id，文本已被拆成
-        // 独立节点（发送 / 钉钉登录#IWYYA / 复制 / 到 / 号码），纯文本关键字法会降级到
-        // 页面标题等无关文本（如把「发送短信验证」当正文）。故优先按 rid 精确取，
-        // 命中即用；未命中（旧版/非钉钉页/rid 变化）才回退下方 kw1/kw2 与内置规则。
+        // ① rid 精确锚定（仅用于当前钉钉页面结构已知的节点）
         fun ridText(idContains: String): String? = nodes.firstOrNull {
             it.resourceId?.contains(idContains) == true
         }?.text?.trim()?.takeIf { it.isNotBlank() }
         val ridContent = ridText("sms_up_tv_sms_token")
         val ridRecipient = ridText("sms_up_tv_sms_target_mobile")
 
-        // 拆成文本行：兼容聚合节点（行间 &#10; / \n）与独立节点，去空白后逐行精配
-        val lines = nodes.mapNotNull { it.text }
-            .flatMap { it.replace("&#10;", "\n").split('\n', '\r') }
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+        // ② 短信模板关键字兜底：kw 未配置时用钉钉模板默认值（接入号前缀 / 正文前缀）。
+        //    kw 定位取「text 含关键字」的节点——独立节点布局下正文/号码就是节点文本本身；
+        //    若取到的是聚合文本（发送…复制 同行），做轻量清洗还原正文。
+        val kwRecipient = step.kw1.ifBlank { DEFAULT_SMS_RECIPIENT_KW }
+        val kwContent = step.kw2.ifBlank { DEFAULT_SMS_CONTENT_KW }
         val phoneRegex = Regex("""1\d{10,}""")
-        val recipient = ridRecipient ?: if (step.kw1.isNotBlank()) {
-            lines.firstOrNull { it.contains(step.kw1) && phoneRegex.containsMatchIn(it) }
-                ?.let { phoneRegex.find(it)?.value }
-                ?: lines.firstOrNull { phoneRegex.containsMatchIn(it) }?.let { phoneRegex.find(it)?.value }
-        } else {
-            lines.firstOrNull { phoneRegex.containsMatchIn(it) }?.let { phoneRegex.find(it)?.value }
-        }
-        // 短信正文清洗：去「发送 」前缀（钉钉）与「复制」尾标签；其余行原样保留
+        val phoneOf = { t: String? -> t?.let { phoneRegex.find(it)?.value } }
+        val recipient = ridRecipient
+            ?: nodes.firstOrNull { it.text?.contains(kwRecipient) == true }?.text?.let { phoneOf(it) }
+            ?: nodes.firstOrNull { phoneRegex.containsMatchIn(it.text.orEmpty()) }?.text?.let { phoneOf(it) }
+
+        // 正文轻量清洗：仅剥离钉钉 UI 的「发送 」前缀与「复制」尾标签，不动正文本身
         fun contentFrom(line: String): String = line.trim()
             .replace(Regex("""^发送\s+"""), "")
             .replace(Regex("""\s*(复制|Copy|点此复制|拷贝)\s*$"""), "")
             .trim()
-        val content = ridContent ?: if (step.kw2.isNotBlank()) {
-            lines.firstOrNull { it.contains(step.kw2) }?.let { contentFrom(it) }
-                ?.takeIf { it.isNotBlank() } ?: step.kw2
-        } else {
-            // 内置优先级：钉钉「发送 … 复制」→ 含「发送 」（发送+空格）→「验证码」（排除按钮）→ 发送至/发送到 → 短信（排除状态横幅）
-            lines.firstOrNull { it.contains("发送 ") }?.let { contentFrom(it) }
-                ?.takeIf { it.isNotBlank() }
-                ?: lines.firstOrNull { it.contains("验证码") && !it.contains("发送") }?.let { contentFrom(it) }
-                ?: lines.firstOrNull { it.contains("发送至") || it.contains("发送到") }?.let { contentFrom(it) }
-                ?: lines.firstOrNull { it.contains("短信") && !it.contains("互发") && !it.contains("彩信") }
-                    ?.let { contentFrom(it) }
-                ?: "请将登录验证码短信发送至收件人"
-        }
+        val content = ridContent
+            ?: nodes.firstOrNull { it.text?.contains(kwContent) == true }?.text
+                ?.let { contentFrom(it) }?.takeIf { it.isNotBlank() }
+            ?: "请将登录验证码短信发送至收件人"
+
         val json = org.json.JSONObject().apply {
             put("content", content)
             put("recipient", recipient ?: "待定")
@@ -345,6 +333,10 @@ object ShizukuActions {
         }
         return false
     }
+
+    /** 钉钉短信采集默认关键字（kw 未配置时兜底；短信模板由钉钉服务端下发，接入号/正文前缀稳定） */
+    private const val DEFAULT_SMS_RECIPIENT_KW = "1069076"
+    private const val DEFAULT_SMS_CONTENT_KW = "钉钉登录"
 
     /**
      * 结果判定（RESULT_CHECK，作为最后一个步骤）：截图回传人工确认。
