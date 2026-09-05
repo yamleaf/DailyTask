@@ -584,9 +584,9 @@ val attendanceText = buildString {
             return
         }
         LogFileManager.action("收到截屏指令")
-        val resultSource = SaveKeyValues.loadInt(
-            Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
-        )
+        // 手动截屏是控制端显式下发的指令：不依赖 resultSource 运行模式（通知监听/截屏/无障碍）。
+        // resultSource 只约束「自动打卡」的结果反馈方式，不应限制用户主动请求的截屏——
+        // 只要任一截图通道就绪（MediaProjection / 无障碍 14+ / Shizuku）即直接截取目标 App 图像。
         val mediaProjectionReady = ProjectionSession.isStateActive()
         val a11yScreenshotReady = AutoProjectionAccessibilityService.canTakeScreenshot(this)
         // Shizuku screencap 兜底：免 MediaProjection 授权与系统无障碍，screencap 直接抓屏。
@@ -594,20 +594,10 @@ val attendanceText = buildString {
         // 时 ShizukuShell.screenshotBytes() 会返回 null，此时不能走此路。两个判断内部均用
         // runCatching/空安全包裹，未安装或未授权都不会抛 NPE。
         val shizukuScreenshotReady = ShizukuManager.isAvailable() && ShizukuManager.isGranted()
-        // 截屏命令：优先 MediaProjection；无障碍模式即使文本反馈，只要有无障碍截屏能力也兜底截屏；
-        // 二者皆不可用时，若 Shizuku 已就绪则经 screencap 兜底截屏。
-        val canProceed = when (resultSource) {
-            0 -> false                                            // 通知监听模式不支持截屏（即便 Shizuku 可用也保持原约束）
-            1 -> mediaProjectionReady || a11yScreenshotReady || shizukuScreenshotReady
-            2 -> a11yScreenshotReady || shizukuScreenshotReady
-            else -> false
-        }
+        val canProceed = mediaProjectionReady || a11yScreenshotReady || shizukuScreenshotReady
         if (!canProceed) {
-            val failMsg = when (resultSource) {
-                0 -> "当前为通知监听模式，不支持截屏"
-                2 -> "无障碍截屏不可用（需 Android 14+ 且已开启无障碍服务），将以文本反馈为主"
-                else -> "截屏服务未开启、无障碍截屏不可用且 Shizuku 未授权或未安装，请先在被控端高级设置完成 Shizuku 授权"
-            }
+            val failMsg = "无可用截图通道：截屏服务未开启、无障碍截屏不可用且 Shizuku 未授权或未安装，" +
+                "请先在被控端高级设置完成 Shizuku 授权"
             MessageDispatcher.sendMessage(
                 "截屏状态通知",
                 StatusReporter.buildScreenshotResultHtml(false, failMsg),
