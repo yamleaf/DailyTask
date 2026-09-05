@@ -35,6 +35,7 @@ import java.io.File
 import java.io.FileOutputStream
 import com.pengxh.daily.app.BuildConfig
 import com.pengxh.daily.app.R
+import com.yample.mqttprotocol.Protocol
 import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import com.pengxh.daily.app.databinding.ActivityMainBinding
 import com.pengxh.daily.app.extensions.bringDailyTaskToFront
@@ -607,24 +608,22 @@ private fun applyTabFromIntent(intent: Intent?) {
                         CaptureImageService.requestCaptureScreen().await()
                     }
 
-                    // 回到被控端主界面：手动截屏是控制端主动查看动作，会话结束应把 DT 拉回前台
-                    // （不复用 backToMainActivity()——其非打卡分支按「返回桌面」开关点 Home，会停在桌面）。
-                    // 也不带 EXTRA_MASK_COMMAND（会与 finally 的蒙层恢复竞态，伪息屏被异步指令摘除）；
-                    // 蒙层/保活恢复统一由下方 finally 依据截图前状态处理。
-                    runCatching {
-                        startActivity(Intent(this@MainActivity, MainActivity::class.java).apply {
-                            addFlags(
-                                Intent.FLAG_ACTIVITY_NEW_TASK or
-                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                            )
-                        })
-                    }
+                    // 回到被控端：对齐打卡语义（backToMainActivity(isPunchReturn=true)）——
+                    // 伪息屏开 → 回桌面由后台伪息屏接管；伪息屏关 +「返回桌面」开 → 先回桌面再
+                    // 800ms 拉回本 App 主界面；伪息屏关 +「返回桌面」关 → 不打扰，停留当前界面。
+                    // 此前误用 isPunchReturn=false 分支（仅点 Home 不回 App）导致停在桌面。
+                    backToMainActivity(isPunchReturn = true)
                     if (imagePath.isNullOrEmpty()) {
                         MessageDispatcher.sendMessage(
                             "截屏状态通知",
                             StatusReporter.buildScreenshotResultHtml(false, "截图完成，但无法获取截图"),
                             appendMeta = false
+                        )
+                        // 结果 alert 回执：让控制端「手动截屏」等待弹窗刷新为可关闭的人工确认
+                        // （DC 端 ALERT_TYPE_RESULT_SCREENSHOT → refreshShizukuWaitToResultConfirm）
+                        MqttAgentService.publishDangerAlert(
+                            Protocol.ALERT_TYPE_RESULT_SCREENSHOT,
+                            "手动截屏失败：截图完成，但无法获取截图"
                         )
                     } else {
                         MessageDispatcher.sendAttachmentMessage(
@@ -633,6 +632,11 @@ private fun applyTabFromIntent(intent: Intent?) {
                             imagePath,
                             onSuccess = { runCatching { File(imagePath).delete() } },
                             onFailure = { runCatching { File(imagePath).delete() } }
+                        )
+                        // 结果 alert 回执：截图已走邮箱/企微附件回传，控制端看附件后点「成功/失败」关闭
+                        MqttAgentService.publishDangerAlert(
+                            Protocol.ALERT_TYPE_RESULT_SCREENSHOT,
+                            "手动截屏完成：截图已发送至邮箱/企微，请查看附件确认"
                         )
                     }
                     } finally {

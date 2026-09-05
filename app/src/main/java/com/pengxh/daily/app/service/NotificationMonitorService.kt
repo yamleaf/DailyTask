@@ -151,6 +151,12 @@ class NotificationMonitorService : NotificationListenerService() {
                     StatusReporter.buildScreenshotResultHtml(false, failMsg),
                     appendMeta = false
                 )
+                // 控制端等待弹窗需被控端结果 alert 才能关闭/刷新：失败也须回执，
+                // 否则 DC 端「手动截屏」等待弹窗永远停在「指令已下发」。
+                MqttAgentService.publishDangerAlert(
+                    Protocol.ALERT_TYPE_RESULT_SCREENSHOT,
+                    "手动截屏失败：$failMsg"
+                )
                 return
             }
             val keptAwakeForShot = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(context)
@@ -171,6 +177,11 @@ class NotificationMonitorService : NotificationListenerService() {
                     "截屏状态通知",
                     StatusReporter.buildScreenshotResultHtml(false, "目标应用未能启动"),
                     appendMeta = false
+                )
+                // 目标 App 启动失败也须回执，让控制端等待弹窗关闭/刷新（见 gate 失败分支注释）
+                MqttAgentService.publishDangerAlert(
+                    Protocol.ALERT_TYPE_RESULT_SCREENSHOT,
+                    "手动截屏失败：目标应用未能启动"
                 )
             }
         }
