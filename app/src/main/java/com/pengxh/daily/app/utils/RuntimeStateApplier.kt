@@ -129,7 +129,13 @@ object RuntimeStateApplier {
                 }
                 Protocol.FIELD_RESET_HOUR -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: 0
-                    SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, v.coerceIn(0, 23))
+                    val hour = v.coerceIn(0, 23)
+                    SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, hour)
+                    // 与本地 UI（TaskConfigActivity.setTaskResetTime）对齐的副作用。只写 key 不通知的后果：
+                    // waitUntilNextReset 仍按旧目标挂起最长 23h，且 ACTION_RESET_TASK 闹钟仍指旧整点，
+                    // 表现为「控制端改了重置时间，第二天到点不执行」。
+                    TaskScheduler.notifyResetTimeChanged()
+                    KeepAliveReceiver.scheduleResetAlarm(DailyTaskApplication.get(), hour)
                     true
                 }
                 Protocol.FIELD_TIME_RANGE -> {
@@ -139,7 +145,7 @@ object RuntimeStateApplier {
                 }
                 Protocol.FIELD_STAY_OVERTIME -> {
                     val v = (packet.v as? PacketValue.IntValue)?.i ?: 30
-                    SaveKeyValues.saveInt(Constant.STAY_OVERTIME_KEY, v.coerceIn(0, 120))
+                    SaveKeyValues.saveInt(Constant.STAY_OVERTIME_KEY, v.coerceIn(5, 120))
                     true
                 }
                 Protocol.FIELD_MSG_CHANNEL -> {

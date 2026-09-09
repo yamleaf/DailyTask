@@ -87,6 +87,9 @@ object TaskScheduler {
     val returnToApp = _returnToApp.asSharedFlow()
 
     private var scope: CoroutineScope? = null
+
+    /** 当前调度 job。stop/start 由多线程入口调用（FGS/心跳/MQTT/远程/用户点击），volatile 保证跨线程可见 */
+    @Volatile
     private var job: Job? = null
 
     /**
@@ -177,9 +180,16 @@ object TaskScheduler {
             }
         }
         tempJob.invokeOnCompletion {
-            _isRunning.value = false
-            runningDetail = "空闲"
-            RemoteSnapshot.invalidateCache()
+            // 身份校验：仅当自己仍是当前 job 时才复位运行标志。
+            // stopTask 的 job.cancel() 在协程阻塞于 delay 时是异步取消（worker 线程完成尾回调），
+            // 若此时另一路 startTask（MQTT 远程/心跳复活/用户点击）已 CAS 成功起新循环，
+            // 旧 job 的无条件复位会把新循环的 _isRunning 清成 false → UI 误报未运行 +
+            // 下一次 startTask 又能 CAS 成功 → 双循环并行重复打卡/重复邮件（08:37:58 双执行事故同类）。
+            if (job === tempJob) {
+                _isRunning.value = false
+                runningDetail = "空闲"
+                RemoteSnapshot.invalidateCache()
+            }
         }
         job = tempJob
     }
@@ -299,9 +309,10 @@ object TaskScheduler {
             KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
 
             // ====== 阶段 2：打开目标 App，等待打卡或超时 ======
+            // 下界钳制：远程/导入可把该值写成 0（UI 之外无校验），0 会让任务瞬间判超时并强发告警邮件
             val timeoutSeconds = SaveKeyValues.loadInt(
                 Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
-            )
+            ).coerceIn(5, 120)
 
             runningDetail =
                 "执行第 ${task.displayIndex}/${schedule.size} 个任务（等待打卡）"
