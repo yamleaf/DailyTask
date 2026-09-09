@@ -1143,9 +1143,16 @@ object StatusReporter {
         val crossMidnight = detectEndMinute < detectStartMinute
         val detectEndHm = if (crossMidnight) "次日 ${BatteryPredictor.formatWarningMinute(detectEndMinute)}"
                           else BatteryPredictor.formatWarningMinute(detectEndMinute)
-        // 电量完全耗尽时间（降至 0%）
-        val shutdownTimeMs = System.currentTimeMillis() + (battery / pred.ratePerHour * 3600 * 1000).toLong()
-        val shutdownTimeText = java.util.Date(shutdownTimeMs).format("HH:mm")
+        // 电量完全耗尽时间（降至 0%）。ratePerHour<=0 属脏数据（predict() 已排除，但缓存/反序列化来源
+        // 可能带 0）：直接除会得到 Infinity → .toLong() 溢出成 Long.MAX_VALUE → 显示荒谬时间。
+        // 防御：无法预测时回退为「—」，不影响 ratePerHour>0 的正常路径。
+        val shutdownTimeText = if (pred.ratePerHour > 0f) {
+            val shutdownTimeMs =
+                System.currentTimeMillis() + (battery / pred.ratePerHour * 3600 * 1000).toLong()
+            java.util.Date(shutdownTimeMs).format("HH:mm")
+        } else {
+            "—"
+        }
         val rateText = String.format("%.1f", pred.ratePerHour)
 
         val body = buildString {
@@ -1242,10 +1249,13 @@ object StatusReporter {
     @JvmStatic
     fun buildClockInResultHtml(title: String, notice: String): String {
         val battery = batteryCap()
+        // title/notice 来自第三方通知文本，含 < > & 时若不转义会破坏 HTML 排版甚至注入标签/像素追踪
+        val t = escapeHtml(title.ifBlank { "—" })
+        val n = escapeHtml(notice.ifBlank { "—" })
         val body = centerHeader("✅", "#52c41a", "打卡成功") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
-                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;\">${title.ifBlank { "—" }}</td></tr>" +
-                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;\">${notice}</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;\">$t</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;\">$n</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
         return pageShell("✅ 打卡结果通知", body, compact = true)
@@ -1258,15 +1268,27 @@ object StatusReporter {
         content: String,
         time: String
     ): String {
-        val body = centerHeader("📨", "#1677ff", "通知转移", "${appName} 的通知已转发到本机") +
+        // appName/title/content 来自第三方应用通知，未转义拼接可注入任意 HTML（排版破坏 + 追踪像素）
+        val a = escapeHtml(appName.ifBlank { "未知应用" })
+        val t = escapeHtml(title.ifBlank { "—" })
+        val c = escapeHtml(content.ifBlank { "—" })
+        val body = centerHeader("📨", "#1677ff", "通知转移", "$a 的通知已转发到本机") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
-                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">来源应用</td><td style=\"font-size:12px;color:#333;text-align:right;\">$appName</td></tr>" +
-                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${title.ifBlank { "—" }}</td></tr>" +
-                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;vertical-align:top;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${content.ifBlank { "—" }}</td></tr>" +
-                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">接收时间</td><td style=\"font-size:12px;color:#333;text-align:right;\">$time</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">来源应用</td><td style=\"font-size:12px;color:#333;text-align:right;\">$a</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">$t</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;vertical-align:top;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">$c</td></tr>" +
+                "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">接收时间</td><td style=\"font-size:12px;color:#333;text-align:right;\">${escapeHtml(time)}</td></tr>" +
                 "</table>"
-        return pageShell("📨 通知转移 · $appName", body, compact = true)
+        return pageShell("📨 通知转移 · $a", body, compact = true)
     }
+
+    /** HTML 转义：第三方通知文本拼进邮件 HTML 前必须经过本方法（防排版破坏 + 标签注入） */
+    private fun escapeHtml(s: String): String = s
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
 
     @JvmStatic
     fun buildStopTaskHtml(): String {

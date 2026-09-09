@@ -53,18 +53,21 @@ object LogFileManager {
     }
 
     fun initLogFile(context: Context) {
-        val documentDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
-            ?: throw IllegalStateException("External storage directory not available")
-        val logDir = documentDir.toPath()
-        currentLogFile = logDir.resolve("app_runtime_log.txt")
-        try {
+        // 本方法在 Application.onCreate 早期调用，任何异常都会导致进程启动即崩（当天定时打卡全丢）。
+        // 外部存储 Direct Boot / FBE 未解锁时 getExternalFilesDir 会返回 null，此时降级到内部目录，
+        // 而不是抛异常；整体上再用 runCatching 兜一层，保证「日志不可用」不会拖垮启动流程。
+        runCatching {
+            val documentDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+                ?: context.filesDir
+            val logDir = documentDir.toPath()
+            currentLogFile = logDir.resolve("app_runtime_log.txt")
             if (!Files.exists(currentLogFile)) {
                 Files.createFile(currentLogFile)
             } else if (Files.size(currentLogFile) > MAX_LOG_SIZE) {
                 rotateLogFiles(logDir)
             }
-        } catch (e: IOException) {
-            Log.e(kTag, "日志文件操作异常", e)
+        }.onFailure { e ->
+            Log.e(kTag, "日志文件初始化失败，本次运行不落盘日志", e)
         }
     }
 
