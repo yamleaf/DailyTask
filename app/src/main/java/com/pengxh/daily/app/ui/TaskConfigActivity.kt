@@ -58,7 +58,14 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         val hour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         binding.resetTimeView.text = "每天${hour}点"
 
-        val time = SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME)
+        val rawTime = SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME)
+        val time = rawTime.coerceIn(5, 120)
+        // 历史脏值归一化回写：远程/导入/旧版本可能把该值写成越界（UI 外无校验），
+        // 展示端 coerce 只是掩盖，存储仍是脏值；此处一次性把合法值落回存储，避免后续
+        // 导出/其它读取点反复处理脏值（RemoteSnapshot 等虽各自 coerce，落回后全局一致）。
+        if (rawTime != time) {
+            SaveKeyValues.saveInt(Constant.STAY_OVERTIME_KEY, time)
+        }
         binding.timeoutTextView.text = "${time}s"
 
         binding.keyTextView.text = SaveKeyValues.loadString(Constant.REMOTE_COMMAND_KEY, "打卡")
@@ -225,10 +232,12 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
 
         val holidayCount = mgr.getHolidayCount()
         val workdayCount = mgr.getWorkdayCount()
-        val cachedYear = mgr.getCachedYear()
+        val coverage = mgr.getCachedCoverage() // 缓存覆盖的年份范围 [from, to]
+        val cachedYear = coverage?.second // 数据覆盖的最大年份（11/12 月同步后可能覆盖到次年）
+        val fromYear = coverage?.first
         val currentYear = LocalDate.now().year
         val hasInMemory = holidayCount > 0 || workdayCount > 0
-        val hasCache = cachedYear != null
+        val hasCache = coverage != null
         val ready = hasInMemory || hasCache
 
         // 状态 badge（标题行右侧）
@@ -240,10 +249,14 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
             binding.holidayStatusView.setTextColor(R.color.md_warning.convertColor(this))
         }
 
-        // 第 2 行：覆盖数据
+        // 第 2 行：覆盖数据（缓存可能同时覆盖多年，如「覆盖：2026-2027年」）
+        val coverageText = when {
+            fromYear != null && cachedYear != null && fromYear < cachedYear -> "$fromYear-$cachedYear"
+            else -> "${cachedYear ?: currentYear}"
+        }
         binding.holidayCoverageView.text = when {
-            hasInMemory -> "覆盖：${cachedYear ?: currentYear}年  ·  节假日 ${holidayCount} 天  ·  补班 ${workdayCount} 天"
-            hasCache -> "覆盖：${cachedYear}年 · 已缓存，等待加载"
+            hasInMemory -> "覆盖：${coverageText}年  ·  节假日 ${holidayCount} 天  ·  补班 ${workdayCount} 天"
+            hasCache -> "覆盖：${coverageText}年 · 已缓存，等待加载"
             else -> "暂无节假日数据，节假日/补班判断暂不生效"
         }
 
@@ -271,8 +284,9 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
         }
 
         // 第 4 行：过期提示 / 来源 / 隐藏
-        if (hasCache && cachedYear != currentYear) {
-            binding.holidayUpdateView.text = "缓存为 ${cachedYear} 年数据，建议在设置页更新"
+        // 过期 = 缓存覆盖最大年份低于当前年（未覆盖今年）。11/12 月正常同步后覆盖到次年，不应误报过期
+        if (hasCache && cachedYear != null && cachedYear < currentYear) {
+            binding.holidayUpdateView.text = "缓存数据截至 ${cachedYear} 年，建议在设置页更新"
             binding.holidayUpdateView.setTextColor(R.color.md_warning.convertColor(this))
             binding.holidayUpdateView.visibility = View.VISIBLE
         } else if (ready) {
@@ -412,8 +426,13 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
     }
 
     private fun updateTimeout(time: Int) {
-        if (time <= 0) {
-            "超时时间必须大于0秒".show(this)
+        // 有效范围 5~120：<5s 打开 App + 打卡不可能完成，>120s 超时等待过长
+        if (time < 5) {
+            "超时时间不能小于 5 秒".show(this)
+            return
+        }
+        if (time > 120) {
+            "超时时间不能大于 120 秒".show(this)
             return
         }
         binding.timeoutTextView.text = "${time}s"
