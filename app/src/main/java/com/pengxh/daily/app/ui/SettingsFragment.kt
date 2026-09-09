@@ -62,6 +62,7 @@ import com.pengxh.daily.app.service.FloatingWindowService
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.NotificationMonitorService
+import com.pengxh.daily.app.shizuku.ShizukuConfigStore
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.ConfigImportSignal
@@ -241,7 +242,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             }
         }
 
-    /** 配置导出：远程/任务/设置三页全量配置序列化为 JSON，经 SAF 保存对话框写入用户选择的可见目录（如 Downloads） */
+    /** 配置导出：远程/任务/设置三页全量配置 + 高级设置操作配置序列化为 JSON，经 SAF 保存对话框写入用户选择的可见目录（如 Downloads） */
     private fun exportConfig() {
         val exportData = ExportDataModel()
 
@@ -304,6 +305,22 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         exportData.logEnabled = SaveKeyValues.loadBoolean(Constant.LOG_ENABLED_KEY, true)
         exportData.themeMode = ThemeManager.getMode(ctx)
 
+        // v5 扩展：静默通知 / 开机自动调度 / 电池预警细节（旧版本导入时自动忽略缺失字段）
+        exportData.feedbackNotifyDisabled =
+            SaveKeyValues.loadBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, false)
+        exportData.bootAutoSchedule =
+            SaveKeyValues.loadBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, false)
+        exportData.batteryWarningHour =
+            SaveKeyValues.loadInt(Constant.BATTERY_WARNING_HOUR_KEY, 20 * 60)
+        exportData.batteryAlertMaxStages =
+            SaveKeyValues.loadInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, 3)
+        exportData.batteryAlertDetectionStart =
+            SaveKeyValues.loadInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, 20)
+        exportData.batteryAlertDetectionDuration = SaveKeyValues.loadInt(
+            Constant.BATTERY_ALERT_DETECTION_DURATION_KEY,
+            Constant.DEFAULT_BATTERY_ALERT_DURATION
+        )
+
         // v3 扩展：远程页连接信息（密码/AppSecret 以 AES 加密写入文件，导入时自动解密填充）
         exportData.mqttBroker = SaveKeyValues.loadString(Constant.MQTT_BROKER_KEY, "")
         exportData.mqttUser = SaveKeyValues.loadString(Constant.MQTT_USER_KEY, "")
@@ -338,6 +355,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                     if (rawAuth.isNotBlank()) ConfigCipher.encrypt(rawAuth) else ""
             }
         }
+
+        // v4 扩展：高级设置·操作配置（Shizuku 登录/验证/打卡/自定义操作步骤+名称+超时；每步密码 AES 密文写入）
+        exportData.shizukuOperationConfig = ShizukuConfigStore.exportOperationConfig()
 
         // TaskBeans
         lifecycleScope.launch {

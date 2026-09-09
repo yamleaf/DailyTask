@@ -3,6 +3,7 @@ package com.pengxh.daily.app.shizuku
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.pengxh.daily.app.utils.ConfigCipher
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.SecurePrefs
 import com.pengxh.kt.lite.utils.SaveKeyValues
@@ -107,7 +108,7 @@ data class ShizukuStep(
 /**
  * Shizuku 高级功能配置存储（feat_shiziku，独立新键，与现有配置零交集）。
  *
- * - 非敏感配置走 SaveKeyValues；密码走 SecurePrefs（Keystore AES256-GCM 加密），
+ * - 非敏感配置走 SaveKeyValues；每步独立密码走 SecurePrefs（Keystore AES256-GCM 加密），
  *   只在被控端高级设置界面可显隐，**永不进快照 / 协议 / 日志**。
  * - 控制端镜像下发的配置（FIELD_SHIZUKU_CONFIG）只接受非密码字段。
  * - 登录 / 身份验证 / 模拟打卡步骤均无内置默认：全坐标采集，坐标逐机不同，
@@ -115,7 +116,6 @@ data class ShizukuStep(
  */
 object ShizukuConfigStore {
     private const val KEY_METHOD = "shizuku_login_method"
-    private const val KEY_PASSWORD = "shizuku_login_password"
     private const val KEY_PWD_STEPS = "shizuku_pwd_login_steps"
     private const val KEY_VERIFY_STEPS = "shizuku_verify_login_steps"
     private const val KEY_VERIFY_WAIT = "shizuku_verify_wait_sec"
@@ -137,11 +137,6 @@ object ShizukuConfigStore {
             ShizukuLoginMethod.PASSWORD
         }
     fun setLoginMethod(m: ShizukuLoginMethod) = SaveKeyValues.saveString(KEY_METHOD, m.name)
-
-    // ---- 密码（仅 SecurePrefs 加密存储，仅被控端本地可读）----
-    fun password(): String = SecurePrefs.getString(KEY_PASSWORD)
-    fun setPassword(p: String) = SecurePrefs.putString(KEY_PASSWORD, p)
-    fun hasPassword(): Boolean = password().isNotBlank()
 
     // ---- 每步独立密码（仅 SecurePrefs 加密存储，按步骤 uid 关联）----
     private fun pwdKey(uid: String) = "shizuku_step_pwd_$uid"
@@ -241,7 +236,6 @@ object ShizukuConfigStore {
         addProperty("verifyStepsLabel", stepsLabel(verifyLoginSteps()))
         addProperty("authStepsLabel", stepsLabel(authSteps()))
         addProperty("punchStepsLabel", stepsLabel(punchSteps()))
-        addProperty("hasPassword", hasPassword())
         addProperty("verifyWait", verifyWaitSeconds())
         addProperty("authWait", authWaitSeconds())
         addProperty("opName1", opName1())
@@ -264,6 +258,68 @@ object ShizukuConfigStore {
             if (o.has("authWait")) setAuthWaitSeconds(o.get("authWait").asInt)
             // 注意：password 字段绝不接收——密码仅被控端本地设置，公共 Broker 不明文传输；
             // loginSteps/authSteps 亦由被控端本地维护（控制端只读展示，不下发）
+        }
+    }
+
+    // ---- 配置导入导出（v4）：整个操作配置随配置文件迁移；密码以 AES 密文写入，导入时自动解密 ----
+
+    /** 导出整个操作配置（登录方式/超时/操作名/五类步骤 + 密码 AES 密文）为 JSON 字符串；供配置导出 */
+    fun exportOperationConfig(): String = JsonObject().apply {
+        addProperty("method", loginMethod().name)
+        addProperty("verifyWait", verifyWaitSeconds())
+        addProperty("authWait", authWaitSeconds())
+        addProperty("opName1", opName1())
+        fun addSteps(key: String, steps: List<ShizukuStep>) {
+            if (steps.isNotEmpty()) add(key, JsonParser.parseString(encodeSteps(steps)).asJsonArray)
+        }
+        addSteps("pwdLoginSteps", pwdLoginSteps())
+        addSteps("verifyLoginSteps", verifyLoginSteps())
+        addSteps("authSteps", authSteps())
+        addSteps("punchSteps", punchSteps())
+        addSteps("custom1Steps", custom1Steps())
+        // 每步独立密码：按步骤 uid 关联导出密文（uid 进明文步骤 JSON，密码本身从不落明文）
+        run {
+            val stepPwds = JsonObject()
+            (pwdLoginSteps() + verifyLoginSteps() + authSteps() + punchSteps() + custom1Steps())
+                .distinctBy { it.uid }
+                .forEach { s ->
+                    if (s.uid.isNotBlank() && hasStepPassword(s.uid)) {
+                        stepPwds.addProperty(s.uid, ConfigCipher.encrypt(stepPassword(s.uid)))
+                    }
+                }
+            if (stepPwds.size() > 0) add("stepPasswords", stepPwds)
+        }
+    }.toString()
+
+    /** 应用导出的操作配置（导入）：json 为 [exportOperationConfig] 产物；缺失字段保持本机现状 */
+    fun applyOperationConfig(json: String) {
+        if (json.isBlank()) return
+        runCatching {
+            val o = JsonParser.parseString(json).asJsonObject
+            o.get("method")?.takeIf { it.isJsonPrimitive }?.asString?.let { m ->
+                setLoginMethod(runCatching { ShizukuLoginMethod.valueOf(m) }
+                    .getOrDefault(ShizukuLoginMethod.PASSWORD))
+            }
+            o.get("verifyWait")?.takeIf { it.isJsonPrimitive }?.asInt?.let { setVerifyWaitSeconds(it) }
+            o.get("authWait")?.takeIf { it.isJsonPrimitive }?.asInt?.let { setAuthWaitSeconds(it) }
+            o.get("opName1")?.takeIf { it.isJsonPrimitive }?.asString?.let { setOpName1(it) }
+            fun applySteps(key: String, sink: (List<ShizukuStep>) -> Unit) {
+                o.get(key)?.takeIf { it.isJsonArray }?.let { sink(decodeSteps(it.asJsonArray.toString())) }
+            }
+            applySteps("pwdLoginSteps") { setPwdLoginSteps(it) }
+            applySteps("verifyLoginSteps") { setVerifyLoginSteps(it) }
+            applySteps("authSteps") { setAuthSteps(it) }
+            applySteps("punchSteps") { setPunchSteps(it) }
+            applySteps("custom1Steps") { setCustom1Steps(it) }
+            // 每步独立密码：AES 密文解密后按 uid 写回本机加密存储（仅配置确实带密码时覆盖）
+            o.get("stepPasswords")?.takeIf { it.isJsonObject }?.asJsonObject?.let { sp ->
+                sp.entrySet().forEach { (uid, v) ->
+                    if (uid.isNotBlank() && v.isJsonPrimitive) {
+                        val plain = ConfigCipher.decrypt(v.asString)
+                        if (plain.isNotBlank()) setStepPassword(uid, plain)
+                    }
+                }
+            }
         }
     }
 }

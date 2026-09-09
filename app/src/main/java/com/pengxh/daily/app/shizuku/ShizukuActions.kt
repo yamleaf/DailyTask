@@ -297,9 +297,8 @@ object ShizukuActions {
                 }
 
                 ShizukuStepType.PWD_INPUT -> {
-                    // 每步独立密码优先，未配置回退全局密码
+                    // 每步独立密码（全局密码缓存入口已移除，密码一律按步骤 uid 配置）
                     val pwd = ShizukuConfigStore.stepPassword(step.uid)
-                        .ifBlank { ShizukuConfigStore.password() }
                     if (pwd.isBlank()) return "$tag·失败：密码未配置"
                     if (!ShizukuShell.tap(step.x, step.y, step.range)) return "$tag·失败：第 ${index + 1} 步点击失败"
                     delay(300)

@@ -61,6 +61,17 @@ public class ExportDataModel {
     private String apiAppId; // Serverless API AppID
     private String apiAppSecretEncrypted; // Serverless API AppSecret（AES 密文）
 
+    // ── v4 扩展字段：高级设置·操作配置（feat_shiziku 登录/验证/打卡/自定义操作；密码以 AES 密文写入）──
+    private String shizukuOperationConfig; // 操作配置 JSON（登录方式/超时/操作名/五类步骤 + 密码 AES 密文）
+
+    // ── v5 扩展字段：静默通知 / 开机自动调度 / 电池预警细节 ──
+    private Boolean feedbackNotifyDisabled; // 静默通知：关闭反馈通知（不发送邮件/企微消息）
+    private Boolean bootAutoSchedule; // 开机自动调度：重启后任务列表非空自动 startTask
+    private Integer batteryWarningHour; // 电量智能提醒时间（分钟 0-1439，默认 20*60）
+    private Integer batteryAlertMaxStages; // 低电量提醒段数（0-3，0=不提醒，默认 3）
+    private Integer batteryAlertDetectionStart; // 预警检测区间起始小时（0-23，默认 20）
+    private Integer batteryAlertDetectionDuration; // 预警检测区间时长小时（1-24，默认 12）
+
     public Integer getResultSource() {
         return resultSource;
     }
@@ -251,6 +262,62 @@ public class ExportDataModel {
 
     public void setApiAppSecretEncrypted(String apiAppSecretEncrypted) {
         this.apiAppSecretEncrypted = apiAppSecretEncrypted;
+    }
+
+    public String getShizukuOperationConfig() {
+        return shizukuOperationConfig;
+    }
+
+    public void setShizukuOperationConfig(String shizukuOperationConfig) {
+        this.shizukuOperationConfig = shizukuOperationConfig;
+    }
+
+    public Boolean getFeedbackNotifyDisabled() {
+        return feedbackNotifyDisabled;
+    }
+
+    public void setFeedbackNotifyDisabled(Boolean feedbackNotifyDisabled) {
+        this.feedbackNotifyDisabled = feedbackNotifyDisabled;
+    }
+
+    public Boolean getBootAutoSchedule() {
+        return bootAutoSchedule;
+    }
+
+    public void setBootAutoSchedule(Boolean bootAutoSchedule) {
+        this.bootAutoSchedule = bootAutoSchedule;
+    }
+
+    public Integer getBatteryWarningHour() {
+        return batteryWarningHour;
+    }
+
+    public void setBatteryWarningHour(Integer batteryWarningHour) {
+        this.batteryWarningHour = batteryWarningHour;
+    }
+
+    public Integer getBatteryAlertMaxStages() {
+        return batteryAlertMaxStages;
+    }
+
+    public void setBatteryAlertMaxStages(Integer batteryAlertMaxStages) {
+        this.batteryAlertMaxStages = batteryAlertMaxStages;
+    }
+
+    public Integer getBatteryAlertDetectionStart() {
+        return batteryAlertDetectionStart;
+    }
+
+    public void setBatteryAlertDetectionStart(Integer batteryAlertDetectionStart) {
+        this.batteryAlertDetectionStart = batteryAlertDetectionStart;
+    }
+
+    public Integer getBatteryAlertDetectionDuration() {
+        return batteryAlertDetectionDuration;
+    }
+
+    public void setBatteryAlertDetectionDuration(Integer batteryAlertDetectionDuration) {
+        this.batteryAlertDetectionDuration = batteryAlertDetectionDuration;
     }
 
     public int getResetTime() {

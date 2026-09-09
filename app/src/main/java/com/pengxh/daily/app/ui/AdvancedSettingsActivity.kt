@@ -58,7 +58,7 @@ import rikka.shizuku.Shizuku
  *  - 弹窗统一走 UnifiedDialogKit，不手拼原生 AlertDialog。
  *
  * 安全约定：
- *  - 密码仅在「密码缓存」对话框输入时录入；保存后不回显明文，再次进入只能重新填写覆盖。
+ *  - 密码按步骤录入（每步独立密码，Keystore 加密存储）；保存后不回显明文，再次进入只能重新填写覆盖。
  *  - 密码登录 / 验证码登录步骤分开配置；步骤一律**按采集的坐标执行**（逐机不同，无内置默认），
  *    未配置时执行器直接反馈「步骤未配置」，需在高级设置里「从当前屏幕采集坐标」。
  */
@@ -365,44 +365,6 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     // ═══════ 对话框（统一 UnifiedDialogKit 风格）═══════
 
-    /**
-     * 密码设置：密文经 SecurePrefs（Keystore AES256-GCM）保存。
-     * 保存后不回显明文——再次打开输入框为空，只能重新填写覆盖（或清除）。
-     */
-    private fun showPasswordDialog() {
-        val has = ShizukuConfigStore.hasPassword()
-        val input = EditText(this).apply {
-            hint = if (has) "已设置，重新输入将覆盖" else "请输入登录密码"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        val tip = TextView(this).apply {
-            text = "密码仅存于本机加密存储；保存后不再显示，仅可重新填写覆盖。"
-            textSize = 12f
-            setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
-            setPadding(0, 0, 0, dp(6))
-        }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(8), dp(4), 0)
-            addView(input)
-            addView(tip)
-        }
-        UnifiedDialogKit.showForm(
-            ctx = this,
-            contentView = box,
-            title = "密码缓存",
-            positiveText = "保存",
-            negativeText = "取消",
-            onConfirm = {
-                // 留空视为清除（用户主动置空）
-                ShizukuConfigStore.setPassword(input.text.toString())
-                refreshConfig()
-                true
-            }
-        )
-    }
-
     private fun showOpNameDialog() {
         val current = ShizukuConfigStore.opName1()
         val input = EditText(this).apply {
@@ -611,7 +573,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         val tip = TextView(this).apply {
-            text = "本步密码仅存于本机加密存储；留空保存 = 清除（执行时回退全局密码缓存）。"
+            text = "本步密码仅存于本机加密存储；留空保存 = 清除（执行时该步将因密码未配置而失败）。"
             textSize = 12f
             setTextColor(ContextCompat.getColor(this@AdvancedSettingsActivity, R.color.md_onSurfaceVariant))
             setPadding(0, 0, 0, dp(6))

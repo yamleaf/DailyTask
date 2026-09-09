@@ -11,6 +11,7 @@ import com.google.gson.reflect.TypeToken
 import com.pengxh.daily.app.model.ExportDataModel
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.MqttAgentService
+import com.pengxh.daily.app.shizuku.ShizukuConfigStore
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.kt.lite.utils.SaveKeyValues
@@ -191,6 +192,30 @@ class TaskDataManager() {
         }
         AppRuntimeConfig.refreshFromStore()
 
+        // v5 扩展：静默通知 / 开机自动调度 / 电池预警细节（旧配置文件缺失时为 null，跳过以保留本机值）
+        config.feedbackNotifyDisabled?.let {
+            SaveKeyValues.saveBoolean(Constant.FEEDBACK_NOTIFY_DISABLED_KEY, it)
+        }
+        config.bootAutoSchedule?.let {
+            // 与设置页保持一致用 commit 立即落盘（受 ConstraintLayout 开关依赖，需立即可读）
+            SaveKeyValues.saveBoolean(Constant.BOOT_AUTO_SCHEDULE_KEY, it, commit = true)
+        }
+        config.batteryWarningHour?.let {
+            SaveKeyValues.saveInt(Constant.BATTERY_WARNING_HOUR_KEY, it.coerceIn(0, 1439))
+        }
+        config.batteryAlertMaxStages?.let {
+            SaveKeyValues.saveInt(Constant.BATTERY_ALERT_MAX_STAGES_KEY, it.coerceIn(0, 3))
+        }
+        config.batteryAlertDetectionStart?.let {
+            SaveKeyValues.saveInt(Constant.BATTERY_ALERT_DETECTION_START_KEY, it.coerceIn(0, 23))
+        }
+        config.batteryAlertDetectionDuration?.let {
+            SaveKeyValues.saveInt(
+                Constant.BATTERY_ALERT_DETECTION_DURATION_KEY,
+                it.coerceIn(1, 24)
+            )
+        }
+
         // v3 扩展：远程页连接信息（非空才覆盖，避免旧文件空值清掉本机配置；
         // 密码/AppSecret 为 AES 密文，解密后写入 Keystore 加密存储）
         config.mqttBroker?.takeIf { it.isNotBlank() }?.let {
@@ -248,6 +273,12 @@ class TaskDataManager() {
             if (!authCode.isNullOrBlank() && !EmailSecureConfig.isMasked(authCode)) {
                 EmailSecureConfig.saveAuthCode(authCode)
             }
+        }
+
+        // v4 扩展：高级设置·操作配置（旧配置文件缺失时跳过以保留本机值；密码由 AES 密文解密后写回）
+        val shizukuConfig = config.shizukuOperationConfig
+        if (!shizukuConfig.isNullOrBlank()) {
+            ShizukuConfigStore.applyOperationConfig(shizukuConfig)
         }
         return connectionChanged
     }
