@@ -196,22 +196,36 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         super.onPause()
         runCatching { ctx.unregisterReceiver(remoteConfigReceiver) }
         binding.root.removeCallbacks(retryRunnable)
-        if (MqttAgentService.isRunning()) {
-            MqttAgentService.stateListener = null
-            MqttAgentService.bindingStateListener = null
-            MqttAgentService.idAlertListener = null
-            MqttAgentService.conflictListener = null
-        }
+        clearStaticListeners()
     }
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
-        if (!hidden && isAdded) refreshUi()
+        if (hidden) {
+            // hide/show 切 Tab 不触发 onPause：隐藏期间页面不可见，刷新无意义。
+            // 同步清空静态 listener，避免隐藏态仍被状态回调驱动（空转 + 回调打在不可见 View 上）；
+            // 切回可见时下方 refreshUi() → registerListeners() 会重新挂载并同步最新状态。
+            clearStaticListeners()
+        } else if (isAdded) {
+            refreshUi()
+        }
     }
 
     override fun onDestroyView() {
         binding.root.removeCallbacks(retryRunnable)
+        // onPause/onHiddenChanged 已清过一次；这里再兜底（activity 异常销毁等未走前两者的路径）
+        clearStaticListeners()
         super.onDestroyView()
+    }
+
+    /** 清空 MqttAgentService 的 4 个静态 listener。无条件清空（不依赖 isRunning）：
+     * 这四个静态字段的唯一持有者就是本 Fragment，不清空会导致服务长期持有已销毁的
+     * Activity/Fragment（泄漏）或回调打在死 View / 不可见 Fragment 上（空转）。 */
+    private fun clearStaticListeners() {
+        MqttAgentService.stateListener = null
+        MqttAgentService.bindingStateListener = null
+        MqttAgentService.idAlertListener = null
+        MqttAgentService.conflictListener = null
     }
 
     // ═══════════════════════ 连接与状态 ═══════════════════════
@@ -219,6 +233,8 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
     private fun registerListeners() {
         MqttAgentService.stateListener = { connected ->
             activity?.runOnUiThread {
+                // Fragment 已销毁但回调仍被触发（如状态变更广播晚到）时守卫，避免打在死 View 上
+                if (!isAdded || view == null) return@runOnUiThread
                 if (connected) lastConnectedMs = System.currentTimeMillis()
                 updateStatusUI(connected)
                 updateHeroUI()
@@ -226,17 +242,20 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         }
         MqttAgentService.bindingStateListener = { bound ->
             activity?.runOnUiThread {
+                if (!isAdded || view == null) return@runOnUiThread
                 updateBindingUI(bound)
             }
         }
         MqttAgentService.idAlertListener = {
             activity?.runOnUiThread {
+                if (!isAdded || view == null) return@runOnUiThread
                 updateIdConflictBanners()
                 updateHeroUI()
             }
         }
         MqttAgentService.conflictListener = {
             activity?.runOnUiThread {
+                if (!isAdded || view == null) return@runOnUiThread
                 updateIdConflictBanners()
                 updateHeroUI()
             }
