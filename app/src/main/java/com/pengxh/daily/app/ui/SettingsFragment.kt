@@ -162,13 +162,16 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     private val pickConfigLauncher =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
             if (uri == null) return@registerForActivityResult
+            // SAF 结果回调可能晚于 view 回收才到达（旋转/被系统回收等）：读文件属关键 IO，
+            // 必须放 Fragment 级 lifecycleScope 执行 —— view 级 scope 在 onDestroyView 即取消，
+            // 会导致「选了文件却静默没导入」；UI 弹窗/提示再按 view 存活状态守卫。
             lifecycleScope.launch(Dispatchers.IO) {
                 val json = runCatching {
                     ctx.contentResolver.openInputStream(uri)
                         ?.bufferedReader()?.use { it.readText() }
                 }.getOrNull().orEmpty()
                 if (json.isBlank()) {
-                    withContext(Dispatchers.Main) { "读取配置文件失败".show(ctx) }
+                    runCatching { "读取配置文件失败".show(ctx) }
                     return@launch
                 }
                 // 身份字段预检：配置文件携带与本地不同的设备ID/控制端凭证时，
@@ -183,18 +186,21 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                         (incomingCtl.isNotBlank() && localCtl.isNotBlank() && incomingCtl != localCtl)
                 if (identityConflict) {
                     withContext(Dispatchers.Main) {
-                        UnifiedDialogKit.showConfirm(
-                            ctx,
-                            "将覆盖设备身份",
-                            "配置文件包含与本机不同的设备ID/控制端凭证，导入后当前绑定关系将失效，需要重新扫码配对。",
-                            confirmText = "继续导入",
-                            cancelText = "取消",
-                            danger = true,
-                            icon = UnifiedDialogKit.IconType.WARNING,
-                            onConfirm = {
-                                lifecycleScope.launch(Dispatchers.IO) { importConfigJson(json) }
-                            }
-                        )
+                        if (view != null && isAdded) {
+                            UnifiedDialogKit.showConfirm(
+                                ctx,
+                                "将覆盖设备身份",
+                                "配置文件包含与本机不同的设备ID/控制端凭证，导入后当前绑定关系将失效，需要重新扫码配对。",
+                                confirmText = "继续导入",
+                                cancelText = "取消",
+                                danger = true,
+                                icon = UnifiedDialogKit.IconType.WARNING,
+                                onConfirm = { importConfigJson(json) }
+                            )
+                        } else {
+                            // view 已回收：无法弹二次确认，按安全默认放弃覆盖导入
+                            runCatching { "界面已关闭，已取消导入".show(ctx) }
+                        }
                     }
                 } else {
                     importConfigJson(json)
@@ -204,17 +210,28 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 执行导入并按结果提示；成功后设置页即时刷新，任务/远程页由广播联动刷新 */
     private fun importConfigJson(json: String) {
+        // 导入写库（DB/SP/ConfigStore）是必须落盘的关键操作：用 Fragment 级 lifecycleScope 执行，
+        // 避免 SAF 回调晚于 view 回收时写库被 view 级 scope 取消而静默丢失；仅 UI 刷新按 view 存活守卫。
         lifecycleScope.launch(Dispatchers.IO) {
             when (val result = TaskDataManager().importTasks(json, ctx)) {
                 is TaskDataManager.ImportResult.Success -> {
                     withContext(Dispatchers.Main) {
-                        syncSettingsUiFromStore()
-                        applyTargetAppIcon()
-                        "配置导入成功".show(ctx)
+                        if (view != null && isAdded) {
+                            syncSettingsUiFromStore()
+                            applyTargetAppIcon()
+                            "配置导入成功".show(ctx)
+                        } else {
+                            // view 已回收：写库已完成，UI 由下次可见时 Receiver/onResume 刷新，
+                            // 用 Toast 兜底告知结果（ctx 为 activity，不依赖 view）
+                            runCatching { "配置导入成功".show(ctx) }
+                        }
                     }
                 }
                 is TaskDataManager.ImportResult.Error -> {
-                    withContext(Dispatchers.Main) { result.message.show(ctx) }
+                    withContext(Dispatchers.Main) {
+                        if (view != null && isAdded) result.message.show(ctx)
+                        else runCatching { result.message.show(ctx) }
+                    }
                 }
             }
         }
@@ -229,6 +246,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             val json = pendingExportJson ?: return@registerForActivityResult
             if (uri == null) return@registerForActivityResult
             pendingExportJson = null
+            // SAF 结果回调可能晚于 view 回收才到达：写盘是必须落盘的关键操作，放 Fragment 级
+            // lifecycleScope（view 级 scope 在 onDestroyView 取消 → 用户选完位置却静默没生成文件）；
+            // 成功提示弹窗等 UI 段再按 view 存活守卫。
             lifecycleScope.launch(Dispatchers.IO) {
                 runCatching {
                     val os = ctx.contentResolver.openOutputStream(uri, "w")
@@ -236,8 +256,32 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                     os.use { it.write(json.toByteArray(Charsets.UTF_8)) }
                     true
                 }.fold(
-                    onSuccess = { withContext(Dispatchers.Main) { "配置已导出到所选目录".show(ctx) } },
-                    onFailure = { withContext(Dispatchers.Main) { "导出失败：${it.message}".show(ctx) } }
+                    onSuccess = {
+                        withContext(Dispatchers.Main) {
+                            if (view != null && isAdded) {
+                                // 导出成功提醒（A3=甲）：加密仅"防随手查看"，密钥内置在 App 内，不绑定设备。
+                                // 文件含 MQTT/CTL 密码、Serverless AppSecret、邮箱授权码等敏感凭据，须让用户知情。
+                                UnifiedDialogKit.showInfo(
+                                    ctx,
+                                    "配置已导出",
+                                    "配置文件包含连接密码、Serverless AppSecret、邮箱授权码等敏感凭据。" +
+                                        "文件加密仅用于随配置迁移，密钥内置在 App 中、不绑定设备，" +
+                                        "拿到该文件的任何人（配合本 App）均可解密读取。\n\n" +
+                                        "请通过可信渠道传输（勿发公开群聊/网盘链接），使用完毕建议及时删除。",
+                                    buttonText = "我知道了"
+                                )
+                            } else {
+                                // view 已回收：文件已写出，仅 Toast 兜底（不弹需要 view 的对话框）
+                                runCatching { "配置已导出".show(ctx) }
+                            }
+                        }
+                    },
+                    onFailure = {
+                        withContext(Dispatchers.Main) {
+                            if (view != null && isAdded) "导出失败：${it.message}".show(ctx)
+                            else runCatching { "导出失败：${it.message}".show(ctx) }
+                        }
+                    }
                 )
             }
         }
@@ -251,6 +295,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         exportData.overtime =
             SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME)
+                .coerceIn(5, 120)   // 导出的文件应自洽合法，避免脏值 0 被旧版本导入端直接采用
         exportData.timeRange =
             SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
         exportData.msgChannel =
@@ -359,7 +404,9 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         // v4 扩展：高级设置·操作配置（Shizuku 登录/验证/打卡/自定义操作步骤+名称+超时；每步密码 AES 密文写入）
         exportData.shizukuOperationConfig = ShizukuConfigStore.exportOperationConfig()
 
-        // TaskBeans
+        // TaskBeans：组装导出 JSON 是弹 SAF 保存框的前置步骤，放 Fragment 级 scope ——
+        // 本段只做 DB 读 + exportLauncher.launch，不触碰 binding；若用 view 级 scope，
+        // 用户在 DB 读取间隙切换/回收 view 会导致 json 组装被取消、SAF 对话框永不弹出。
         lifecycleScope.launch {
             val taskBeans = withContext(Dispatchers.IO) {
                 DatabaseWrapper.loadAllTask()
@@ -432,7 +479,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.contentView.background = WatermarkDrawable(ctx, DailyTask.getWatermarkText())
 
         // 节假日同步结果 → 关闭加载框
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             ChinaHolidayManager.syncResult.collect { result ->
                 LoadingDialog.dismiss()
                 when (result) {
@@ -445,7 +492,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             }
         }
         // 通知监听服务状态 → 刷新提示
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             NotificationMonitorService.listenerState.collect { connected ->
                 if (!connected) {
                     binding.noticeTipsView.text = "服务未开启，无法监听打卡结果和接收远程指令"
@@ -457,7 +504,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
         // 截屏服务事件 → Ready 同步开关打开（服务真正初始化完成后，避免授权回调过早被 refreshUi 覆盖）；
         //                   Failed 时回切通知源并同步开关关闭
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             CaptureImageService.projectionEvents.collect { event ->
                 when (event) {
                     is ProjectionEvent.Ready -> {
@@ -674,7 +721,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.downloadRow.setOnClickListener {
             val fallbackUrl = BuildConfig.CTRL_DOWNLOAD_URL.trim()
             binding.downloadRow.isEnabled = false
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 // 动态查 GitHub DailyController 最新 release（含 prerelease）页面，
                 // 失败（离线/被墙）回退静态地址（/releases/latest 或列表页）
                 val latestUrl = fetchLatestControllerReleaseUrl()
@@ -696,7 +743,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.updateRow.setOnClickListener {
             binding.updateStatus.text = "检查中…"
             binding.updateBadge.visibility = View.GONE
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 UpdateChecker.check(ctx, showNoUpdateToast = true)
                 binding.updateStatus.text = ""
                 binding.updateBadge.visibility =
@@ -783,7 +830,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         binding.batteryStageCountRow.setOnClickListener { showBatteryStageCountPicker() }
         binding.captureTestLayout.setOnClickListener {
             val source = SaveKeyValues.loadInt(Constant.RESULT_SOURCE_KEY, -1)
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 // 按结果来源选择截图通道：无障碍(2) 优先；否则截屏服务(1) 或兜底
                 val imagePath: String? = if (source == 2) {
                     if (AutoProjectionAccessibilityService.canTakeScreenshot(ctx)) {
@@ -821,7 +868,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
             }
         }
         binding.statusQueryLayout.setOnClickListener {
-            lifecycleScope.launch(Dispatchers.IO) {
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                 try {
                     val report = StatusReporter.buildStatusReport(
                         ctx,
@@ -1039,7 +1086,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         }
         // 一键诊断：写 Documents/diagnostic_*.txt，经系统分享面板导出（Fragment 化时曾误改为弹窗预览）
         binding.diagnosticLayout.setOnClickListener {
-            lifecycleScope.launch(Dispatchers.IO) {
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                 val file = DiagnosticReporter.exportToFile(ctx)
                 withContext(Dispatchers.Main) {
                     file?.let { reportFile ->
@@ -1105,7 +1152,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
     private fun refreshUi() {
         // 检查更新红点：有红点时才做一次安装完成核对（包替换广播在安装时可能丢失、
         // 进程被杀收不到，导致安装成功后红点仍亮）。无红点无需核对，直接刷新显示即可
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             if (UpdateChecker.hasPendingUpdate()) {
                 UpdateChecker.reconcilePendingUpdate(ctx)
             }
@@ -1114,6 +1161,11 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
                     if (UpdateChecker.hasPendingUpdate()) View.VISIBLE else View.GONE
             }
         }
+        // 先注销再注册（幂等）：refreshUi 同时被 onResume 与 onHiddenChanged(false) 调用，
+        // Fragment hide/show 切换 Tab 不触发 onPause，若直接重复 registerReceiver，
+        // 每切一次 Tab 就叠加一份注册 → ACTION_REMOTE_CONFIG_CHANGED 回调被放大 N 倍。
+        // receiver 未注册时 unregisterReceiver 抛 IllegalArgumentException，用 runCatching 兜住。
+        runCatching { ctx.unregisterReceiver(remoteConfigReceiver) }
         ContextCompat.registerReceiver(
             ctx, remoteConfigReceiver,
             IntentFilter(ConfigImportSignal.ACTION_REMOTE_CONFIG_CHANGED),
@@ -1150,7 +1202,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
         } else {
             binding.noticeTipsView.text = "服务状态查询中，请稍后..."
             binding.noticeTipsView.setTextColor(R.color.md_primary.convertColor(ctx))
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 delay(500)
                 if (ctx.notificationEnable()) {
                     binding.noticeSwitch.isChecked = true
@@ -2674,7 +2726,7 @@ class SettingsFragment : KotlinBaseFragment<FragmentSettingsBinding>() {
 
     /** 开启通知监听服务（启用组件 + 周期性检查） */
     private fun turnOnNotificationMonitorService() {
-        lifecycleScope.launch(Dispatchers.IO) {
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             val cn = android.content.ComponentName(ctx, NotificationMonitorService::class.java)
             try {
                 ctx.packageManager.setComponentEnabledSetting(
