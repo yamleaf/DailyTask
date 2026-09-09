@@ -319,6 +319,8 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'com.google.android.material:material:1.14.0'
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    // repeatOnLifecycle 需 2.4+：lite 模块是 implementation 不透出编译期类路径，这里显式声明避免版本歧义
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.11.0'
     //数据库框架
     implementation 'androidx.room:room-runtime:2.8.4'
     annotationProcessor 'androidx.room:room-compiler:2.8.4'

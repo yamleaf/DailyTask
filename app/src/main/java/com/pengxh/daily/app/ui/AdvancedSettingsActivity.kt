@@ -33,7 +33,9 @@ import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.shizuku.CoordinateCaptureOverlay
 import com.pengxh.daily.app.shizuku.ShizukuActions
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.pengxh.daily.app.shizuku.ShizukuManager
 import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.shizuku.ShizukuStep
@@ -44,7 +46,6 @@ import com.yample.mqttprotocol.dialog.UnifiedDialogKit
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -111,11 +112,17 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             cardAddButton(card).setOnClickListener { if (editable()) addStep(card) }
         }
         populateAllStepCards()
-        // 操作执行状态轮询：仅页面存活期间刷新，离开自动取消
+        // 操作执行状态轮询：仅在页面处于可见态（STARTED）时刷新。
+        // 不可见场景（坐标采集拉起打卡App/退后台）轮询无意义——执行状态在 ShizukuActions 内存，
+        // 页面重回前台时 repeatOnLifecycle 自动重启并立即刷一帧，不会错过状态变化。
+        // 用 STARTED 而非 RESUMED：Shizuku 授权弹窗等仅触发 onPause 的场景页面仍可见，轮询应继续。
         lifecycleScope.launch {
-            while (isActive) {
-                refreshShizukuRunState()
-                delay(500)
+            // repeatOnLifecycle 是 Lifecycle 的扩展：block 在 STARTED 及以上运行，降到之下自动取消
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    refreshShizukuRunState()
+                    delay(500)
+                }
             }
         }
     }
@@ -522,7 +529,7 @@ class AdvancedSettingsActivity : AppCompatActivity() {
 
     private fun collectSteps(card: OpCard): List<ShizukuStep> {
         val rows = cardStepRows[card] ?: return emptyList()
-        return rows.mapNotNull { row ->
+        return rows.map { row ->
             val x = row.xEdit.text.toString().trim().toIntOrNull() ?: -1
             val y = row.yEdit.text.toString().trim().toIntOrNull() ?: -1
             val x2 = row.x2Edit.text.toString().trim().toIntOrNull() ?: -1
@@ -530,12 +537,8 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             val remark = row.remarkEdit.text.toString().trim()
             val kw1 = row.kw1Edit.text.toString()
             val kw2 = row.kw2Edit.text.toString()
-            val needCoord = row.type == ShizukuStepType.CLICK ||
-                row.type == ShizukuStepType.SWIPE ||
-                row.type == ShizukuStepType.PWD_INPUT ||
-                row.type == ShizukuStepType.CODE_INPUT
-            if (needCoord && (x < 0 || y < 0)) return@mapNotNull null
-            if (row.type == ShizukuStepType.SWIPE && (x2 < 0 || y2 < 0)) return@mapNotNull null
+            // 不再静默丢弃坐标非法的步骤（原 mapNotNull 会返回 null → 步骤凭空消失 + 失焦即存直接丢配置）。
+            // 坐标校验由执行器 ShizukuActions 统一做：缺坐标会报「第 N 步未配置坐标」明确失败而非静默跳过。
             ShizukuStep(row.type, remark, x, y, x2, y2, row.range, row.delayMin, row.delayMax, kw1, kw2, row.uid, row.codeWait)
         }
     }

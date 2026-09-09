@@ -27,43 +27,48 @@ object ShizukuVerifyCodeBus {
     private val _resultConfirm = MutableStateFlow<String?>(null)
     val resultConfirm: StateFlow<String?> = _resultConfirm.asStateFlow()
 
-    fun dispatch(code: String) {
+    /**
+     * 全部 dispatch/consume/reset 用同一把锁（object 自身）串行化：
+     * consume 的「读-清」若不加锁会与 dispatch 交错——新验证码被误清（吞码）或
+     * 同一条码被并发消费两次。MQTT 线程 dispatch、执行器线程 consume，必须互斥。
+     */
+    fun dispatch(code: String) = synchronized(this) {
         _code.value = code
     }
 
-    fun consume(): String? {
+    fun consume(): String? = synchronized(this) {
         val c = _code.value
         if (c != null) _code.value = null
-        return c
+        c
     }
 
-    fun reset() {
+    fun reset() = synchronized(this) {
         _code.value = null
         _smsSent.value = false
         _resultConfirm.value = null
     }
 
     /** 控制端确认「短信已发送」 */
-    fun dispatchSmsSent() {
+    fun dispatchSmsSent() = synchronized(this) {
         _smsSent.value = true
     }
 
     /** 消费「短信已发送」信号；未收到返回 false（消费即清空） */
-    fun consumeSmsSent(): Boolean {
+    fun consumeSmsSent(): Boolean = synchronized(this) {
         val v = _smsSent.value
         if (v) _smsSent.value = false
-        return v
+        v
     }
 
     /** 控制端人工确认结果（"success"/"fail"） */
-    fun dispatchResultConfirm(v: String) {
+    fun dispatchResultConfirm(v: String) = synchronized(this) {
         _resultConfirm.value = v
     }
 
     /** 消费人工确认结果；未收到返回 null（消费即清空） */
-    fun consumeResultConfirm(): String? {
+    fun consumeResultConfirm(): String? = synchronized(this) {
         val v = _resultConfirm.value
         if (v != null) _resultConfirm.value = null
-        return v
+        v
     }
 }

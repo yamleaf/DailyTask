@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -162,8 +163,12 @@ object ShizukuActions {
             }
             throw e
         } finally {
-            // 无论成败/异常/手动终止都恢复系统动画并释放锁：绝不能把用户设备的动画永久置 0
-            runCatching { ShizukuShell.restoreAnimations() }
+            // 无论成败/异常/手动终止都恢复系统动画并释放锁：绝不能把用户设备的动画永久置 0。
+            // withContext(NonCancellable)：协程已被取消时 finally 内的挂起点会立即抛
+            // CancellationException（restoreAnimations 是 suspend），导致恢复永远执行不到。
+            runCatching {
+                withContext(NonCancellable) { ShizukuShell.restoreAnimations() }
+            }
             actionMutex.unlock()
             // 清空执行状态（手动终止经 CancellationException 走 finally 同样清理）
             runningJob = null

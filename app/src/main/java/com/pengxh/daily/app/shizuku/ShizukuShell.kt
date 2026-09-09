@@ -53,9 +53,11 @@ object ShizukuShell {
      */
     suspend fun exec(cmd: String, timeoutMs: Long = EXEC_TIMEOUT_MS): String? = withContext(Dispatchers.IO) {
         val process = ShizukuRuntime.newProcess(arrayOf("sh", "-c", cmd)) ?: return@withContext null
-        var out: String? = null
+        // 用 AtomicReference 传递读线程结果：普通 var 跨线程读写无 happens-before 边，
+        // 偶发在主协程读到 null（线程已写完但缓存未刷新）；AtomicReference.get/set 提供 volatile 语义
+        val out = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val reader = Thread({
-            out = ShizukuRuntime.readOutput(process)
+            out.set(ShizukuRuntime.readOutput(process))
         }, "sz-exec").apply { isDaemon = true }
         reader.start()
         try {
@@ -67,7 +69,7 @@ object ShizukuShell {
             destroy(process)
             return@withContext null
         }
-        out
+        out.get()
     }
 
     /** 执行并校验：命令跑完且 echo 出标记才算成功（空输出一律视为失败） */

@@ -43,9 +43,27 @@ object UiNodeParser {
 
     /** 取属性值并做 XML 实体解码（&amp;/&lt;/&gt;/&quot;/&apos;/&#10;） */
     private fun attr(tag: String, name: String): String? {
-        val m = Regex("""\b$name="([^"]*)"""").find(tag) ?: return null
+        // 热路径：一屏 dump 200~500 节点 × 每节点 6 次属性读取，若每次 new Regex 会重复编译上千次。
+        // 预编译常量 + when 分发（行为与动态 \b$name="..." 完全一致）
+        val m = when (name) {
+            "text" -> RE_TEXT
+            "resource-id" -> RE_RES_ID
+            "class" -> RE_CLASS
+            "clickable" -> RE_CLICKABLE
+            "password" -> RE_PASSWORD
+            "bounds" -> RE_BOUNDS_ATTR
+            else -> Regex("""\b$name="([^"]*)"""")   // 兜底（当前调用方不会走到）
+        }.find(tag) ?: return null
         return decode(m.groupValues[1]).ifBlank { null }
     }
+
+    private val RE_TEXT = Regex("""\btext="([^"]*)"""")
+    private val RE_RES_ID = Regex("""\bresource-id="([^"]*)"""")
+    private val RE_CLASS = Regex("""\bclass="([^"]*)"""")
+    private val RE_CLICKABLE = Regex("""\bclickable="([^"]*)"""")
+    private val RE_PASSWORD = Regex("""\bpassword="([^"]*)"""")
+    private val RE_BOUNDS_ATTR = Regex("""\bbounds="([^"]*)"""")
+    private val RE_BOUNDS = Regex("""\[(\d+),(\d+)\]\[(\d+),(\d+)\]""")
 
     private fun decode(s: String): String = s
         .replace("&lt;", "<")
@@ -57,7 +75,7 @@ object UiNodeParser {
 
     private fun parseBounds(s: String?): Rect? {
         if (s.isNullOrBlank()) return null
-        val m = Regex("""\[(\d+),(\d+)\]\[(\d+),(\d+)\]""").find(s) ?: return null
+        val m = RE_BOUNDS.find(s) ?: return null
         val (x1, y1, x2, y2) = m.destructured
         return Rect(x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt())
     }
