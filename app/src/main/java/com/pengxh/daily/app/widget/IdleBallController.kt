@@ -196,7 +196,7 @@ class IdleBallController(
             } else {
                 val ot = SaveKeyValues.loadInt(
                     Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
-                )
+                ).coerceIn(5, 120)
                 "${ot}s"
             }
         } catch (_: Exception) {

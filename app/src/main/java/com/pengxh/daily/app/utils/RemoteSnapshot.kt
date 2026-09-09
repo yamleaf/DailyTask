@@ -393,8 +393,8 @@ object RemoteSnapshot {
             min = 0, max = 23, step = 1)
         add("tr", "随机范围", "int", SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, 5).coerceIn(0, 60),
             min = 0, max = 60, step = 1)
-        add("ot", "超时时间", "int", SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, 30).coerceIn(0, 120),
-            min = 0, max = 120, step = 1)
+        add("ot", "超时时间", "int", SaveKeyValues.loadInt(Constant.STAY_OVERTIME_KEY, 30).coerceIn(5, 120),
+            min = 5, max = 120, step = 1)
         add("lb", "低电量阈值（%）", "int", SaveKeyValues.loadInt(Constant.LOW_BATTERY_THRESHOLD_KEY, Constant.DEFAULT_LOW_BATTERY_THRESHOLD).coerceIn(10, 80),
             min = 10, max = 80, step = 1)
         add("ba", "电量智能提醒", "bool", SaveKeyValues.loadBoolean(Constant.BATTERY_SMART_ALERT_ENABLED_KEY, false))

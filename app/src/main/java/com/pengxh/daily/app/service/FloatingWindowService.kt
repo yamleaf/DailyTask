@@ -138,7 +138,7 @@ class FloatingWindowService : Service(), CoroutineScope by CoroutineScope(Dispat
                 if (active) {
                     val time = SaveKeyValues.loadInt(
                         Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
-                    )
+                    ).coerceIn(5, 120)
                     // 渐隐横跨整个倒计时周期：记录总时长供曲线计算
                     countdownTotal = time
                     resetCountdownPresentation()

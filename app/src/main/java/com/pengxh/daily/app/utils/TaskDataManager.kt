@@ -92,7 +92,7 @@ class TaskDataManager() {
         SaveKeyValues.saveInt(Constant.RESET_TIME_KEY, config.resetTime.coerceIn(0, 23))
         SaveKeyValues.saveInt(
             Constant.STAY_OVERTIME_KEY,
-            config.overtime.takeIf { it > 0 } ?: Constant.DEFAULT_OVER_TIME
+            (config.overtime.takeIf { it > 0 } ?: Constant.DEFAULT_OVER_TIME).coerceIn(5, 120)
         )
         SaveKeyValues.saveInt(
             Constant.TIME_RANGE_KEY,

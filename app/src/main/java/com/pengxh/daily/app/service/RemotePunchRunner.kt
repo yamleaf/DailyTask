@@ -65,7 +65,7 @@ object RemotePunchRunner {
                 launchIn(scope, "远程打卡倒计时") {
                     val timeout = SaveKeyValues.loadInt(
                         Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
-                    )
+                    ).coerceIn(5, 120)
                     val resultSource = SaveKeyValues.loadInt(
                         Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
                     )
