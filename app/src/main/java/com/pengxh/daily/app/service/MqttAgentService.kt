@@ -1321,7 +1321,8 @@ class MqttAgentService : Service() {
         MqttSecureConfig.saveSession("")
         SaveKeyValues.saveString(Constant.MQTT_PAIRING_TOKEN_KEY, "")
         SaveKeyValues.saveLong(Constant.MQTT_PAIRING_EXPIRY_KEY, 0L)
-        recentRids.clear()
+        // recentRids 由 MQTT 回调线程写入、可能被主线程清空：clear 与 acceptRid 互斥（见 acceptRid 内同步）
+        synchronized(recentRids) { recentRids.clear() }
         // 警告：publishStatus 是 blocking 的 qos1 发布，绝不能在主线程执行
         // （被控端“强制解绑”按钮在主线程调用本方法，若在主线程 publish 会 ANR/闪退）。
         // 统一丢到 IO 协程域执行，无论本方法从主线程还是 MQTT 回调线程进入都安全。
@@ -1342,7 +1343,10 @@ class MqttAgentService : Service() {
         val expected = MqttSigner.sign(
             session, deviceId, packet.ts, packet.rid, packet.f, type, vStr, packet.c
         )
-        return expected == packet.sign
+        // 常量时间比较：避免 String.equals 逐字符短路带来的时序侧信道
+        return java.security.MessageDigest.isEqual(
+            expected.toByteArray(Charsets.UTF_8), packet.sign.toByteArray(Charsets.UTF_8)
+        )
     }
 
     private fun packetValueParts(v: PacketValue?): Pair<String, String> = when (v) {
@@ -1369,10 +1373,15 @@ class MqttAgentService : Service() {
     private fun acceptRid(rid: String, ts: Long): Boolean {
         val now = System.currentTimeMillis()
         if (kotlin.math.abs(now - ts) > 120_000L) return false // ±120s 偏斜
-        if (recentRids.contains(rid)) return false
-        recentRids.addLast(rid)
-        // A4：定长环形（最多 200 条），超限移除最旧，避免长运行内存渐增
-        while (recentRids.size > 200) recentRids.removeFirst()
+        // ArrayDeque 非线程安全：MQTT 回调线程入站消息并发调用本方法，且 doUnbind 可能同时 clear()。
+        // 不加同步的后果：并发 addLast/removeFirst 破坏内部一致性 → 合法指令被误判 DUP_OR_STALE 丢弃，
+        // 或去重失效绕过防重放。synchronized 锁对象即容器自身（字段初始化后不再重赋值，安全）。
+        synchronized(recentRids) {
+            if (recentRids.contains(rid)) return false
+            recentRids.addLast(rid)
+            // A4：定长环形（最多 200 条），超限移除最旧，避免长运行内存渐增
+            while (recentRids.size > 200) recentRids.removeFirst()
+        }
         return true
     }
 
@@ -1685,6 +1694,9 @@ class MqttAgentService : Service() {
     private fun publishPresenceMsg(json: String, retained: Boolean) {
         val client = mqttClient ?: return
         try {
+            // 注意：同步 publish 内部 waitForCompletion()，弱网/断网未 RST 时可能阻塞较久。
+            // 本方法只允许在 IO 协程上下文调用；主线程路径（PING 闹钟 onPingHook）已在
+            // AlarmPingSender.onReceive 用 goAsync()+后台线程派发，绝不要从主线程直连本方法。
             client.publish(
                 topicPresence(),
                 MqttMessage(json.toByteArray()).apply { qos = 1; isRetained = retained }
@@ -2054,8 +2066,11 @@ class MqttAgentService : Service() {
         if (!KeepAliveReceiver.isKeepAliveEnabled()) return
         // 设备ID冲突停服中：不再排复活闹钟（用户手动开启时清除标志后由 UI 拉起）
         if (isIdConflictBlocked()) return
+        // 移位量先钳到 10：JVM 长整型移位只取位移量 & 63，attempt=66 时 1L shl 64 会回绕成 1L shl 0
+        // （退避从 15min 塌缩到 1min），与「上限 15min」语义不符，夜间弱网反复失联时会额外唤醒。
+        val shift = (resurrectAttempt - 2).coerceAtMost(10)
         val delay = if (resurrectAttempt < 3) 30_000L
-        else minOf((1L shl (resurrectAttempt - 2)) * 60_000L, 15 * 60_000L)
+        else minOf((1L shl shift) * 60_000L, 15 * 60_000L)
         resurrectAttempt++
         Log.d(TAG, "安排复活闹钟(退避) attempt=$resurrectAttempt delay=${delay}ms")
         nextReconnectAtMs = System.currentTimeMillis() + delay

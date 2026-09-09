@@ -721,13 +721,10 @@ class ForegroundRunningService : Service() {
             Log.e(javaClass.simpleName, "ForegroundRunningService 操作异常", e)
         }
 
-        // 还原通知文本
-        val notification = notificationBuilder.apply {
-            setContentText("为保证程序正常运行，请勿移除此通知")
-        }.build()
-        notificationManager.notify(
-            Constant.FOREGROUND_RUNNING_SERVICE_NOTIFICATION_ID, notification
-        )
+        // 注：原「还原通知文本」块已移除。原因有二：
+        // 1) notify() 之后紧接着 stopForeground(STOP_FOREGROUND_REMOVE) 会移除同一 ID 的通知，该段本就是 no-op；
+        // 2) onCreate 在「暂停使用」分支早退时 notificationBuilder 尚未赋值，此处访问会抛
+        //    UninitializedPropertyAccessException 并导致整个进程崩溃（同进程 MQTT/通知监听一起死）。
 
         serviceScope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)

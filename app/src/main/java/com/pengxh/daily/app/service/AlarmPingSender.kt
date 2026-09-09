@@ -59,6 +59,15 @@ class AlarmPingSender(context: Context) : MqttPingSender {
     @Volatile
     var onPingHook: (() -> Unit)? = null
 
+    /**
+     * 钩子执行线程池：钩子实现是阻塞式 QoS1 publish（waitForCompletion），若直接在闹钟
+     * onReceive（主线程）调用，弱网/断网未 RST 时会阻塞主线程到连接判定超时 → ANR。
+     * 单线程 + daemon 即可：一次 PING 唤醒只有一帧钩子，串行避免重入。
+     */
+    private val hookExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "ping-hook-executor").apply { isDaemon = true }
+    }
+
     /** WifiLock(WIFI_MODE_FULL)：方案 A —— 仅 PING 窗口持有，息屏间隙 WiFi 可 suspend 省电 */
     private var wifiLock: WifiManager.WifiLock? = null
     /** 主线程 Handler：WifiLock 无 acquire(timeout) 重载，用 postDelayed 模拟超时释放 */
@@ -104,8 +113,34 @@ class AlarmPingSender(context: Context) : MqttPingSender {
                     commsRef.sendNoWait(MqttPingReq(), MqttToken(commsRef.getClient().clientId))
                     Log.d(TAG, "PING 强制发送 PINGREQ")
                     commsRef.checkForActivity()
-                    // 蹭本次唤醒窗口补发占位牌（连接态与节流由钩子实现方判断），异常隔离
-                    runCatching { onPingHook?.invoke() }
+                    // 蹭本次唤醒窗口补发占位牌（连接态与节流由钩子实现方判断），异常隔离。
+                    // 钩子实现是阻塞式 QoS1 publish，绝不能占主线程（弱网下会阻塞到连接判定超时 → ANR），
+                    // 因此 goAsync() 保活广播 + 后台单线程执行，结束后必须 finish() 归还 PendingResult。
+                    // CPU/WifiLock 仍按原有 3s/5s 窗口释放：健康网络下 publish 在窗口内完成；
+                    // 极端慢网下最多丢一帧 presence HB（周期性补发 + 重连后 claim 会兜底），可接受。
+                    val hook = onPingHook
+                    if (hook != null && hookExecutor.isShutdown) {
+                        // stop() 已关闭执行器（连接销毁/重建中）：直接跳过本帧，
+                        // 避免 goAsync 后 execute 必然被拒还要手工归还 PendingResult
+                        Log.d(TAG, "PING 钩子跳过：执行器已关闭（连接销毁中）")
+                    } else if (hook != null) {
+                        val pending = goAsync()
+                        // 提交单独 try/catch 与本帧外层隔离：stop() 的 shutdownNow 若抢在 execute 前执行，
+                        // 会抛 RejectedExecutionException —— 落入外层 catch 会误报「强制发送 PINGREQ 异常」
+                        // 并对已停止的实例重排闹钟；此处单独捕获，立即 finish() 归还 PendingResult（广播不超时）。
+                        try {
+                            hookExecutor.execute {
+                                try {
+                                    runCatching { hook() }
+                                } finally {
+                                    runCatching { pending.finish() }
+                                }
+                            }
+                        } catch (e: java.util.concurrent.RejectedExecutionException) {
+                            Log.d(TAG, "PING 钩子未提交：执行器已被关闭（stop 竞态），跳过本帧")
+                            runCatching { pending.finish() }
+                        }
+                    }
                 } else {
                     // 未连接（掉线重连中）：Paho 重连机制兜底，本帧跳过
                     Log.d(TAG, "PING 未连接，跳过强制发送")
@@ -174,12 +209,17 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         schedule(keepAliveMs)
     }
 
-    /** Paho 关闭（ClientComms.close）时调用；幂等（onDestroy 兜底也会调） */
+    /** Paho 关闭（ClientComms.close）时调用；幂等（onDestroy 兜底也会调）。
+     * 注意：本实例 stop() 后即被上层置空丢弃（MqttAgentService.rebuildMqttClient/onDestroy），
+     * 不会再 start() 复用，故可在此 shutdownNow 释放钩子线程，避免级别切换时线程泄漏。 */
     override fun stop() {
         cancelAlarm()
         unregisterReceiver()
         releaseWakeLock()
         releaseWifiLock()
+        // 释放钩子线程池：shutdownNow 中断正在执行的钩子（其内部 runCatching + finally finish 兜底），
+        // 并拒绝后续任务。stop 后实例不再复用，安全。
+        runCatching { hookExecutor.shutdownNow() }
     }
 
     /** Paho 每次 checkForActivity 后按剩余 keepalive 时间调用；同 PendingIntent 多次 set 自动覆盖旧闹钟 */
