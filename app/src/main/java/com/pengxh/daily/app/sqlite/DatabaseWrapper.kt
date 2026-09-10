@@ -3,7 +3,9 @@ package com.pengxh.daily.app.sqlite
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
+import com.pengxh.daily.app.utils.LogFileManager
 import java.time.LocalDate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -17,6 +19,21 @@ object DatabaseWrapper {
      */
     suspend fun loadAllTask(): MutableList<DailyTaskBean> = withContext(Dispatchers.IO) {
         dailyTaskDao.loadAll()
+    }
+
+    /**
+     * 安全读任务列表：成功返回列表；失败返回 null（调用方勿当成空列表）。
+     * [CancellationException] 原样抛出，避免被当成读失败/空列表后误写「今日已重置」。
+     */
+    suspend fun loadAllTaskOrNull(): MutableList<DailyTaskBean>? {
+        return try {
+            loadAllTask()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            LogFileManager.error("读任务列表失败: ${e.message}")
+            null
+        }
     }
 
     suspend fun isTaskTimeExist(time: String): Boolean = withContext(Dispatchers.IO) {

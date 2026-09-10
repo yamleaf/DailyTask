@@ -251,9 +251,21 @@ class ForegroundRunningService : Service() {
                     // 发信号让 waitUntilNextReset 立即返回重排；旧逻辑直接 return 导致重置永远无法推进
                     TaskScheduler.notifyResetTimeReached()
                 } else {
-                    TaskScheduler.startTask()
-                    // 无等待期信号可释放，主动卸掉 RESET 闹钟持的推进锁
-                    KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
+                    // 空列表无任务可执行，不 startTask；读失败不伪装成空列表；锁必须 finally 释放
+                    serviceScope.launch {
+                        try {
+                            val tasks = com.pengxh.daily.app.sqlite.DatabaseWrapper.loadAllTaskOrNull()
+                            if (tasks == null) {
+                                LogFileManager.error("RESET_TASK：读任务失败，跳过启动（待下次重试）")
+                            } else if (tasks.isEmpty()) {
+                                LogFileManager.action("RESET_TASK：任务列表为空，跳过启动调度")
+                            } else if (!TaskScheduler.isRunning()) {
+                                TaskScheduler.startTask()
+                            }
+                        } finally {
+                            KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
+                        }
+                    }
                 }
             } else {
                 KeepAliveReceiver.releaseSchedulerAdvanceWakeLock()
@@ -668,16 +680,40 @@ class ForegroundRunningService : Service() {
             return
         }
 
-        // 标记今天已重置，防止重复触发
-        SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
-
-        // 任务重置：调度未跑 → 补启；调度在跑（等待重置期被冻结）→ 发信号立即重排。
-        // 旧逻辑在 isRunning()=true 时直接跳过，配合协程 delay 被冻结，重置永远无法推进（08-15/16 漏执行）
-        if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
-            if (TaskScheduler.isRunning()) {
-                TaskScheduler.notifyResetTimeReached()
-            } else {
+        // 任务重置：先读库再决定是否启动/标记。
+        // 读失败不标记「今日已重置」，留给后续 TIME_TICK / 打开 App 补重置重试；
+        // 空列表只标记不启动；有任务则 startTask，成功后再标记。
+        if (!SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)) {
+            SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+            return
+        }
+        if (TaskScheduler.isRunning()) {
+            SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+            TaskScheduler.notifyResetTimeReached()
+            return
+        }
+        serviceScope.launch {
+            val tasks = com.pengxh.daily.app.sqlite.DatabaseWrapper.loadAllTaskOrNull()
+            if (tasks == null) {
+                LogFileManager.error("TIME_TICK 重置：读任务失败，不标记今日已重置，待下次重试")
+                return@launch
+            }
+            // 异步期间可能已被补重置等路径标记，避免重复 startTask
+            if (SaveKeyValues.loadString(Constant.LAST_RESET_DATE_KEY, "") == today) {
+                return@launch
+            }
+            if (tasks.isEmpty()) {
+                LogFileManager.action("TIME_TICK 重置：任务列表为空，跳过启动调度")
+                SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+                return@launch
+            }
+            if (!TaskScheduler.isRunning()) {
                 TaskScheduler.startTask()
+            }
+            if (TaskScheduler.isRunning()) {
+                SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+            } else {
+                LogFileManager.error("TIME_TICK 重置：startTask 后仍未运行，不标记今日已重置")
             }
         }
     }

@@ -743,10 +743,22 @@ private fun applyTabFromIntent(intent: Intent?) {
         if (SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
             && !KeepAliveReceiver.isPaused()
         ) {
-            // 仅在启动成功（或已在跑）后落库日期，避免 scope 未就绪导致整日漏调度
-            if (TaskScheduler.isRunning()) {
-                SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
-            } else {
+            // 读库须 IO；空列表只标记不启动；读失败/取消不标记，避免当天补调度被锁死
+            lifecycleScope.launch {
+                if (TaskScheduler.isRunning()) {
+                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+                    return@launch
+                }
+                val tasks = com.pengxh.daily.app.sqlite.DatabaseWrapper.loadAllTaskOrNull()
+                if (tasks == null) {
+                    LogFileManager.error("补重置：读任务失败，不标记今日已重置，待下次重试")
+                    return@launch
+                }
+                if (tasks.isEmpty()) {
+                    LogFileManager.action("补重置：任务列表为空，跳过启动调度")
+                    SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
+                    return@launch
+                }
                 TaskScheduler.startTask()
                 if (TaskScheduler.isRunning()) {
                     SaveKeyValues.saveString(Constant.LAST_RESET_DATE_KEY, today)
