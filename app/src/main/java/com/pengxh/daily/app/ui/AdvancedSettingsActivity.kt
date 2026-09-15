@@ -13,6 +13,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
@@ -65,8 +66,9 @@ import rikka.shizuku.Shizuku
  */
 class AdvancedSettingsActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityAdvancedSettingsBinding
+    private val TAG = "AdvancedSettingsActivity"
 
+    private lateinit var binding: ActivityAdvancedSettingsBinding
     // 坐标采集（可拖动十字光标 + 范围可视化 + 自动回跳回填）挂起状态
     private var pendingCaptureCallback: ((Int, Int, Int) -> Unit)? = null
     private var pendingCaptureCoord: Triple<Int, Int, Int>? = null
@@ -106,6 +108,12 @@ class AdvancedSettingsActivity : AppCompatActivity() {
             ShizukuActions.stopCurrent()
             Toast.makeText(this, "已请求终止当前操作", Toast.LENGTH_SHORT).show()
             refreshShizukuRunState()
+        }
+        // 任务执行（定时/远程打卡等）前清理打卡应用后台：开关持久化
+        binding.swKillTargetBeforeTask.isChecked = ShizukuConfigStore.killTargetBeforeTask()
+        binding.swKillTargetBeforeTask.setOnCheckedChangeListener { _, isChecked ->
+            ShizukuConfigStore.setKillTargetBeforeTask(isChecked)
+            Log.d(TAG, "killTargetBeforeTask=$isChecked")
         }
         binding.layoutOp1Name.setOnClickListener { if (editable()) showOpNameDialog() }
         OpCard.entries.forEach { card ->
@@ -178,6 +186,8 @@ class AdvancedSettingsActivity : AppCompatActivity() {
         // 高级功能：Shizuku 已授权即生效，配置区始终随授权状态可编辑
         val on = ShizukuManager.isGranted()
         OpCard.entries.forEach { card -> cardRoot(card).alpha = if (on) 1f else 0.45f }
+        binding.swKillTargetBeforeTask.isEnabled = on
+        binding.swKillTargetBeforeTask.alpha = if (on) 1f else 0.45f
         refreshConfig()
         refreshEnv()
     }

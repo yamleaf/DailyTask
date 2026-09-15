@@ -1,6 +1,8 @@
 package com.pengxh.daily.app.shizuku
 
 import android.util.Log
+import com.pengxh.daily.app.utils.Constant
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
@@ -116,6 +118,51 @@ object ShizukuShell {
         exec(sb.toString())
         Log.d(TAG, "animations restored: $savedAnim")
         savedAnim.clear()
+    }
+
+    /**
+     * 强制停止指定包名应用（执行前调用，杀进程+清任务栈，保证从初始页冷启）。
+     * - 不在 shell 内 sleep：冷启等待交给后续已有首步延迟 / 打卡停留超时，避免固定多耗 ~300ms。
+     * - Shizuku 未启动/被杀时 newProcess 失败 → 返回 false，不抛异常。
+     */
+    suspend fun forceStopPackage(pkg: String): Boolean {
+        if (!PACKAGE_NAME_REGEX.matches(pkg)) {
+            Log.w(TAG, "force-stop 跳过：非法包名 [$pkg]")
+            return false
+        }
+        return try {
+            // 仅 am force-stop；不加 sleep，缩短开关开启时的固定开销
+            execChecked("am force-stop $pkg")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Binder 死亡 / 服务被杀等：当作失败，调用方 best-effort 继续
+            Log.w(TAG, "force-stop 异常（Shizuku 可能未就绪）: ${e.message}")
+            false
+        }
+    }
+
+    private val PACKAGE_NAME_REGEX =
+        Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+$")
+
+    /**
+     * 「任务执行前清理打卡应用后台」是否生效：
+     * 开关开 + 已授权 + 运行时可用（服务在、binder 通）。服务被杀时 isAvailable/isGranted 为 false，直接跳过。
+     */
+    fun killTargetBeforeTaskEnabled(): Boolean =
+        ShizukuConfigStore.killTargetBeforeTask()
+            && ShizukuManager.isGranted()
+            && ShizukuManager.isAvailable()
+
+    /**
+     * 按开关条件强制停止目标打卡应用：
+     * 开关关 / 未授权 / 服务不可用 / 包名为空 → false；成功 true。异常已在内部吞掉。
+     */
+    suspend fun forceStopTargetIfEnabled(): Boolean {
+        if (!killTargetBeforeTaskEnabled()) return false
+        val pkg = Constant.getTargetApp()
+        if (pkg.isBlank()) return false
+        return forceStopPackage(pkg)
     }
 
     /**

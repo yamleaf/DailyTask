@@ -125,9 +125,17 @@ object ShizukuConfigStore {
     private const val KEY_OP_NAME_1 = "shizuku_op_name_1"
     private const val KEY_CUSTOM_1_STEPS = "shizuku_custom_1_steps"
     private const val DEFAULT_OP_NAME_1 = "操作1"
+    private const val KEY_KILL_TARGET_BEFORE_TASK = "shizuku_kill_target_before_task"
 
     // ---- 高级功能：Shizuku 已授权即默认开启，无独立开关 ----
     fun isEnabled(): Boolean = ShizukuManager.isGranted()
+
+    // ---- 任务执行（含远程打卡）前先清理打卡应用后台 ----
+    /** 开关是否开启：开启且 Shizuku 可用时，调起打卡应用前先 force-stop 目标应用，再执行任务 */
+    fun killTargetBeforeTask(): Boolean =
+        SaveKeyValues.loadBoolean(KEY_KILL_TARGET_BEFORE_TASK, false)
+    fun setKillTargetBeforeTask(v: Boolean) =
+        SaveKeyValues.saveBoolean(KEY_KILL_TARGET_BEFORE_TASK, v)
 
     // ---- 登录方式（当前生效方式，控制端可切换；两种配置可同时维护）----
     fun loginMethod(): ShizukuLoginMethod =

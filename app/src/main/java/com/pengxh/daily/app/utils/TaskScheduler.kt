@@ -5,8 +5,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
+import com.pengxh.daily.app.shizuku.ShizukuActions
 import com.pengxh.daily.app.shizuku.ShizukuManager
 import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.extensions.openApplication
@@ -44,8 +46,12 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
 
 /**
  * 任务调度器
@@ -54,11 +60,51 @@ object TaskScheduler {
     /** 进程被杀后闹钟略晚于计划点时，仍允许执行的宽限（毫秒） */
     private const val PUNCH_LATE_GRACE_MS = 120_000L
 
+    /** 打卡坑位占用方：stopTask 只清调度侧，避免误清远程占的坑 */
+    enum class PunchOwner { SCHEDULER, REMOTE }
+
     /**
      * 调度器是否在运行中
      * */
     private val _isRunning = MutableStateFlow(false)
     val isRunning = _isRunning.asStateFlow()
+
+    /**
+     * 打卡准备期占坑：CAS 写入占用方，覆盖 force-stop/亮屏/拉起 窗口；
+     * 同时互斥定时↔远程、远程↔远程。clear 须带同一 [PunchOwner]，防 stopTask 误清远程。
+     */
+    private val punchOwner = AtomicReference<PunchOwner?>(null)
+
+    /** @return true 表示抢占成功，调用方结束时必须 [clearPunchBusy] 同一 owner */
+    fun tryMarkPunchBusy(owner: PunchOwner): Boolean = punchOwner.compareAndSet(null, owner)
+
+    fun clearPunchBusy(owner: PunchOwner) {
+        punchOwner.compareAndSet(owner, null)
+    }
+
+    /**
+     * 跳过打卡时统一发邮件 + MQTT danger 告警（msg 带 HH:mm:ss，供控制端等待弹窗分行展示）。
+     */
+    fun notifyPunchSkipped(
+        mailTitle: String,
+        htmlHeading: String,
+        htmlDetail: String,
+        alertBody: String
+    ) {
+        MessageDispatcher.sendMessage(
+            mailTitle,
+            StatusReporter.buildTimeoutAlertHtml(htmlHeading, htmlDetail),
+            force = true,
+            appendMeta = false
+        )
+        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.CHINA).format(Date())
+        runCatching {
+            com.pengxh.daily.app.service.MqttAgentService.publishDangerAlert(
+                com.yample.mqttprotocol.Protocol.ALERT_TYPE_TASK_SKIP,
+                "$timeStr $alertBody"
+            )
+        }
+    }
 
     /** 重置等待中断信号：修改重置时间时唤醒 waitUntilNextReset 重新计算目标 */
     @Volatile
@@ -113,8 +159,9 @@ object TaskScheduler {
         return _isRunning.value
     }
 
-    /** 是否处于打开目标 App / 等待打卡成功的窗口期（此期间不宜盖黑屏） */
+    /** 是否处于打开目标 App / 等待打卡成功的窗口期（此期间不宜盖黑屏 / 不宜跑 Shizuku force-stop） */
     fun isInActivePunch(): Boolean {
+        if (punchOwner.get() != null) return true
         // 定时任务「等待打卡」或任意 float 会话（远程打卡/截屏）均视为活跃操作窗
         if (FloatingWindowController.isSessionActive) return true
         if (!_isRunning.value) return false
@@ -204,6 +251,8 @@ object TaskScheduler {
     private suspend fun CoroutineScope.executeSchedule(schedule: List<ScheduledTask>) {
         var executedCount = 0
         var skippedCount = 0
+        // 本轮冲突跳过只发一次邮件/告警（Shizuku / 打卡占用共用），避免刷屏
+        var skipAlertedThisRound = false
 
         persistScheduledTimes(schedule)
 
@@ -316,6 +365,67 @@ object TaskScheduler {
 
             runningDetail =
                 "执行第 ${task.displayIndex}/${schedule.size} 个任务（等待打卡）"
+
+            // Shizuku 操作进行中：不让路等待，本场直接跳过并发邮件/告警，避免 force-stop/拉起互相干扰
+            // force-stop 放在保亮之前：不依赖亮屏，且便于冲突再检查时无需回滚 WakeLock/蒙层
+            suspend fun skipDueToShizukuConflict(reason: String): Boolean {
+                if (!ShizukuActions.isRunning) return false
+                val op = ShizukuActions.currentOperationTag()
+                LogFileManager.action(
+                    "定时任务跳过：第 ${task.displayIndex} 个任务$reason Shizuku「$op」进行中"
+                )
+                if (!skipAlertedThisRound) {
+                    skipAlertedThisRound = true
+                    notifyPunchSkipped(
+                        mailTitle = "任务执行结果通知",
+                        htmlHeading = "任务已跳过",
+                        htmlDetail = "第 ${task.displayIndex} 个任务（计划 ${task.plannedTime} / 实际 ${task.actualTime}）" +
+                            "执行时检测到 Shizuku「$op」正在进行，本场已跳过。" +
+                            "请待 Shizuku 操作结束后如需补打可使用远程打卡。",
+                        alertBody = "定时任务第 ${task.displayIndex} 个已跳过：Shizuku「$op」进行中"
+                    )
+                } else {
+                    LogFileManager.writeLog("定时任务跳过：本轮已发过冲突告警，不再重复邮件/MQTT")
+                }
+                return true
+            }
+            if (skipDueToShizukuConflict("执行时")) {
+                skippedCount++
+                continue
+            }
+            // CAS 占坑：与远程打卡互斥；失败说明另一路打卡已占用（含其 force-stop 窗口）
+            if (!tryMarkPunchBusy(PunchOwner.SCHEDULER)) {
+                skippedCount++
+                LogFileManager.action(
+                    "定时任务跳过：第 ${task.displayIndex} 个任务执行时已有打卡进行中（远程或其它场次）"
+                )
+                if (!skipAlertedThisRound) {
+                    skipAlertedThisRound = true
+                    notifyPunchSkipped(
+                        mailTitle = "任务执行结果通知",
+                        htmlHeading = "任务已跳过",
+                        htmlDetail = "第 ${task.displayIndex} 个任务执行时检测到已有打卡进行中，本场已跳过，以免互相干扰。",
+                        alertBody = "定时任务第 ${task.displayIndex} 个已跳过：已有打卡进行中"
+                    )
+                }
+                continue
+            }
+            try {
+            // 开关开启且已授权：打卡前 force-stop，保证冷启刷新打卡页/数据；失败不影响后续拉起
+            try {
+                if (ShizukuShell.forceStopTargetIfEnabled()) {
+                    LogFileManager.writeLog("定时任务执行前：已强制停止目标打卡应用后台")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("TaskScheduler", "force-stop 目标应用异常（已忽略，继续打卡）: ${e.message}")
+            }
+            // force-stop 窗口内 Shizuku 可能刚启动：再检查一次，避免随后拉起与自动化互相踩
+            if (skipDueToShizukuConflict("force-stop 后")) {
+                skippedCount++
+                continue
+            }
 
             // 打卡准备：屏幕当前息屏时先亮屏再打卡，保证打卡界面真实可见、可被无障碍正常操作；
             // 伪息屏蒙层显示时同样先保亮、再移除蒙层（避免蒙层释放 SCREEN_DIM 瞬间被系统休眠锁屏）。
@@ -484,6 +594,9 @@ object TaskScheduler {
 
             // ====== 阶段 3：回到主界面，处理结果 ======
             executedCount++
+            } finally {
+                clearPunchBusy(PunchOwner.SCHEDULER)
+            }
         }
 
         // ====== 全部完成 ======
@@ -748,6 +861,7 @@ object TaskScheduler {
         pendingResetReachedSignal = null
         _isRunning.value = false
         runningDetail = "空闲"
+        clearPunchBusy(PunchOwner.SCHEDULER)
         RemoteSnapshot.invalidateCache()
         ForegroundRunningService.emitNotificationText("为保证程序正常运行，请勿移除此通知")
     }
@@ -770,6 +884,7 @@ object TaskScheduler {
         pendingResetReachedSignal = null
         _isRunning.value = false
         runningDetail = "空闲"
+        clearPunchBusy(PunchOwner.SCHEDULER)
         RemoteSnapshot.invalidateCache()
     }
 

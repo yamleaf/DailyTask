@@ -7,6 +7,8 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.pengxh.daily.app.extensions.openApplication
+import com.pengxh.daily.app.shizuku.ShizukuActions
+import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.ui.MainActivity
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.Constant
@@ -27,6 +29,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 远程打卡执行器（与通知监听服务解耦）：
@@ -51,190 +54,305 @@ object RemotePunchRunner {
             return
         }
         LogFileManager.action("收到远程打卡指令（关键词=$keyword）")
-        // 遥控"打卡"：一次性，只唤起目标 App 并倒计时，不关联任务调度
-        // 打卡前准备：屏幕当前息屏时先亮屏再打卡，保证打卡界面真实可见、可被无障碍正常操作；
-        // 伪息屏蒙层显示时同样先保亮、再移除蒙层（避免蒙层释放 SCREEN_DIM 瞬间被系统休眠锁屏）。
-        val keptAwakeForPunch = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(context)
-        val maskWasShowing = MaskOverlayHelper.isShowing()
-        if (maskWasShowing) {
-            LogFileManager.writeLog("远程打卡：伪息屏蒙层显示中，临时移除以确保障碍不遮挡目标App")
-            MaskOverlayHelper.hide(context, MaskOverlayHelper.HideReason.TEMP_PUNCH)
-        }
-        try {
-            val opened = context.openApplication {
-                launchIn(scope, "远程打卡倒计时") {
-                    val timeout = SaveKeyValues.loadInt(
-                        Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
-                    ).coerceIn(5, 120)
-                    val resultSource = SaveKeyValues.loadInt(
-                        Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
-                    )
-                    val feedbackMode = SaveKeyValues.loadInt(
-                        Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0
-                    )
-                    // 文本检测命中标记（用于结果兜底判断）
-                    var detectedSuccess = false
-                    // 监听无障碍成功事件：命中后打标，避免重复发通知
-                    val detectionJob = launch {
-                        NotificationMonitorService.events.collect { event ->
-                            if (event is MonitorEvent.ClockInSuccess) detectedSuccess = true
-                        }
-                    }
-                    // 无障碍文本反馈模式：开启文本检测
-                    if (resultSource == 2 && feedbackMode == 1) {
-                        AutoProjectionAccessibilityService.setTextDetectionEnabled(true)
-                    } else if (resultSource == 2) {
-                        LogFileManager.action("远程打卡：无障碍截屏反馈（不启用文本识别）")
-                    }
-                    val target = SystemClock.elapsedRealtime() + timeout * 1000L
-                    var hasCaptured = false
-                    var captureDeferred: CompletableDeferred<String?>? = null
-                    try {
-                        while (isActive) {
-                            if (detectedSuccess) break
-                            val remaining = target - SystemClock.elapsedRealtime()
-                            if (remaining <= 0) break
-                            val tick = (remaining / 1000).toInt()
-                            FloatingWindowController.updateTime(tick)
+        // 遥控"打卡"：一次性，只唤起目标 App 并倒计时，不关联任务调度。
+        launchIn(scope, "远程打卡") {
+            fun notifyRemoteSkip(logLine: String, htmlDetail: String, alertBody: String) {
+                LogFileManager.action(logLine)
+                TaskScheduler.notifyPunchSkipped(
+                    mailTitle = "远程打卡通知",
+                    htmlHeading = "远程打卡已跳过",
+                    htmlDetail = htmlDetail,
+                    alertBody = alertBody
+                )
+            }
+            // Shizuku 操作进行中：不让路等待，直接退出本场并发邮件/告警
+            // force-stop 放在保亮之前，冲突再检查时无需回滚 WakeLock/蒙层
+            suspend fun skipDueToShizukuConflict(reason: String): Boolean {
+                if (!ShizukuActions.isRunning) return false
+                val op = ShizukuActions.currentOperationTag()
+                notifyRemoteSkip(
+                    logLine = if (reason.isBlank()) "远程打卡跳过：Shizuku「$op」进行中"
+                    else "远程打卡跳过：$reason Shizuku「$op」进行中",
+                    htmlDetail = "检测到 Shizuku「$op」正在进行，本次远程打卡已取消，以免互相干扰。" +
+                        "请待 Shizuku 操作结束后再试。",
+                    alertBody = "远程打卡已跳过：Shizuku「$op」进行中"
+                )
+                return true
+            }
+            if (skipDueToShizukuConflict("")) return@launchIn
 
-                            // 最后 5 秒兜底截屏（只触发一次）；文本反馈同样保留末段截屏
-                            if (tick <= 5 && !hasCaptured && !detectedSuccess) {
-                                if (resultSource == 1) {
-                                    // 截屏模式：MediaProjection
-                                    hasCaptured = true
-                                    // 等悬浮窗把卡片压到低透明后再截，避免同帧仍拍到不透明遮挡
-                                    delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
-                                    captureDeferred = CaptureImageService.requestCaptureScreen()
-                                } else if (resultSource == 2 && (
-                                    feedbackMode == 0
-                                        || (feedbackMode == 1 && AutoProjectionAccessibilityService.canTakeScreenshot(context))
-                                    )
-                                ) {
-                                    // 无障碍模式兜底截屏：
-                                    // · 截屏反馈(feedbackMode=0) 直接 AccessibilityService.takeScreenshot
-                                    // · 文本反馈(feedbackMode=1) 有截屏能力(Android14+)时同样兜底截屏；
-                                    //   无截屏能力(版本过低)则不预截屏，交由后续 tryFallbackScreenshot 失败 → 文字提示
-                                    hasCaptured = true
-                                    delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
-                                    val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
-                                    captureDeferred = a11yDeferred
-                                        ?: CompletableDeferred<String?>().apply { complete("") }
+            // 定时「等待打卡」文案 / 已有 float 会话：先拦一层（对方可能尚未 CAS）
+            if (TaskScheduler.isInActivePunch()) {
+                notifyRemoteSkip(
+                    logLine = "远程打卡跳过：已有打卡进行中",
+                    htmlDetail = "检测到已有打卡进行中，本次远程打卡已取消，以免互相干扰。",
+                    alertBody = "远程打卡已跳过：已有打卡进行中"
+                )
+                return@launchIn
+            }
+            // CAS 占坑：与定时/另一路远程互斥；失败说明刚被抢占
+            if (!TaskScheduler.tryMarkPunchBusy(TaskScheduler.PunchOwner.REMOTE)) {
+                notifyRemoteSkip(
+                    logLine = "远程打卡跳过：打卡坑位已被占用",
+                    htmlDetail = "检测到已有打卡进行中，本次远程打卡已取消，以免互相干扰。",
+                    alertBody = "远程打卡已跳过：已有打卡进行中"
+                )
+                return@launchIn
+            }
+            // 高级设置开关开启且 Shizuku 已授权时：先强制停止打卡应用后台（常驻不刷新打卡记录的场景），
+            // 再从初始页冷启动拉起。失败仍继续（best-effort）。
+            try {
+                if (ShizukuShell.forceStopTargetIfEnabled()) {
+                    LogFileManager.writeLog("远程打卡执行前：已强制停止目标打卡应用后台")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                throw e
+            } catch (e: Exception) {
+                Log.w(kTag, "force-stop 目标应用异常（已忽略，继续打卡）: ${e.message}")
+            }
+            if (skipDueToShizukuConflict("force-stop 后")) {
+                TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                return@launchIn
+            }
+
+            // 打卡准备起即纳入 try：keepAwake/hide 抛错也必须清 REMOTE 坑（stopTask 只清 SCHEDULER）
+            var keptAwakeForPunch = false
+            var maskWasShowing = false
+            try {
+                // 屏幕当前息屏时先亮屏再打卡；伪息屏蒙层显示时同样先保亮、再移除蒙层
+                keptAwakeForPunch = IdlePseudoMaskController.keepAwakeForPunchIfNeeded(context)
+                maskWasShowing = MaskOverlayHelper.isShowing()
+                if (maskWasShowing) {
+                    LogFileManager.writeLog("远程打卡：伪息屏蒙层显示中，临时移除以确保障碍不遮挡目标App")
+                    MaskOverlayHelper.hide(context, MaskOverlayHelper.HideReason.TEMP_PUNCH)
+                }
+
+                // needWarmup 时 openApplication 先 return true、~450ms 后才 onOpened；
+                // 若其间 scope 取消，launchIn 直接 return 且 opened=true 不走 !opened → REMOTE 坑泄漏。
+                // 用门闩等待「倒计时协程确已执行」；超时或未启动则外层释放。
+                val countdownArmed = CompletableDeferred<Boolean>()
+                val opened = withContext(Dispatchers.Main) {
+                    context.openApplication {
+                        val started = launchIn(scope, "远程打卡倒计时") {
+                            // 块首 complete：started=true 但 dispatch 前取消导致块未跑时，外层超时兜底清坑
+                            countdownArmed.complete(true)
+                            val timeout = SaveKeyValues.loadInt(
+                                Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
+                            ).coerceIn(5, 120)
+                            val resultSource = SaveKeyValues.loadInt(
+                                Constant.RESULT_SOURCE_KEY, Constant.DEFAULT_INDEX
+                            )
+                            val feedbackMode = SaveKeyValues.loadInt(
+                                Constant.ACCESSIBILITY_FEEDBACK_MODE_KEY, 0
+                            )
+                            // 文本检测命中标记（用于结果兜底判断）
+                            var detectedSuccess = false
+                            // 监听无障碍成功事件：命中后打标，避免重复发通知
+                            val detectionJob = launch {
+                                NotificationMonitorService.events.collect { event ->
+                                    if (event is MonitorEvent.ClockInSuccess) detectedSuccess = true
                                 }
                             }
-
-                            delay(minOf(1000L, remaining).coerceAtLeast(1))
-                        }
-                        FloatingWindowController.stopFloatSession()
-                        // 倒计时结束 / 文本命中提前结束：关闭文本检测；未成功时再取截图
-                        AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
-                        detectionJob.cancel()
-
-                        var imagePath = ""
-                        if (!detectedSuccess) {
-                            LogFileManager.writeLog("远程打卡倒计时结束，目标 App 仍在台，准备截图")
-                            val deferred = captureDeferred
-                            if (hasCaptured && deferred != null) {
-                                imagePath = runCatching {
-                                    withTimeout(5000) { deferred.await() ?: "" }
-                                }.getOrNull() ?: ""
+                            // 无障碍文本反馈模式：开启文本检测
+                            if (resultSource == 2 && feedbackMode == 1) {
+                                AutoProjectionAccessibilityService.setTextDetectionEnabled(true)
+                            } else if (resultSource == 2) {
+                                LogFileManager.action("远程打卡：无障碍截屏反馈（不启用文本识别）")
                             }
-                            if (imagePath.isEmpty()) {
-                                imagePath = runCatching {
-                                    withTimeout(5000) { TaskScheduler.tryFallbackScreenshot() }
-                                }.getOrNull() ?: ""
-                            }
-                        } else {
-                            // 文本已命中：取消未完成的末段预截图等待，避免多余落盘/日志
-                            captureDeferred?.cancel()
-                        }
-
-                        // 截屏临时隐藏结束后先恢复悬浮窗（贴边宠物），再回桌面/本 App，
-                        // 否则安卓 15+ 缺少可见悬浮窗豁免，可能停在目标 App。
-                        FloatingWindowController.restoreAfterScreenshot()
-
-                        // 现在返回主页 / 本 App
-                        LogFileManager.writeLog("远程打卡结束，返回主页")
-                        withContext(Dispatchers.Main) {
+                            val target = SystemClock.elapsedRealtime() + timeout * 1000L
+                            var hasCaptured = false
+                            var captureDeferred: CompletableDeferred<String?>? = null
                             try {
-                                context.startActivity(Intent(Intent.ACTION_MAIN).apply {
-                                    addCategory(Intent.CATEGORY_HOME)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                })
-                            } catch (e: Exception) {
-                                Log.w(kTag, "返回桌面失败: ${e.message}")
-                            }
-                            delay(300L)
-                            bringMainActivityForMask(context, showMask = maskWasShowing)
-                            // 真息屏打卡优化：远程指令同样在回到前台后，若「打卡前真息屏 + 伪息屏关 + 模式=息屏」，
-                            // 盖不保亮黑蒙层等待系统超时灭屏（ForegroundRunningService 在 SCREEN_OFF/SCREEN_ON 时摘除）。
-                            if (keptAwakeForPunch && !maskWasShowing &&
-                                !AppRuntimeConfig.isForcePseudoMask() &&
-                                AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
-                            ) {
-                                MaskOverlayHelper.show(context, keepAwake = false)
-                                LogFileManager.writeLog("远程打卡结束：真息屏场景，盖不保亮黑蒙层等待系统超时")
-                            }
-                        }
+                                while (isActive) {
+                                    if (detectedSuccess) break
+                                    val remaining = target - SystemClock.elapsedRealtime()
+                                    if (remaining <= 0) break
+                                    val tick = (remaining / 1000).toInt()
+                                    FloatingWindowController.updateTime(tick)
 
-                        // 统一发送远程打卡结果：无论何种模式都必须有反馈，避免“什么都没有”。
-                        // 控制端下发的打卡：结果经 alert 通道回传（仅控制端触发时，定时/DT# 不回传），
-                        // 供控制端关闭等待弹窗并展示打卡结果；消息带执行时间
-                        if (fromController) {
-                            val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA)
-                                .format(java.util.Date())
-                            // 弹窗主内容（第一行时间+状态；超时第二行小字提示）
-                            val resultMsg = if (detectedSuccess) {
-                                "$timeStr 打卡·成功"
-                            } else {
-                                "$timeStr 打卡·超时\n打卡结果未识别，请手动确认执行结果"
-                            }
-                            runCatching {
-                                MqttAgentService.publishAlert(
-                                    org.json.JSONObject().apply {
-                                        put("type", com.yample.mqttprotocol.Protocol.ALERT_TYPE_PUNCH_RESULT)
-                                        put("msg", resultMsg)
-                                        put("ts", System.currentTimeMillis())
-                                    }.toString()
-                                )
+                                    // 最后 5 秒兜底截屏（只触发一次）；文本反馈同样保留末段截屏
+                                    if (tick <= 5 && !hasCaptured && !detectedSuccess) {
+                                        if (resultSource == 1) {
+                                            // 截屏模式：MediaProjection
+                                            hasCaptured = true
+                                            // 等悬浮窗把卡片压到低透明后再截，避免同帧仍拍到不透明遮挡
+                                            delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
+                                            captureDeferred = CaptureImageService.requestCaptureScreen()
+                                        } else if (resultSource == 2 && (
+                                            feedbackMode == 0
+                                                || (feedbackMode == 1 && AutoProjectionAccessibilityService.canTakeScreenshot(context))
+                                            )
+                                        ) {
+                                            // 无障碍模式兜底截屏：
+                                            // · 截屏反馈(feedbackMode=0) 直接 AccessibilityService.takeScreenshot
+                                            // · 文本反馈(feedbackMode=1) 有截屏能力(Android14+)时同样兜底截屏；
+                                            //   无截屏能力(版本过低)则不预截屏，交由后续 tryFallbackScreenshot 失败 → 文字提示
+                                            hasCaptured = true
+                                            delay(FloatingWindowController.SCREENSHOT_FADE_YIELD_MS)
+                                            val a11yDeferred = AutoProjectionAccessibilityService.requestScreenshot()
+                                            captureDeferred = a11yDeferred
+                                                ?: CompletableDeferred<String?>().apply { complete("") }
+                                        }
+                                    }
+
+                                    delay(minOf(1000L, remaining).coerceAtLeast(1))
+                                }
+                                FloatingWindowController.stopFloatSession()
+                                // 倒计时结束 / 文本命中提前结束：关闭文本检测；未成功时再取截图
+                                AutoProjectionAccessibilityService.setTextDetectionEnabled(false)
+                                detectionJob.cancel()
+
+                                var imagePath = ""
+                                if (!detectedSuccess) {
+                                    LogFileManager.writeLog("远程打卡倒计时结束，目标 App 仍在台，准备截图")
+                                    val deferred = captureDeferred
+                                    if (hasCaptured && deferred != null) {
+                                        imagePath = runCatching {
+                                            withTimeout(5000) { deferred.await() ?: "" }
+                                        }.getOrNull() ?: ""
+                                    }
+                                    if (imagePath.isEmpty()) {
+                                        imagePath = runCatching {
+                                            withTimeout(5000) { TaskScheduler.tryFallbackScreenshot() }
+                                        }.getOrNull() ?: ""
+                                    }
+                                } else {
+                                    // 文本已命中：取消未完成的末段预截图等待，避免多余落盘/日志
+                                    captureDeferred?.cancel()
+                                }
+
+                                // 截屏临时隐藏结束后先恢复悬浮窗（贴边宠物），再回桌面/本 App，
+                                // 否则安卓 15+ 缺少可见悬浮窗豁免，可能停在目标 App。
+                                FloatingWindowController.restoreAfterScreenshot()
+
+                                // 现在返回主页 / 本 App
+                                LogFileManager.writeLog("远程打卡结束，返回主页")
+                                withContext(Dispatchers.Main) {
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_MAIN).apply {
+                                            addCategory(Intent.CATEGORY_HOME)
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        })
+                                    } catch (e: Exception) {
+                                        Log.w(kTag, "返回桌面失败: ${e.message}")
+                                    }
+                                    delay(300L)
+                                    bringMainActivityForMask(context, showMask = maskWasShowing)
+                                    // 真息屏打卡优化：远程指令同样在回到前台后，若「打卡前真息屏 + 伪息屏关 + 模式=息屏」，
+                                    // 盖不保亮黑蒙层等待系统超时灭屏（ForegroundRunningService 在 SCREEN_OFF/SCREEN_ON 时摘除）。
+                                    if (keptAwakeForPunch && !maskWasShowing &&
+                                        !AppRuntimeConfig.isForcePseudoMask() &&
+                                        AppRuntimeConfig.getScreenMode() == Constant.SCREEN_MODE_OFF
+                                    ) {
+                                        MaskOverlayHelper.show(context, keepAwake = false)
+                                        LogFileManager.writeLog("远程打卡结束：真息屏场景，盖不保亮黑蒙层等待系统超时")
+                                    }
+                                }
+
+                                // 统一发送远程打卡结果：无论何种模式都必须有反馈，避免“什么都没有”。
+                                // 控制端下发的打卡：结果经 alert 通道回传（仅控制端触发时，定时/DT# 不回传），
+                                // 供控制端关闭等待弹窗并展示打卡结果；消息带执行时间
+                                if (fromController) {
+                                    val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA)
+                                        .format(java.util.Date())
+                                    // 弹窗主内容（第一行时间+状态；超时第二行小字提示）
+                                    val resultMsg = if (detectedSuccess) {
+                                        "$timeStr 打卡·成功"
+                                    } else {
+                                        "$timeStr 打卡·超时\n打卡结果未识别，请手动确认执行结果"
+                                    }
+                                    runCatching {
+                                        MqttAgentService.publishAlert(
+                                            org.json.JSONObject().apply {
+                                                put("type", com.yample.mqttprotocol.Protocol.ALERT_TYPE_PUNCH_RESULT)
+                                                put("msg", resultMsg)
+                                                put("ts", System.currentTimeMillis())
+                                            }.toString()
+                                        )
+                                    }
+                                }
+                                if (detectedSuccess) {
+                                    // 文本检测命中成功：无障碍服务已直接发过“打卡结果通知”，不重复
+                                    LogFileManager.action("远程打卡结果：文本识别已成功")
+                                } else {
+                                    if (imagePath.isNotEmpty()) {
+                                        MessageDispatcher.sendAttachmentMessage(
+                                            "远程打卡结果",
+                                            StatusReporter.buildTimeoutAlertHtml(
+                                                "远程打卡结果",
+                                                "远程打卡已执行，截图见附件，请手动确认是否成功"
+                                            ),
+                                            imagePath,
+                                            force = true
+                                        )
+                                        LogFileManager.writeLog("远程打卡结果：已发兜底截图 $imagePath")
+                                    } else {
+                                        MessageDispatcher.sendMessage(
+                                            "远程打卡结果",
+                                            StatusReporter.buildTimeoutAlertHtml(
+                                                "远程打卡结果",
+                                                "远程打卡已执行，但当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查是否成功"
+                                            ),
+                                            force = true,
+                                            appendMeta = false
+                                        )
+                                        LogFileManager.error("远程打卡结果：无可用截屏权限，已发文字提醒")
+                                    }
+                                }
+                            } finally {
+                                // 异常路径兜底：确保悬浮窗一定收起
+                                FloatingWindowController.stopFloatSession()
+                                TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                                if (maskWasShowing) {
+                                    LogFileManager.writeLog("远程打卡结束，恢复伪息屏蒙层")
+                                    withContext(Dispatchers.Main) {
+                                        // 按「伪息屏开关 + 屏幕模式」三态矩阵恢复蒙层：
+                                        // 伪息屏开或模式=伪息屏 → 保亮伪息屏；模式=息屏 → 不保亮黑蒙层等系统超时；
+                                        // 模式=亮屏 → 不恢复蒙层（前台常亮阻止系统息屏）
+                                        val pseudoOn = AppRuntimeConfig.isForcePseudoMask()
+                                        val mode = AppRuntimeConfig.getScreenMode()
+                                        when {
+                                            pseudoOn || mode == Constant.SCREEN_MODE_PSEUDO ->
+                                                MaskOverlayHelper.show(context)
+                                            mode == Constant.SCREEN_MODE_OFF -> {
+                                                MaskOverlayHelper.show(context, keepAwake = false)
+                                                LogFileManager.writeLog("远程打卡结束：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                                            }
+                                            else ->
+                                                LogFileManager.writeLog("远程打卡结束：伪息屏关+模式亮屏，不恢复蒙层")
+                                        }
+                                    }
+                                }
+                                // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
+                                if (keptAwakeForPunch) {
+                                    IdlePseudoMaskController.releaseKeepAwakeForPunch(context)
+                                }
                             }
                         }
-                        if (detectedSuccess) {
-                            // 文本检测命中成功：无障碍服务已直接发过“打卡结果通知”，不重复
-                            LogFileManager.action("远程打卡结果：文本识别已成功")
-                        } else {
-                            if (imagePath.isNotEmpty()) {
-                                MessageDispatcher.sendAttachmentMessage(
-                                    "远程打卡结果",
-                                    StatusReporter.buildTimeoutAlertHtml(
-                                        "远程打卡结果",
-                                        "远程打卡已执行，截图见附件，请手动确认是否成功"
-                                    ),
-                                    imagePath,
-                                    force = true
-                                )
-                                LogFileManager.writeLog("远程打卡结果：已发兜底截图 $imagePath")
-                            } else {
-                                MessageDispatcher.sendMessage(
-                                    "远程打卡结果",
-                                    StatusReporter.buildTimeoutAlertHtml(
-                                        "远程打卡结果",
-                                        "远程打卡已执行，但当前无可用的截屏权限（无障碍/截屏服务均未启用），请手动登录检查是否成功"
-                                    ),
-                                    force = true,
-                                    appendMeta = false
-                                )
-                                LogFileManager.error("远程打卡结果：无可用截屏权限，已发文字提醒")
-                            }
+                        if (!started) {
+                            // scope 已取消：倒计时 finally 不会跑，此处释放 REMOTE 坑并收起 float
+                            FloatingWindowController.stopFloatSession()
+                            TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                            LogFileManager.error("远程打卡：倒计时 scope 已取消，已释放 punchBusy")
+                            countdownArmed.complete(false)
                         }
-                    } finally {
-                        // 异常路径兜底：确保悬浮窗一定收起
-                        FloatingWindowController.stopFloatSession()
-                        if (maskWasShowing) {
-                            LogFileManager.writeLog("远程打卡结束，恢复伪息屏蒙层")
-                            withContext(Dispatchers.Main) {
-                                // 按「伪息屏开关 + 屏幕模式」三态矩阵恢复蒙层：
-                                // 伪息屏开或模式=伪息屏 → 保亮伪息屏；模式=息屏 → 不保亮黑蒙层等系统超时；
-                                // 模式=亮屏 → 不恢复蒙层（前台常亮阻止系统息屏）
+                        // started=true：由倒计时块首 complete(true)；勿在此处再 complete，避免双重 complete
+                    }
+                }
+                if (!opened) {
+                    TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                    LogFileManager.error("远程打卡：目标 App 未能启动，恢复蒙层/保活")
+                    MessageDispatcher.sendMessage(
+                        "远程打卡通知",
+                        StatusReporter.buildTimeoutAlertHtml("远程打卡失败", "目标应用未能启动，请检查是否已安装及后台弹出权限"),
+                        force = true,
+                        appendMeta = false
+                    )
+                    if (maskWasShowing || keptAwakeForPunch) {
+                        Handler(Looper.getMainLooper()).post {
+                            if (maskWasShowing) {
+                                // 按「伪息屏开关 + 屏幕模式」三态矩阵恢复：模式=息屏盖不保亮黑蒙层等系统超时，模式=亮屏不恢复
                                 val pseudoOn = AppRuntimeConfig.isForcePseudoMask()
                                 val mode = AppRuntimeConfig.getScreenMode()
                                 when {
@@ -242,63 +360,51 @@ object RemotePunchRunner {
                                         MaskOverlayHelper.show(context)
                                     mode == Constant.SCREEN_MODE_OFF -> {
                                         MaskOverlayHelper.show(context, keepAwake = false)
-                                        LogFileManager.writeLog("远程打卡结束：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                                        LogFileManager.writeLog("伪息屏关+模式息屏：盖不保亮黑蒙层等待系统超时灭屏")
                                     }
                                     else ->
-                                        LogFileManager.writeLog("远程打卡结束：伪息屏关+模式亮屏，不恢复蒙层")
+                                        LogFileManager.writeLog("伪息屏关+模式亮屏：不恢复蒙层")
                                 }
                             }
-                        }
-                        // 无论是否恢复蒙层，只要打卡前亮过屏就释放打卡保活，让屏幕回到系统自然管理
-                        if (keptAwakeForPunch) {
                             IdlePseudoMaskController.releaseKeepAwakeForPunch(context)
                         }
                     }
+                } else {
+                    // 同步路径：块首已 complete；needWarmup：等悬浮窗预热+onOpened（放宽防主线程卡顿误清）
+                    val armed = withTimeoutOrNull(5_000L) { countdownArmed.await() }
+                    if (armed == null) {
+                        // 仍在 float 会话中：更可能是倒计时慢启动，交给其 finally 清坑，避免误清后被插队
+                        if (FloatingWindowController.isSessionActive) {
+                            LogFileManager.writeLog("远程打卡：倒计时门闩超时但 float 会话仍在，暂不清 punchBusy")
+                        } else {
+                            TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                            FloatingWindowController.stopFloatSession()
+                            LogFileManager.error("远程打卡：倒计时未在时限内拉起（needWarmup/onOpened 失败），已释放 punchBusy")
+                        }
+                    }
                 }
-            }
-            if (!opened) {
-                LogFileManager.error("远程打卡：目标 App 未能启动，恢复蒙层/保活")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                if (keptAwakeForPunch) {
+                    IdlePseudoMaskController.releaseKeepAwakeForPunch(context)
+                }
+                throw e
+            } catch (e: Exception) {
+                TaskScheduler.clearPunchBusy(TaskScheduler.PunchOwner.REMOTE)
+                Log.e(kTag, "远程打卡启动失败", e)
+                LogFileManager.error("远程打卡启动失败: ${e.message}")
                 MessageDispatcher.sendMessage(
                     "远程打卡通知",
-                    StatusReporter.buildTimeoutAlertHtml("远程打卡失败", "目标应用未能启动，请检查是否已安装及后台弹出权限"),
+                    StatusReporter.buildTimeoutAlertHtml("远程打卡失败", e.message ?: "未知错误"),
                     force = true,
                     appendMeta = false
                 )
+                // 异常时也要恢复蒙层 / 释放打卡保活
                 if (maskWasShowing || keptAwakeForPunch) {
                     Handler(Looper.getMainLooper()).post {
-                        if (maskWasShowing) {
-                            // 按「伪息屏开关 + 屏幕模式」三态矩阵恢复：模式=息屏盖不保亮黑蒙层等系统超时，模式=亮屏不恢复
-                            val pseudoOn = AppRuntimeConfig.isForcePseudoMask()
-                            val mode = AppRuntimeConfig.getScreenMode()
-                            when {
-                                pseudoOn || mode == Constant.SCREEN_MODE_PSEUDO ->
-                                    MaskOverlayHelper.show(context)
-                                mode == Constant.SCREEN_MODE_OFF -> {
-                                    MaskOverlayHelper.show(context, keepAwake = false)
-                                    LogFileManager.writeLog("伪息屏关+模式息屏：盖不保亮黑蒙层等待系统超时灭屏")
-                                }
-                                else ->
-                                    LogFileManager.writeLog("伪息屏关+模式亮屏：不恢复蒙层")
-                            }
-                        }
+                        if (maskWasShowing) MaskOverlayHelper.show(context)
                         IdlePseudoMaskController.releaseKeepAwakeForPunch(context)
                     }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(kTag, "远程打卡启动失败", e)
-            LogFileManager.error("远程打卡启动失败: ${e.message}")
-            MessageDispatcher.sendMessage(
-                "远程打卡通知",
-                StatusReporter.buildTimeoutAlertHtml("远程打卡失败", e.message ?: "未知错误"),
-                force = true,
-                appendMeta = false
-            )
-            // 异常时也要恢复蒙层 / 释放打卡保活
-            if (maskWasShowing || keptAwakeForPunch) {
-                Handler(Looper.getMainLooper()).post {
-                    if (maskWasShowing) MaskOverlayHelper.show(context)
-                    IdlePseudoMaskController.releaseKeepAwakeForPunch(context)
                 }
             }
         }
@@ -322,19 +428,23 @@ object RemotePunchRunner {
         }
     }
 
-    private fun launchIn(scope: CoroutineScope, tag: String, block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) {
+    /** @return true 表示已启动协程；false 表示 scope 已取消、未启动（调用方须自行清 punchBusy） */
+    private fun launchIn(scope: CoroutineScope, tag: String, block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit): Boolean {
         if (!scope.isActive) {
             Log.w(kTag, "scope 已取消，无法处理指令: $tag")
             LogFileManager.error("scope 已取消，$tag 指令丢弃")
-            return
+            return false
         }
         scope.launch {
             try {
                 block()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(kTag, "$tag 处理异常", e)
                 LogFileManager.error("$tag 处理异常: ${e.message}")
             }
         }
+        return true
     }
 }

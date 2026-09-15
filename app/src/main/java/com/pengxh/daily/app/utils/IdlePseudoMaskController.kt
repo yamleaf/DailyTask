@@ -17,8 +17,10 @@ import android.view.WindowManager
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.bringDailyTaskToFront
 import com.pengxh.daily.app.service.KeepAliveReceiver
+import com.pengxh.daily.app.shizuku.ShizukuActions
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.kt.lite.utils.SaveKeyValues
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 离开本软件后的「强制伪息屏」策略（需在设置中开启）：
@@ -45,8 +47,17 @@ object IdlePseudoMaskController {
     private var pendingReturnFromBackground = false
     /** 是否正处于「进入伪息屏」的过渡中（离开超时后到蒙层真正显示前），用于阻止倒计时被重复重置 */
     private var enteringMask = false
+
+    /** 是否处于活跃操作窗口（定时打卡 / 远程打卡 / Shizuku 自动化操作）：
+     *  这些流程依赖屏幕常亮 + 目标 App 顶层可点击，伪息屏（盖黑蒙层 / 干预屏幕）会打断它们，
+     *  故一律延后/放行，不盖黑屏。 */
+    private fun isInOperationWindow(): Boolean =
+        TaskScheduler.isInActivePunch() || ShizukuActions.isRunning
+
     /** 打卡期间持有的独立保亮 WakeLock：唤醒并保持屏幕亮，避免蒙层移除释放 SCREEN_DIM 后系统休眠锁屏 */
     private var punchWakeLock: PowerManager.WakeLock? = null
+    /** keepAwakeForPunch / release 嵌套深度：打卡与 Shizuku 重叠时防漏放或抢释（跨线程） */
+    private val punchWakeLockDepth = AtomicInteger(0)
     /** 打卡期间伪息屏被延后的日志每轮只报一次，避免高频重复写日志 */
     private var punchIdlePostponeNotified = false
     private var keepAwakeView: View? = null
@@ -63,10 +74,10 @@ object IdlePseudoMaskController {
         if (KeepAliveReceiver.isPaused()) return@Runnable
         if (!appInBackground) return@Runnable
         if (!AppRuntimeConfig.isForcePseudoMask()) return@Runnable
-        if (TaskScheduler.isInActivePunch()) {
-            // 打卡进行中：绝不盖黑屏 / 强制返回桌面。延后日志每轮只报一次，避免高频重复写。
+        if (isInOperationWindow()) {
+            // 打卡/Shizuku 操作进行中：绝不盖黑屏 / 强制返回桌面。延后日志每轮只报一次，避免高频重复写。
             if (!punchIdlePostponeNotified) {
-                LogFileManager.writeLog("打卡进行中，延后伪息屏")
+                LogFileManager.writeLog("打卡/Shizuku 操作进行中，延后伪息屏")
                 punchIdlePostponeNotified = true
             }
             mainHandler.postDelayed(upgradeToMaskRunnable, idleToMaskMs())
@@ -194,10 +205,10 @@ object IdlePseudoMaskController {
         if (KeepAliveReceiver.isPaused()) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
         if (!appInBackground) return
-        if (TaskScheduler.isInActivePunch()) {
+        if (isInOperationWindow()) {
             wakeScreen(context)
             ensureKeepAwake(context)
-            LogFileManager.writeLog("打卡中收到 SCREEN_OFF，已保亮但不盖黑屏")
+            LogFileManager.writeLog("打卡/Shizuku 操作中收到 SCREEN_OFF，已保亮但不盖黑屏")
             return
         }
         // 进入黑屏蒙层，但【不要】主动唤醒背光：
@@ -236,19 +247,26 @@ object IdlePseudoMaskController {
      * （真机复现：打卡瞬间 goToSleep + show keyguard + 指纹图标）。先唤醒保亮、再移除蒙层，彻底消除竞态。
      */
     fun keepAwakeForPunch(context: Context) {
-        punchWakeLock = context.acquireWakeLock(
-            LegacyWakeLockFlags.SCREEN_BRIGHT,
-            "DailyTask:PunchKeepAwake",
-            extraFlags = LegacyWakeLockFlags.CAUSES_WAKEUP or LegacyWakeLockFlags.ON_AFTER_RELEASE
-        )
-        ensureKeepAwake(context)
-        LogFileManager.writeLog("打卡期间：唤醒并保持亮屏，防止屏幕休眠")
+        // getAndIncrement：仅第一个持有者真正申请 WakeLock；其余只加深计数
+        if (punchWakeLockDepth.getAndIncrement() == 0) {
+            punchWakeLock = context.acquireWakeLock(
+                LegacyWakeLockFlags.SCREEN_BRIGHT,
+                "DailyTask:PunchKeepAwake",
+                extraFlags = LegacyWakeLockFlags.CAUSES_WAKEUP or LegacyWakeLockFlags.ON_AFTER_RELEASE
+            )
+            ensureKeepAwake(context)
+            LogFileManager.writeLog("打卡期间：唤醒并保持亮屏，防止屏幕休眠")
+        }
     }
 
     /**
      * 打卡结束释放保活：释放打卡 WakeLock、移除透明保亮层，让黑屏蒙层恢复后屏幕可自然熄灭，回到省电伪息屏。
+     * 与 [keepAwakeForPunch] 成对；嵌套持有时仅最外层真正释放。
      */
     fun releaseKeepAwakeForPunch(context: Context) {
+        val left = punchWakeLockDepth.decrementAndGet()
+        if (left > 0) return
+        if (left < 0) punchWakeLockDepth.set(0)
         punchWakeLock?.let { if (it.isHeld) it.release() }
         punchWakeLock = null
         removeKeepAwake(context)
@@ -263,6 +281,7 @@ object IdlePseudoMaskController {
         runCatching {
             punchWakeLock?.let { if (it.isHeld) it.release() }
             punchWakeLock = null
+            punchWakeLockDepth.set(0)
         }
         LogFileManager.writeLog("强制伪息屏已关闭，取消后台保亮与倒计时、前台无操作计时")
     }
@@ -275,6 +294,7 @@ object IdlePseudoMaskController {
         runCatching {
             punchWakeLock?.let { if (it.isHeld) it.release() }
             punchWakeLock = null
+            punchWakeLockDepth.set(0)
         }
     }
 
@@ -297,7 +317,7 @@ object IdlePseudoMaskController {
         if (KeepAliveReceiver.isPaused()) return@Runnable
         if (!shouldRunForegroundIdleMask()) return@Runnable
         if (appInBackground) return@Runnable
-        if (TaskScheduler.isInActivePunch()) return@Runnable
+        if (isInOperationWindow()) return@Runnable
         if (MaskOverlayHelper.isShowing()) return@Runnable
         LogFileManager.action("前台无操作超时（${idleToMaskMs() / 1000}s），进入伪熄屏")
         // 与后台「离开超时」路径一致：拉起 MainActivity 由 MaskViewController 接管，
@@ -366,7 +386,7 @@ object IdlePseudoMaskController {
         if (KeepAliveReceiver.isPaused()) return
         if (!appInBackground) return
         if (!AppRuntimeConfig.isForcePseudoMask()) return
-        if (TaskScheduler.isInActivePunch()) return  // 打卡期间不重置/触发伪息屏计时（同时避免高频日志）
+        if (isInOperationWindow()) return  // 打卡/Shizuku 操作期间不重置/触发伪息屏计时（同时避免高频日志）
         if (enteringMask) return
         if (MaskOverlayHelper.isShowing()) return
         mainHandler.removeCallbacks(upgradeToMaskRunnable)

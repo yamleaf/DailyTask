@@ -1,27 +1,31 @@
 package com.pengxh.daily.app.shizuku
 
+import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.app.KeyguardManager
 import android.os.PowerManager
 import android.util.Log
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.ui.MainActivity
+import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.Constant
+import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
+import com.pengxh.daily.app.utils.TaskScheduler
 import com.yample.mqttprotocol.Protocol
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -77,6 +81,9 @@ object ShizukuActions {
 
     /** 是否有 Shizuku 操作正在执行 */
     val isRunning: Boolean get() = runningJob?.isActive == true
+
+    /** 当前操作展示名（仅 [isRunning] 时有意义），供打卡冲突跳过邮件引用 */
+    fun currentOperationTag(): String = if (isRunning) runningTag.ifBlank { "Shizuku操作" } else ""
 
     /**
      * 执行进度快照（供 UI 轮询）：空闲返回 null；执行中返回 (操作名, "第x/y步")。
@@ -142,6 +149,12 @@ object ShizukuActions {
         }
         Log.d(TAG, "Shizuku $tag 动作开始 mode=$mode")
 
+        // 打卡活跃窗口（定时等待打卡 / 远程 float 会话）：拒绝本操作，避免 force-stop 中途杀掉打卡目标
+        if (TaskScheduler.isInActivePunch()) {
+            feedback(resultType, "跳过：打卡进行中，请稍后再试")
+            return
+        }
+
         if (!actionMutex.tryLock()) {
             feedback(resultType, "跳过：已有 Shizuku 操作正在执行，请稍后再试")
             return
@@ -151,6 +164,18 @@ object ShizukuActions {
         runningTag = tag
         currentStep = 0
         totalSteps = 0
+        // Shizuku 操作依赖「屏幕常亮 + 目标 App 顶层可点击」：
+        //  1. 全程 keepAwakeForPunch（SCREEN_BRIGHT + 保亮窗口），验证码等待数十秒也不灭屏，否则 input tap 落空；
+        //  2. 摘除伪息屏蒙层（会拦截点击）。结束 finally 恢复蒙层并释放保亮。
+        val appCtx = context.applicationContext
+        val maskWasShowing = MaskOverlayHelper.isShowing()
+        IdlePseudoMaskController.keepAwakeForPunch(appCtx)
+        if (maskWasShowing) {
+            LogFileManager.writeLog("Shizuku 操作：临时摘除伪息屏蒙层，避免拦截自动化点击")
+            withContext(Dispatchers.Main) {
+                MaskOverlayHelper.hide(appCtx, MaskOverlayHelper.HideReason.TEMP_PUNCH)
+            }
+        }
         try {
             runFlow(context, mode, resultType, tag)
         } catch (e: CancellationException) {
@@ -169,6 +194,30 @@ object ShizukuActions {
             runCatching {
                 withContext(NonCancellable) { ShizukuShell.restoreAnimations() }
             }
+            // 恢复蒙层（操作前有蒙层才恢复）与释放打卡保亮，保证 Shizuku 结束后设备回到原屏幕状态。
+            // 恢复逻辑同打卡「伪息屏开关 + 屏幕模式」三态矩阵：伪息屏开/模式=伪息屏 → 保亮伪息屏；
+            // 模式=息屏 → 不保亮黑蒙层等系统超时；模式=亮屏 → 不恢复蒙层。
+            if (maskWasShowing) {
+                runCatching {
+                    withContext(NonCancellable) {
+                        withContext(Dispatchers.Main) {
+                            val pseudoOn = AppRuntimeConfig.isForcePseudoMask()
+                            val mode = AppRuntimeConfig.getScreenMode()
+                            when {
+                                pseudoOn || mode == Constant.SCREEN_MODE_PSEUDO ->
+                                    MaskOverlayHelper.show(appCtx)
+                                mode == Constant.SCREEN_MODE_OFF -> {
+                                    MaskOverlayHelper.show(appCtx, keepAwake = false)
+                                    LogFileManager.writeLog("Shizuku 结束：伪息屏关+模式息屏，盖不保亮黑蒙层等待系统超时灭屏")
+                                }
+                                else ->
+                                    LogFileManager.writeLog("Shizuku 结束：伪息屏关+模式亮屏，不恢复蒙层")
+                            }
+                        }
+                    }
+                }
+            }
+            runCatching { IdlePseudoMaskController.releaseKeepAwakeForPunch(appCtx) }
             actionMutex.unlock()
             // 清空执行状态（手动终止经 CancellationException 走 finally 同样清理）
             runningJob = null
@@ -224,15 +273,44 @@ object ShizukuActions {
         val locked = km?.isKeyguardLocked == true
         ShizukuShell.wakeAndUnlock(wakeIfNeeded = screenOff, swipeIfNeeded = locked)
 
-        // 2. 打开目标打卡 App
+        // 打卡可能在进入本流程后才启动：force-stop 前再拦一次
+        if (TaskScheduler.isInActivePunch()) {
+            feedback(resultType, "跳过：打卡进行中，请稍后再试")
+            return
+        }
+
+        // 2. 高级设置开关开启且 Shizuku 已授权时，先强制停止目标打卡应用再拉起：
+        //    - 密码登录失败改走验证码登录：必须杀进程回到初始页，坐标才与采集一致；
+        //    - 打卡前清后台：避免目标 App 常驻导致打卡记录/页面不刷新。
+        //    失败仍继续拉起（best-effort）。打卡侧若检测到本操作在跑会跳过本场并邮件通知。
+        try {
+            val killed = ShizukuShell.forceStopTargetIfEnabled()
+            if (killed) {
+                Log.d(TAG, "操作前已强制停止目标应用（开关开启）")
+            } else if (ShizukuShell.killTargetBeforeTaskEnabled()) {
+                Log.w(TAG, "操作前 force-stop 目标应用失败，继续尝试拉起")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "操作前 force-stop 目标应用异常（已忽略，继续执行）: ${e.message}")
+        }
+
+        // force-stop 耗时期间打卡可能已 tryMarkPunchBusy / 拉起：再拦一次，避免随后 launch 与打卡互踩
+        if (TaskScheduler.isInActivePunch()) {
+            feedback(resultType, "跳过：打卡进行中，请稍后再试")
+            return
+        }
+
+        // 3. 打开目标打卡 App
         if (!launchTargetApp(context)) {
             feedback(resultType, "$tag·失败：无法启动打卡应用")
             return
         }
-        // 略等 App 拉起（首步真正的等待在第 1 步执行前，默认 5s）
+        // 略等 App 拉起。force-stop 后冷启主要靠第 1 步默认约 5s 延迟（可配置），此处不加长等待。
         delay(500)
 
-        // 3. 执行步骤（全坐标点选，无需 dump 判定页面）
+        // 4. 执行步骤（全坐标点选，无需 dump 判定页面）
         val waitSeconds = when (mode) {
             MODE_LOGIN -> ShizukuConfigStore.verifyWaitSeconds()
             MODE_VERIFY_LOGIN -> ShizukuConfigStore.verifyWaitSeconds()
