@@ -40,6 +40,7 @@ import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.shizuku.ShizukuActions
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore
+import com.pengxh.daily.app.shizuku.ShizukuManager
 import com.pengxh.daily.app.shizuku.ShizukuVerifyCodeBus
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -563,7 +564,8 @@ class MqttAgentService : Service() {
         return try {
             // Android 15+ 对 dataSync/unknown 类 FGS 有 6h/24h 时间配额：常驻服务跑满即被系统停止，
             // 且重启 startForeground 全部被拒（08-18 K20 Pro 夜间离线根因：type unknown/dataSync 配额耗尽）。
-            // 显式传 specialUse（manifest 已声明 + FOREGROUND_SERVICE_SPECIAL_USE 权限 + property）不受时限。
+            // 故改版统一用 specialUse（manifest 已声明 + FOREGROUND_SERVICE_SPECIAL_USE 权限 + property），
+            // specialUse 无每日时限、且允许开机自启。Manifest 已移除 dataSync 类型与权限声明。
             // 三参 startForeground 自 API 29、SPECIAL_USE 类型自 API 34 才存在；
             // 低版本直调会 NoSuchMethodError（Error 不走 catch），故仅 API 34+ 用三参 specialUse
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -794,6 +796,7 @@ class MqttAgentService : Service() {
         when (packet.f) {
             Protocol.FIELD_VERIFY_CODE -> handleVerifyCodeDispatch(packet)
             Protocol.FIELD_SHIZUKU_CONFIG -> handleShizukuConfigDispatch(packet)
+            Protocol.FIELD_SHIZUKU_START -> handleShizukuStartDispatch(packet)
             Protocol.FIELD_SMS_SENT -> handleSmsSentDispatch(packet)
             Protocol.FIELD_RESULT_CONFIRM -> handleResultConfirmDispatch(packet)
             else -> handleUpdate(packet)
@@ -847,6 +850,26 @@ class MqttAgentService : Service() {
         if (json.isNullOrBlank()) { doPublishAck(packet.rid, "BAD_PAYLOAD"); return }
         ShizukuConfigStore.applyRemote(json)
         doPublishAck(packet.rid, "OK")
+    }
+
+    /** 控制端下发「激活 Shizuku」（FIELD_SHIZUKU_START）：验签 + 防重放 → 发广播拉起 Shizuku manager 启动 server */
+    private fun handleShizukuStartDispatch(packet: MqttPacket) {
+        val session = MqttSecureConfig.loadSession()
+        if (session.isBlank()) { doPublishAck(packet.rid, "UNBOUND"); return }
+        if (!verifyWithSession(packet, session)) { doPublishAck(packet.rid, "SIGN_FAIL"); return }
+        if (!acceptRid(packet.rid, packet.ts)) { doPublishAck(packet.rid, "DUP_OR_STALE"); return }
+        val want = (packet.v as? PacketValue.BooleanValue)?.b ?: false
+        if (!want) { doPublishAck(packet.rid, "BAD_PAYLOAD"); return }
+        // 发广播须在主线程之外避免阻塞服务；Shizuku 启动本身是异步的，这里只负责投递广播
+        val ok = ShizukuManager.requestRemoteStart(this)
+        CommandHistoryRecorder.record("控制端", "激活 Shizuku（广播拉起）")
+        if (ok) {
+            doPublishAck(packet.rid, "START_SENT")
+            Log.d(TAG, "已响应控制端「激活 Shizuku」，启动广播已投递")
+        } else {
+            doPublishAck(packet.rid, "START_FAIL")
+            Log.w(TAG, "激活 Shizuku 失败：官方/自定义 manager 均未安装")
+        }
     }
 
     private fun handleUpdate(packet: MqttPacket) {
