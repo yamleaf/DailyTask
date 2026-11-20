@@ -13,7 +13,6 @@
 
     <!-- 前台通知（通知栏常驻） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -71,11 +70,12 @@
 
         <service android:name=".service.FloatingWindowService" />
 
-        <!-- 远程控制 MQTT 代理（前台 dataSync 服务，常驻接收控制端指令） -->
+        <!-- 远程控制 MQTT 代理（前台 specialUse 服务，常驻接收控制端指令）。
+             dataSync 类型有 Android 15+ 的 6h/24h 配额限制，改版后已废弃，统一用 specialUse（无时限、可开机自启）。 -->
         <service
             android:name=".service.MqttAgentService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|dataSync">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="daily_task_mqtt" />
@@ -83,7 +83,7 @@
         <service
             android:name=".service.ForegroundRunningService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|dataSync">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="daily_task_scheduler" />
