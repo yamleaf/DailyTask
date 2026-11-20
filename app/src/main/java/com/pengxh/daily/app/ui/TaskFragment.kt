@@ -34,6 +34,7 @@ import com.pengxh.daily.app.utils.CustomWorkdayManager
 import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.utils.WatermarkDrawable
+import com.pengxh.daily.app.widget.ChainLineDecoration
 import com.pengxh.kt.lite.base.KotlinBaseFragment
 import com.pengxh.kt.lite.divider.RecyclerViewItemBorder
 import com.pengxh.kt.lite.extensions.convertColor
@@ -129,6 +130,8 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         binding.recyclerView.addItemDecoration(
             RecyclerViewItemBorder(marginOffset, marginOffset / 4, marginOffset, marginOffset / 4)
         )
+        // 链式任务轨道：节点连线（借鉴 master，节点着色由 Adapter 按执行进度驱动）
+        binding.recyclerView.addItemDecoration(ChainLineDecoration(requireContext()))
 
         binding.fabAddTask.setOnClickListener { showAddTaskSheet() }
 
@@ -483,7 +486,15 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     override fun onHiddenChanged(hidden: Boolean) {
         super.onHiddenChanged(hidden)
-        if (!hidden) refreshTaskListFromDb()
+        if (!hidden) {
+            // 重新可见：恢复每秒时钟刷新（隐藏期间已停，避免后台 Tab 空转浪费 CPU）
+            mainHandler.removeCallbacks(timeUpdateRunnable)
+            mainHandler.post(timeUpdateRunnable)
+            refreshTaskListFromDb()
+        } else {
+            // 隐藏：停止时钟 Runnable，避免隐藏 Tab 每秒空转执行日期格式化/节假日查询/adapter 刷新
+            mainHandler.removeCallbacks(timeUpdateRunnable)
+        }
     }
 
     override fun onDestroyView() {

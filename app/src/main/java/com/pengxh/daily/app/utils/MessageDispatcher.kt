@@ -183,7 +183,7 @@ object MessageDispatcher {
         }
         val body = buildString {
             append("<div style=\"max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;\">")
-            append("<div style=\"background:linear-gradient(135deg,#4f6ef7,#6c5ce7);padding:14px 20px;color:#fff;font-size:15px;font-weight:700;\">")
+            append("<div style=\"background:linear-gradient(135deg,#5B5BD6,#2C5F8A);padding:14px 20px;color:#fff;font-size:15px;font-weight:700;\">")
             append(escapeHtml(title.ifBlank { "通知" }))
             append("</div>")
             append("<div style=\"padding:16px 20px;font-size:13px;color:#333;line-height:1.7;white-space:pre-wrap;word-break:break-word;\">")

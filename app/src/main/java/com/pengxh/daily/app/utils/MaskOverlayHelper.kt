@@ -20,6 +20,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextClock
+import androidx.core.content.ContextCompat
 import androidx.core.content.res.ResourcesCompat
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.extensions.bringDailyTaskToFront
@@ -132,7 +133,7 @@ object MaskOverlayHelper {
             }
             val clock = TextClock(appCtx).apply {
                 format24Hour = "HH:mm"
-                setTextColor(0xB3FFFFFF.toInt())
+                setTextColor(ContextCompat.getColor(appCtx, R.color.white_70))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 56f)
                 runCatching {
                     typeface = ResourcesCompat.getFont(appCtx, R.font.ds_digital)

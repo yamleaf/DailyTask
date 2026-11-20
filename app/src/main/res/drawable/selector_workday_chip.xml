@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 选中：品牌主色浅容器底（tonal，与 alpha 设计语言一致） -->
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/md_primaryContainer" />
+            <corners android:radius="@dimen/radius_pill" />
+        </shape>
+    </item>
+    <!-- 未选中：浅灰底 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/md_surfaceContainerLow" />
+            <corners android:radius="@dimen/radius_pill" />
+        </shape>
+    </item>
+</selector>

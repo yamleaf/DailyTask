@@ -52,7 +52,7 @@ class CommandActivity : KotlinBaseActivity<ActivityCommandBinding>() {
                 if (item.third) {
                     cardView.setCardBackgroundColor(R.color.md_tertiary.convertColor(context))
                 } else {
-                    cardView.setCardBackgroundColor(R.color.orange.convertColor(context))
+                    cardView.setCardBackgroundColor(R.color.md_warning.convertColor(context))
                 }
             }
         }

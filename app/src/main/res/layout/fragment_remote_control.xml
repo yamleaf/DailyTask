@@ -72,7 +72,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="@dimen/dp_12"
                 android:visibility="gone"
-                app:cardBackgroundColor="#FFF3C1"
+                app:cardBackgroundColor="@color/md_warningContainer"
                 app:cardCornerRadius="@dimen/radius_card"
                 app:cardElevation="@dimen/elev_card"
                 app:strokeWidth="0dp">
@@ -88,7 +88,7 @@
                         android:layout_width="@dimen/size_28"
                         android:layout_height="@dimen/size_28"
                         android:src="@drawable/daily_ic_cancel_circle"
-                        app:tint="#8A6D00" android:contentDescription="@null" />
+                        app:tint="@color/md_warning" android:contentDescription="@null" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:id="@+id/idAlertBannerText"
@@ -97,20 +97,21 @@
                         android:layout_marginStart="@dimen/dp_12"
                         android:layout_weight="1"
                         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        android:textColor="#5B4A00" />
+                        android:textColor="@color/md_onWarningContainer" />
 
                     <TextView
                         android:id="@+id/idAlertBannerClose"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:background="?attr/selectableItemBackgroundBorderless"
-                        android:paddingStart="@dimen/dp_12"
-                        android:paddingTop="@dimen/dp_4"
-                        android:paddingEnd="@dimen/dp_4"
-                        android:paddingBottom="@dimen/dp_4"
+                        android:gravity="center"
+                        android:minWidth="40dp"
+                        android:minHeight="40dp"
+                        android:padding="8dp"
                         android:text="✕"
-                        android:textColor="#5B4A00"
-                        android:textSize="18sp" />
+                        android:textColor="@color/md_onWarningContainer"
+                        android:textSize="18sp"
+                        android:contentDescription="关闭提示" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

@@ -49,4 +49,10 @@
 
     <!--普通列表Item Layout高度-->
     <dimen name="itemLayoutHeight">60dp</dimen>
+
+    <!--链式任务列表轨道（借鉴 master，节点列宽 / 节点尺寸 / 节点中心偏移）-->
+    <dimen name="chain_track_width">24dp</dimen>
+    <dimen name="chain_dot_size">14dp</dimen>
+    <dimen name="chain_dot_center">34dp</dimen>
+    <dimen name="chain_dot_top">12dp</dimen>
 </resources>

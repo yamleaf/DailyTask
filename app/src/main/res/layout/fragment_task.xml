@@ -228,7 +228,7 @@
             android:layout_height="24dp"
             android:layout_gravity="center"
             android:src="@drawable/ic_menu_add"
-            app:tint="#333333"
+            app:tint="@color/md_onSurface"
             android:contentDescription="@null" />
     </FrameLayout>
 </FrameLayout>

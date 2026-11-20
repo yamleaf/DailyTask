@@ -42,6 +42,45 @@ fun DailyTaskBean.resolveExecutionTime(): String {
     return "${hour.appendZero()}:${minute.appendZero()}:${second.appendZero()}"
 }
 
+/**
+ * 随机时间窗口的展示值：开启随机时间时显示 "起始 - 结束"，如 "08:20 - 08:49"；
+ * 未开启随机时间返回 null（由调用方兜底）。
+ *
+ * 仅用于列表展示，不参与调度计算（调度用 [resolveExecutionTime] / [resolveExecutionSeconds]）。
+ *
+ * 末点必须与 [resolveExecutionSeconds] 的随机偏移精确对齐，否则展示会误导用户：
+ * 真实偏移 = random.nextInt(minuteRange)*60 + random.nextInt(60)，
+ * 即最晚执行时刻 = start + (minuteRange-1)*60 + 59 秒（再被当天 23:59:59 截断），
+ * 而非直观的 start + minuteRange*60（那会晚整一分钟）。
+ * */
+fun DailyTaskBean.resolveRandomTimeRange(): String? {
+    if (!SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)) return null
+
+    val minuteRange =
+        SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
+
+    val parts = time?.trim()?.split(":").orEmpty()
+    val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 0
+    val minute = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+    val second = parts.getOrNull(2)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+    val startSeconds = hour * 3600 + minute * 60 + second
+
+    fun format(totalSeconds: Int): String {
+        val h = totalSeconds / 3600
+        val m = (totalSeconds % 3600) / 60
+        return "${h.appendZero()}:${m.appendZero()}"
+    }
+
+    // 与 resolveExecutionSeconds 的随机算法精确对齐：最晚执行时刻 = start + (minuteRange-1)*60 + 59，
+    // 再被当天 23:59:59 截断；minuteRange<=0 时无分钟级偏移（仅剩 <=59s 秒级抖动，分钟粒度下与起始一致）。
+    val endSeconds = if (minuteRange > 0) {
+        minOf(startSeconds + (minuteRange - 1) * 60 + 59, MAX_SECONDS_OF_DAY)
+    } else {
+        startSeconds
+    }
+    return "${format(startSeconds)} - ${format(endSeconds)}"
+}
+
 private fun DailyTaskBean.resolveExecutionSeconds(): Int {
     val needRandom = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
 

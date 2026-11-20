@@ -1034,6 +1034,10 @@ private fun applyTabFromIntent(intent: Intent?) {
             )
         )
 
+        // 每次弹出前清空旧行，避免异常路径（未点「完成」就跳系统设置再回来）残留脏行导致
+        // refreshPermissionRows 遍历到已脱离弹窗的旧 TextView
+        permissionStatusRows.clear()
+
         items.forEach { perm ->
             val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL

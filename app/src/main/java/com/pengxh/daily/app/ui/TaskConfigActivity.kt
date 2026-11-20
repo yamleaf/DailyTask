@@ -8,6 +8,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.pengxh.daily.app.R
+import com.pengxh.daily.app.adapter.WorkdayAdapter
 import com.pengxh.daily.app.databinding.ActivityTaskConfigBinding
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.ConfigImportSignal
@@ -311,28 +312,31 @@ class TaskConfigActivity : KotlinBaseActivity<ActivityTaskConfigBinding>() {
     private fun showWorkdaySelector() {
         val orderedDays = CustomWorkdayManager.getOrderedDays()
         val selectedDays = CustomWorkdayManager.loadWorkdays().toMutableSet()
-        val labels = orderedDays.map { CustomWorkdayManager.getDayLabel(it) }.toList()
-        val checkedItems = orderedDays.map { it in selectedDays }.toBooleanArray()
+        val view = layoutInflater.inflate(R.layout.sheet_select_workday, null)
+        val dialog = com.google.android.material.bottomsheet.BottomSheetDialog(this)
+        dialog.setContentView(view)
 
-        UnifiedDialogKit.showMultiChoice(
-            this,
-            "选择工作日",
-            labels,
-            checkedItems,
-            onConfirm = { checked ->
-                val current = orderedDays.filterIndexed { index, _ -> checked[index] }.toSet()
-                if (current.isEmpty()) {
+        val adapter = WorkdayAdapter(selectedDays) {
+            "至少保留一天为工作日".show(this)
+        }
+        view.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recyclerView).adapter = adapter
+
+        view.findViewById<com.google.android.material.button.MaterialButton>(R.id.cancelButton)
+            .setOnClickListener { dialog.dismiss() }
+        view.findViewById<com.google.android.material.button.MaterialButton>(R.id.confirmButton)
+            .setOnClickListener {
+                if (selectedDays.isEmpty()) {
                     "至少保留一天为工作日".show(this)
-                    false
-                } else {
-                    val normalized = orderedDays.filter { it in current }.toSet()
-                    CustomWorkdayManager.saveWorkdays(normalized)
-                    updateCustomWorkdaySummary(normalized)
-                    ConfigImportSignal.notifyRemoteChanged(context)
-                    true
+                    return@setOnClickListener
                 }
+                val normalized = orderedDays.filter { it in selectedDays }.toSet()
+                CustomWorkdayManager.saveWorkdays(normalized)
+                updateCustomWorkdaySummary(normalized)
+                ConfigImportSignal.notifyRemoteChanged(context)
+                dialog.dismiss()
             }
-        )
+
+        dialog.show()
     }
 
     private fun updateCustomWorkdaySummary(workdays: Set<DayOfWeek>) {

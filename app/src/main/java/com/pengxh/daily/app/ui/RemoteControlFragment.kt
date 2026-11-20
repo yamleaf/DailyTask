@@ -1614,7 +1614,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val cSub = ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant) // #5b6470
         val cSurface = ContextCompat.getColor(ctx, R.color.md_surface)      // #FBF8FF
         val cOutline = ContextCompat.getColor(ctx, R.color.md_outlineVariant)
-        val cPrimary = ContextCompat.getColor(ctx, R.color.md_primary)       // #5B5BD6
+        val cPrimary = ContextCompat.getColor(ctx, R.color.md_primary)       // #2C5F8A（商务蓝）
         val cWarnBg = ContextCompat.getColor(ctx, R.color.md_warningContainer)
         val cWarnBorder = ContextCompat.getColor(ctx, R.color.md_warning)
         val cWarnText = ContextCompat.getColor(ctx, R.color.md_onWarningContainer)
@@ -1692,7 +1692,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
         val dip = { px: Int -> TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, px.toFloat(), resources.displayMetrics).toInt() }
         val cInk = ContextCompat.getColor(ctx, R.color.md_onSurface)
         val cSub = ContextCompat.getColor(ctx, R.color.md_onSurfaceVariant)
-        val cPrimary = ContextCompat.getColor(ctx, R.color.md_primary)       // #5B5BD6
+        val cPrimary = ContextCompat.getColor(ctx, R.color.md_primary)       // #2C5F8A（商务蓝）
         val cSurface = ContextCompat.getColor(ctx, R.color.md_surface)
         val cOutline = ContextCompat.getColor(ctx, R.color.md_outlineVariant)
         val cCodeBg = ContextCompat.getColor(ctx, R.color.md_surfaceContainer)
@@ -1714,7 +1714,7 @@ class RemoteControlFragment : KotlinBaseFragment<FragmentRemoteControlBinding>()
             }
             setPadding(dip(5), dip(1), dip(5), dip(1))
         }
-        fun tagLabel(content: String, bgColor: Int = ContextCompat.getColor(ctx, R.color.brand_purple_container), textColor: Int = cPrimary): TextView =
+        fun tagLabel(content: String, bgColor: Int = ContextCompat.getColor(ctx, R.color.brand_purple_container), textColor: Int = ContextCompat.getColor(ctx, R.color.brand_on_purple_container)): TextView =
             TextView(ctx).apply {
                 text = content; textSize = 11.5f; setTypeface(null, Typeface.BOLD)
                 setTextColor(textColor); background = GradientDrawable().apply {

@@ -32,9 +32,15 @@ import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import java.util.Date
 import java.util.Locale
+import com.pengxh.daily.app.utils.PunchCalendar.DayKind
+import com.pengxh.daily.app.utils.PunchCalendar.PunchCalendarData
 
 /**
  * 统一组装状态查询 / 任务通知正文。
+ *
+ * ⚠️ 邮件 HTML 内联色值（#2C5F8A / #5B5BD6 / #2E7D5B / #B8860B / #B5302A / #0E86B8 等）
+ * 必须与 :protocol 库 tokens.xml 的 md_* 令牌保持同步。改主色时请同时核对本文件内联 Hex，
+ * 避免邮件主题色与 App 内 UI 色板脱节。
  */
 object StatusReporter {
 
@@ -83,7 +89,7 @@ object StatusReporter {
         val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
         val now = System.currentTimeMillis()
         val pending = plans.filter { it.actualTimeMillis > now }
-        val cal = computePunchCalendar(14, 14)
+        val cal = PunchCalendar.compute(14, 14)
         return StatusReportData(battery, channelType, autoRecycle, resetHour, plans, now, pending, cal)
     }
 
@@ -354,10 +360,10 @@ object StatusReporter {
     /** 状态 Badge */
     private fun badge(text: String, type: String): String {
         val (bg, fg) = when (type) {
-            "ok" -> "#f6ffed" to "#389e0d"
-            "warn" -> "#fff7e6" to "#d46b08"
-            "err" -> "#fff2f0" to "#cf1322"
-            "info" -> "#e6f7ff" to "#096dd9"
+            "ok" -> "#f6ffed" to "#2E7D5B"
+            "warn" -> "#fff7e6" to "#B8860B"
+            "err" -> "#fff2f0" to "#B5302A"
+            "info" -> "#e6f7ff" to "#2C5F8A"
             "skip" -> "#f0f0f0" to "#8c8c8c"
             else -> "#f5f5f5" to "#595959"
         }
@@ -386,7 +392,7 @@ object StatusReporter {
             append("<body style=\"margin:0;padding:16px;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;\">")
             append("<div style=\"max-width:600px;margin:0 auto;\">")
             // Header
-            append("<div style=\"background:linear-gradient(135deg,#4f6ef7,#6c5ce7);padding:22px 24px;border-radius:12px 12px 0 0;\">")
+            append("<div style=\"background:linear-gradient(135deg,#2C5F8A,#5B5BD6);padding:22px 24px;border-radius:12px 12px 0 0;\">")
             append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\"><tr>")
             append("<td style=\"color:#fff;font-size:19px;font-weight:700;\">$title</td>")
             append("</tr><tr>")
@@ -410,7 +416,7 @@ object StatusReporter {
     private fun section(title: String, vararg rows: String): String {
         return buildString {
             append("<div style=\"margin-bottom:14px;\">")
-            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">$title</div>")
+            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #2C5F8A;\">$title</div>")
             append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\">")
             rows.forEach { append(it) }
             append("</table></div>")
@@ -459,7 +465,7 @@ object StatusReporter {
             remoteCommands.forEachIndexed { i, (cmd, desc) ->
                 val bg = if (i % 2 == 0) "#fafafa" else "#fff"
                 append("<tr style=\"background:$bg;\">")
-                append("<td style=\"padding:5px 8px;color:#4f6ef7;font-family:monospace;font-weight:500;white-space:nowrap;border-bottom:1px solid #f0f0f0;\">$cmd</td>")
+                append("<td style=\"padding:5px 8px;color:#2C5F8A;font-family:monospace;font-weight:500;white-space:nowrap;border-bottom:1px solid #f0f0f0;\">$cmd</td>")
                 append("<td style=\"padding:5px 8px;color:#555;border-bottom:1px solid #f0f0f0;\">$desc</td>")
                 append("</tr>")
             }
@@ -468,96 +474,8 @@ object StatusReporter {
     }
 
     // ======================== 近两周打卡日历 ========================
-
-    /** 日历中每一天的分类，用于精确表达「为什么这天打/不打」 */
-    private enum class DayKind {
-        PUNCHED,      // 已打卡（已确认）
-        TIMEOUT,      // 打卡超时（未确认成功，需人工核对截图）
-        MISSED,       // 未计划（已过计划工作日但无打卡记录，日历中以「未计划」展示）
-        SCHEDULED,    // 计划打卡（未来工作日）
-        MAKEUP,       // 调休补班（周末但需上班，会打卡）
-        HOLIDAY,      // 法定节假日，自动跳过
-        REST,         // 自定义休息日，自动跳过
-        NO_TASK,      // 未配置任务，无打卡计划
-        NOT_RUNNING   // 今天调度未启动，不会自动打卡（仅用于“今天”）
-    }
-
-    private data class PunchCalendarData(
-        val windowStart: LocalDate,
-        val windowEnd: LocalDate,
-        val today: LocalDate,
-        val scheduled: Set<LocalDate>,
-        val punched: Set<LocalDate>,
-        val timeoutDates: Set<LocalDate>,
-        val holidays: Set<LocalDate>,
-        val makeupWorkdays: Set<LocalDate>,
-        val restDays: Set<LocalDate>,
-        val customWorkdays: Set<DayOfWeek>,
-        val hasTasks: Boolean,
-        val skipHolidayEnabled: Boolean,
-        val autoRecycle: Boolean
-    )
-
-    /**
-     * 计算 [pastDays] 天前到 [futureDays] 天后窗口内的
-     * 计划打卡日、实际打卡日，以及每一天的跳过原因（节假日 / 调休补班 / 自定义休息日）。
-     */
-    private suspend fun computePunchCalendar(pastDays: Int, futureDays: Int): PunchCalendarData {
-        val today = LocalDate.now()
-        val windowStart = today.minusDays(pastDays.toLong())
-        val windowEnd = today.plusDays(futureDays.toLong())
-        val allTasks = withContext(Dispatchers.IO) {
-            DatabaseWrapper.loadAllTask()
-        }
-        val hasTasks = allTasks.isNotEmpty()
-        val skipHolidayEnabled = SaveKeyValues.loadBoolean(Constant.SKIP_HOLIDAY_KEY, true)
-        val autoRecycle = SaveKeyValues.loadBoolean(Constant.TASK_AUTO_RECYCLE_KEY, true)
-        val customWorkdays = CustomWorkdayManager.loadWorkdays()
-
-        val scheduled = mutableSetOf<LocalDate>()
-        val holidays = mutableSetOf<LocalDate>()
-        val makeupWorkdays = mutableSetOf<LocalDate>()
-        val restDays = mutableSetOf<LocalDate>()
-        var d = windowStart
-        while (!d.isAfter(windowEnd)) {
-            if (TaskScheduler.isPunchScheduled(d, allTasks)) scheduled.add(d)
-            if (skipHolidayEnabled && ChinaHolidayManager.isHoliday(d)) holidays.add(d)
-            if (ChinaHolidayManager.isWorkday(d)) makeupWorkdays.add(d)
-            if (d.dayOfWeek !in customWorkdays) restDays.add(d)
-            d = d.plusDays(1)
-        }
-        val result = withContext(Dispatchers.IO) {
-            DatabaseWrapper.loadPunchResults(windowStart, windowEnd.plusDays(1))
-        }
-        val punched = result.successDates
-        val timeoutDates = result.timeoutDates
-        return PunchCalendarData(
-            windowStart, windowEnd, today, scheduled, punched, timeoutDates,
-            holidays, makeupWorkdays, restDays, customWorkdays, hasTasks, skipHolidayEnabled,
-            autoRecycle
-        )
-    }
-
-    /** 今天是哪一类（供 HTML / 纯文本共用） */
-    private fun todayKind(cal: PunchCalendarData): DayKind {
-        val today = cal.today
-        val punched = today in cal.punched
-        val timedOut = today in cal.timeoutDates
-        val holiday = cal.skipHolidayEnabled && today in cal.holidays
-        val makeup = today in cal.makeupWorkdays
-        val customRest = today.dayOfWeek !in cal.customWorkdays
-        val schedulerRunning = TaskScheduler.isRunning()
-        return when {
-            punched -> DayKind.PUNCHED
-            timedOut -> DayKind.TIMEOUT
-            holiday -> DayKind.HOLIDAY
-            makeup -> if (schedulerRunning) DayKind.MAKEUP else DayKind.NOT_RUNNING
-            customRest -> DayKind.REST
-            !cal.hasTasks -> DayKind.NO_TASK
-            schedulerRunning -> DayKind.SCHEDULED
-            else -> DayKind.NOT_RUNNING
-        }
-    }
+    // 日历的日状态判定 / 取数逻辑统一收敛到 PunchCalendar（顶层 object），
+    // StatusReporter 仅负责把 PunchCalendar.DayKind 渲染成 HTML / 纯文本，避免两套判定分叉。
 
     private fun legendDot(color: String, label: String): String {
         return "<span style=\"display:inline-flex;align-items:center;gap:4px;\">" +
@@ -574,51 +492,23 @@ object StatusReporter {
 
     private fun calendarCell(date: LocalDate, cal: PunchCalendarData): String {
         val inWindow = !date.isBefore(cal.windowStart) && !date.isAfter(cal.windowEnd)
-        val punched = date in cal.punched
-        val timedOut = date in cal.timeoutDates && !punched
         val isToday = date == cal.today
-        val isPast = date.isBefore(cal.today)
-        val holiday = cal.skipHolidayEnabled && date in cal.holidays
-        val makeup = date in cal.makeupWorkdays
-        val customRest = date.dayOfWeek !in cal.customWorkdays
-        // 历史按已发生事实展示；今天看调度是否在跑；未来看每日循环是否开启（关闭则不会重启，未来不自动打卡）
-        val willSchedule = if (isPast) {
-            false
-        } else if (isToday) {
-            TaskScheduler.isRunning()
-        } else {
-            cal.autoRecycle
-        }
-
-        val kind = when {
-            punched -> DayKind.PUNCHED
-            timedOut -> DayKind.TIMEOUT
-            holiday -> DayKind.HOLIDAY
-            makeup -> when {
-                isPast && !punched -> DayKind.MISSED
-                willSchedule -> DayKind.MAKEUP
-                else -> DayKind.NOT_RUNNING
-            }
-            customRest -> DayKind.REST
-            !cal.hasTasks -> DayKind.NO_TASK
-            isPast -> DayKind.MISSED
-            willSchedule -> DayKind.SCHEDULED
-            else -> DayKind.NOT_RUNNING
-        }
+        // 日状态判定统一走 PunchCalendar.dayKindOf，避免此处与 todayKind 两套逻辑分叉
+        val kind = PunchCalendar.dayKindOf(date, cal)
 
         val (cellBg, dayColor, markHtml) = when (kind) {
             // 成功/超时/计划：实心圆点 + 白色图标，色相强对比、色盲友好，不依赖颜色也能一眼区分
-            DayKind.PUNCHED -> Triple("#ffffff", "#22c55e", dotMark("#22c55e", "✓"))
-            DayKind.TIMEOUT -> Triple("#ffffff", "#fa8c16", dotMark("#fa8c16", "☐"))
-            DayKind.SCHEDULED -> Triple("#ffffff", "#4f6ef7", dotMark("#4f6ef7", "❖"))
+            DayKind.PUNCHED -> Triple("#ffffff", "#2E7D5B", dotMark("#2E7D5B", "✓"))
+            DayKind.TIMEOUT -> Triple("#ffffff", "#B8860B", dotMark("#B8860B", "☐"))
+            DayKind.SCHEDULED -> Triple("#ffffff", "#2C5F8A", dotMark("#2C5F8A", "❖"))
             DayKind.MISSED -> Triple("#f5f5f5", "#9aa0a6", dotMark("#9aa0a6", "✗"))
-            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#ef4444", dotMark("#ef4444", "✗"))
-            DayKind.MAKEUP -> Triple("#f9f0ff", "#722ed1", textMark("#722ed1", "班"))
-            DayKind.HOLIDAY -> Triple("#e6f7ff", "#0ea5e9", textMark("#0ea5e9", "假"))
+            DayKind.NOT_RUNNING -> Triple("#fff1f0", "#B5302A", dotMark("#B5302A", "✗"))
+            DayKind.MAKEUP -> Triple("#f9f0ff", "#5B5BD6", textMark("#5B5BD6", "班"))
+            DayKind.HOLIDAY -> Triple("#e6f7ff", "#0E86B8", textMark("#0E86B8", "假"))
             DayKind.REST -> Triple("#e6f7f7", "#0e9b98", textMark("#0e9b98", "休"))
             DayKind.NO_TASK -> Triple("#fafafa", "#cfd3d6", textMark("#cfd3d6", "—"))
         }
-        val border = if (isToday) "border:2px solid #4f6ef7;" else "border:1px solid #eee;"
+        val border = if (isToday) "border:2px solid #2C5F8A;" else "border:1px solid #eee;"
         val opacity = if (inWindow) "1" else "0.35"
         val dayNum = date.dayOfMonth
         return "<td style=\"text-align:center;vertical-align:middle;\">" +
@@ -635,17 +525,17 @@ object StatusReporter {
 
         val sb = StringBuilder()
         sb.append("<div style=\"margin-bottom:14px;\">")
-        sb.append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">📅 打卡日历 <span style=\"font-weight:400;font-size:12px;color:#888;\">近两周（含未来两周）</span></div>")
+        sb.append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #2C5F8A;\">📅 打卡日历 <span style=\"font-weight:400;font-size:12px;color:#888;\">近两周（含未来两周）</span></div>")
         // 图例
         sb.append("<div style=\"font-size:11px;color:#888;margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap;\">")
-        sb.append(legendDot("#22c55e", "打卡成功"))
-        sb.append(legendDot("#fa8c16", "打卡超时"))
+        sb.append(legendDot("#2E7D5B", "打卡成功"))
+        sb.append(legendDot("#B8860B", "打卡超时"))
         sb.append(legendDot("#9aa0a6", "未计划(过去)"))
-        sb.append(legendDot("#4f6ef7", "计划打卡"))
-        sb.append(legendDot("#722ed1", "调休补班"))
-        sb.append(legendDot("#0ea5e9", "节假日"))
+        sb.append(legendDot("#2C5F8A", "计划打卡"))
+        sb.append(legendDot("#5B5BD6", "调休补班"))
+        sb.append(legendDot("#0E86B8", "节假日"))
         sb.append(legendDot("#0e9b98", "休息日"))
-        sb.append(legendDot("#ef4444", "未计划(今日/未来)"))
+        sb.append(legendDot("#B5302A", "未计划(今日/未来)"))
         sb.append("</div>")
         // 周网格
         sb.append("<table cellpadding=\"0\" cellspacing=\"4\" border=\"0\" width=\"100%\" style=\"font-size:12px;border-collapse:separate;\">")
@@ -669,7 +559,7 @@ object StatusReporter {
         val timeoutCount = cal.timeoutDates.count { !it.isAfter(cal.today) && it !in cal.punched }
         val scheduledPast = cal.scheduled.count { !it.isAfter(cal.today) }
         val missed = (scheduledPast - punchedCount - timeoutCount).coerceAtLeast(0)
-        val todayNotRunning = todayKind(cal) == DayKind.NOT_RUNNING
+        val todayNotRunning = PunchCalendar.dayKindOf(cal.today, cal) == DayKind.NOT_RUNNING
         val futureScheduled = cal.scheduled
             .filter { !it.isBefore(cal.today) }
             .let { list ->
@@ -680,9 +570,9 @@ object StatusReporter {
             .size
         sb.append("<div style=\"font-size:12px;color:#555;margin-top:8px;line-height:1.7;\">")
         sb.append("已打卡 <b>${punchedCount + timeoutCount}</b> 天 · 计划 <b>$futureScheduled</b> 天 · 未计划 <b style=\"color:#999;\">$missed</b> 天<br>")
-        sb.append("窗口内：节假日 <b style=\"color:#d46b08;\">${cal.holidays.size}</b> 天 · 休息日 <b>${cal.restDays.size}</b> 天 · 调休补班 <b style=\"color:#722ed1;\">${cal.makeupWorkdays.size}</b> 天")
+        sb.append("窗口内：节假日 <b style=\"color:#0E86B8;\">${cal.holidays.size}</b> 天 · 休息日 <b>${cal.restDays.size}</b> 天 · 调休补班 <b style=\"color:#5B5BD6;\">${cal.makeupWorkdays.size}</b> 天")
         if (!cal.autoRecycle) {
-            sb.append("<br><span style=\"color:#cf1322;\">⚠️ 每日循环已关闭，未来日期不会自动打卡（已标红「未计划」）</span>")
+            sb.append("<br><span style=\"color:#B5302A;\">⚠️ 每日循环已关闭，未来日期不会自动打卡（已标红「未计划」）</span>")
         }
         sb.append("</div>")
         // 今日明确说明
@@ -693,7 +583,7 @@ object StatusReporter {
 
     /** 今日是否会自动打卡的明确说明，避免「停止循环没成功误打卡」类问题 */
     private fun todayCalendarNote(cal: PunchCalendarData): String {
-        val kind = todayKind(cal)
+        val kind = PunchCalendar.dayKindOf(cal.today, cal)
         val text = when (kind) {
             DayKind.PUNCHED -> "今日打卡成功"
             DayKind.TIMEOUT -> "今日打卡超时（未确认成功，请查收截图邮件手动核对）"
@@ -720,7 +610,7 @@ object StatusReporter {
 
     /** 纯文本邮件的今日说明 */
     private fun buildTodayTextNote(cal: PunchCalendarData): String {
-        val kind = todayKind(cal)
+        val kind = PunchCalendar.dayKindOf(cal.today, cal)
         val base = when (kind) {
             DayKind.PUNCHED -> "打卡成功"
             DayKind.TIMEOUT -> "打卡超时（未确认成功）"
@@ -818,7 +708,7 @@ object StatusReporter {
             append("</div>")
 
             // 电量
-            val batColor = when { d.battery < 0 -> "#999"; d.battery < 30 -> "#f5222d"; d.battery < 60 -> "#fa8c16"; else -> "#52c41a" }
+            val batColor = when { d.battery < 0 -> "#999"; d.battery < 30 -> "#B5302A"; d.battery < 60 -> "#B8860B"; else -> "#2E7D5B" }
             append("<div style=\"flex:1;min-width:120px;background:#f9fafc;border-radius:8px;padding:10px 12px;text-align:center;\">")
             append("<div style=\"font-size:11px;color:#888;margin-bottom:4px;\">当前电量</div>")
             append("<div style=\"font-size:20px;font-weight:700;color:$batColor;\">${if (d.battery >= 0) "${d.battery}%" else "—"}</div>")
@@ -868,7 +758,7 @@ object StatusReporter {
                 }
             }
             append("<div style=\"margin-bottom:14px;\">")
-            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">$taskHeader</div>")
+            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #2C5F8A;\">$taskHeader</div>")
             append(taskPlanTable(d.plans, d.now))
             append("</div>")
 
@@ -940,7 +830,7 @@ object StatusReporter {
             append("<div style=\"display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;\">")
             append("<div style=\"flex:1;min-width:100px;background:#f9fafc;border-radius:8px;padding:10px 12px;text-align:center;\">")
             append("<div style=\"font-size:11px;color:#888;margin-bottom:2px;\">当前进度</div>")
-            append("<div style=\"font-size:22px;font-weight:700;color:#4f6ef7;\">$index<span style=\"font-size:14px;color:#999;\">/$total</span></div>")
+            append("<div style=\"font-size:22px;font-weight:700;color:#2C5F8A;\">$index<span style=\"font-size:14px;color:#999;\">/$total</span></div>")
             append("</div>")
             append("<div style=\"flex:1;min-width:100px;background:#f9fafc;border-radius:8px;padding:10px 12px;text-align:center;\">")
             append("<div style=\"font-size:11px;color:#888;margin-bottom:2px;\">计划时间</div>")
@@ -948,7 +838,7 @@ object StatusReporter {
             append("</div>")
             append("<div style=\"flex:1;min-width:100px;background:#f9fafc;border-radius:8px;padding:10px 12px;text-align:center;\">")
             append("<div style=\"font-size:11px;color:#888;margin-bottom:2px;\">实际时间</div>")
-            append("<div style=\"font-size:15px;color:#6c5ce7;font-weight:500;\">$actualTime</div>")
+            append("<div style=\"font-size:15px;color:#5B5BD6;font-weight:500;\">$actualTime</div>")
             append("</div>")
             append("</div>")
 
@@ -956,7 +846,7 @@ object StatusReporter {
             val pct = if (total > 0) (index * 100 / total) else 0
             append("<div style=\"margin-bottom:14px;\">")
             append("<div style=\"background:#f0f0f0;border-radius:4px;height:6px;overflow:hidden;\">")
-            append("<div style=\"background:linear-gradient(90deg,#4f6ef7,#6c5ce7);height:6px;width:${pct}%;border-radius:4px;\"></div>")
+            append("<div style=\"background:linear-gradient(90deg,#2C5F8A,#5B5BD6);height:6px;width:${pct}%;border-radius:4px;\"></div>")
             append("</div>")
             append("<div style=\"font-size:11px;color:#888;text-align:right;margin-top:3px;\">${pct}% 已完成</div>")
             append("</div>")
@@ -968,7 +858,7 @@ object StatusReporter {
                 }
             }
             append("<div style=\"margin-bottom:14px;\">")
-            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">$taskHeader</div>")
+            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #2C5F8A;\">$taskHeader</div>")
             append(taskPlanTable(plans, now))
             append("</div>")
 
@@ -998,7 +888,7 @@ object StatusReporter {
             // 完成提示
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">✅</div>")
-            append("<div style=\"font-size:16px;font-weight:600;color:#52c41a;margin-bottom:4px;\">本轮任务已全部执行完毕</div>")
+            append("<div style=\"font-size:16px;font-weight:600;color:#2E7D5B;margin-bottom:4px;\">本轮任务已全部执行完毕</div>")
             append("<div style=\"font-size:12px;color:#888;\">距下次重置 ${TaskScheduler.secondsUntilNextReset().formatTime()}</div>")
             append("</div>")
 
@@ -1008,7 +898,7 @@ object StatusReporter {
 
             val taskHeader = "📋 已完成任务 <span style=\"font-weight:400;font-size:12px;color:#888;\">共 ${plans.size} 个</span>"
             append("<div style=\"margin-bottom:14px;\">")
-            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">$taskHeader</div>")
+            append("<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #2C5F8A;\">$taskHeader</div>")
             append(taskPlanTable(plans, System.currentTimeMillis()))
             append("</div>")
         }
@@ -1021,7 +911,7 @@ object StatusReporter {
         val body = buildString {
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">🏖️</div>")
-            append("<div style=\"font-size:16px;font-weight:600;color:#fa8c16;margin-bottom:4px;\">节假日/休息日</div>")
+            append("<div style=\"font-size:16px;font-weight:600;color:#B8860B;margin-bottom:4px;\">节假日/休息日</div>")
             append("<div style=\"font-size:13px;color:#888;\">任务已自动跳过</div>")
             append("</div>")
         }
@@ -1030,7 +920,7 @@ object StatusReporter {
 
     @JvmStatic
     fun buildLowBatteryContentHtml(battery: Int, threshold: Int, stage: Int): String {
-        val batColor = if (battery < 15) "#f5222d" else "#fa8c16"
+        val batColor = if (battery < 15) "#B5302A" else "#B8860B"
         val pct = battery.coerceIn(0, 100)
         val bound = threshold - (stage - 1) * 10
 
@@ -1076,7 +966,7 @@ object StatusReporter {
         val body = buildString {
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">⚡</div>")
-            append("<div style=\"font-size:28px;font-weight:700;color:#52c41a;\">$battery%</div>")
+            append("<div style=\"font-size:28px;font-weight:700;color:#2E7D5B;\">$battery%</div>")
             append("<div style=\"font-size:13px;color:#888;margin-top:2px;\">设备已接入电源</div>")
             append("</div>")
             append("<div style=\"font-size:13px;color:#555;line-height:1.6;\">")
@@ -1230,7 +1120,7 @@ object StatusReporter {
             null
         }
         val body = buildString {
-            append(centerHeader("✅", "#52c41a", "打卡成功", "无障碍文本识别"))
+            append(centerHeader("✅", "#2E7D5B", "打卡成功", "无障碍文本识别"))
             append("<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">应用来源</td><td style=\"font-size:12px;color:#333;text-align:right;\">$appName</td></tr>")
             if (clockInText != null) {
@@ -1239,7 +1129,7 @@ object StatusReporter {
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">匹配关键词</td><td style=\"font-size:12px;color:#333;text-align:right;\">$keyword</td></tr>")
             append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;vertical-align:top;\">识别摘要</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">${snippet.ifBlank { "—" }}</td></tr>")
             if (!extra.isNullOrBlank()) {
-                append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">备注</td><td style=\"font-size:12px;color:#cf1322;text-align:right;\">$extra</td></tr>")
+                append("<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">备注</td><td style=\"font-size:12px;color:#B5302A;text-align:right;\">$extra</td></tr>")
             }
             append("</table>")
         }
@@ -1252,7 +1142,7 @@ object StatusReporter {
         // title/notice 来自第三方通知文本，含 < > & 时若不转义会破坏 HTML 排版甚至注入标签/像素追踪
         val t = escapeHtml(title.ifBlank { "—" })
         val n = escapeHtml(notice.ifBlank { "—" })
-        val body = centerHeader("✅", "#52c41a", "打卡成功") +
+        val body = centerHeader("✅", "#2E7D5B", "打卡成功") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;\">$t</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知内容</td><td style=\"font-size:12px;color:#333;text-align:right;\">$n</td></tr>" +
@@ -1272,7 +1162,7 @@ object StatusReporter {
         val a = escapeHtml(appName.ifBlank { "未知应用" })
         val t = escapeHtml(title.ifBlank { "—" })
         val c = escapeHtml(content.ifBlank { "—" })
-        val body = centerHeader("📨", "#1677ff", "通知转移", "$a 的通知已转发到本机") +
+        val body = centerHeader("📨", "#2C5F8A", "通知转移", "$a 的通知已转发到本机") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-bottom:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">来源应用</td><td style=\"font-size:12px;color:#333;text-align:right;\">$a</td></tr>" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">通知标题</td><td style=\"font-size:12px;color:#333;text-align:right;word-break:break-all;\">$t</td></tr>" +
@@ -1293,7 +1183,7 @@ object StatusReporter {
     @JvmStatic
     fun buildStopTaskHtml(): String {
         val battery = batteryCap()
-        val body = centerHeader("⏹️", "#fa8c16", "任务调度已停止", "请及时在下次任务前重新启动") +
+        val body = centerHeader("⏹️", "#B8860B", "任务调度已停止", "请及时在下次任务前重新启动") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
@@ -1303,7 +1193,7 @@ object StatusReporter {
     @JvmStatic
     fun buildCycleStatusHtml(enabled: Boolean): String {
         val icon = if (enabled) "🔄" else "⏸️"
-        val color = if (enabled) "#52c41a" else "#fa8c16"
+        val color = if (enabled) "#2E7D5B" else "#B8860B"
         val label = if (enabled) "每日循环已开启" else "每日循环已关闭"
         val tip = if (enabled) "每天重置时将自动启动调度" else "需手动或远程启动调度"
         val battery = batteryCap()
@@ -1322,7 +1212,7 @@ object StatusReporter {
     @JvmStatic
     fun buildTransferStatusHtml(enabled: Boolean, warning: String?): String {
         val icon = if (enabled) "📨" else "🔕"
-        val color = if (enabled) "#1677ff" else "#fa8c16"
+        val color = if (enabled) "#2C5F8A" else "#B8860B"
         val label = if (enabled) "通知转移已开启" else "通知转移已关闭"
         val tip = if (enabled) "目标打卡应用通知将经现有渠道转发到目标手机" else "不再转发打卡应用通知"
         val battery = batteryCap()
@@ -1364,7 +1254,7 @@ object StatusReporter {
                 append("</table>")
             }
         }
-        val body = "<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #4f6ef7;\">" +
+        val body = "<div style=\"font-size:14px;font-weight:600;color:#1a1a1a;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #2C5F8A;\">" +
                 "📋 今日打卡记录 <span style=\"font-weight:400;font-size:12px;color:#888;\">共 ${lines.size} 条</span>" +
                 "</div>" + tableBody
         return pageShell("📋 考勤记录", body, compact = true)
@@ -1373,9 +1263,9 @@ object StatusReporter {
     @JvmStatic
     fun buildScreenshotResultHtml(success: Boolean, detail: String): String {
         val (icon, color, label) = if (success) {
-            Triple("📸", "#52c41a", "截图成功")
+            Triple("📸", "#2E7D5B", "截图成功")
         } else {
-            Triple("❌", "#cf1322", "截图失败")
+            Triple("❌", "#B5302A", "截图失败")
         }
         val body = centerHeader(icon, color, label, detail)
         return pageShell("📸 截屏通知", body, compact = true)
@@ -1383,14 +1273,14 @@ object StatusReporter {
 
     @JvmStatic
     fun buildTimeoutAlertHtml(alertTitle: String, detail: String): String {
-        val body = centerHeader("⚠️", "#cf1322", alertTitle, detail)
+        val body = centerHeader("⚠️", "#B5302A", alertTitle, detail)
         return pageShell("⚠️ 超时提醒", body, compact = true)
     }
 
     @JvmStatic
     fun buildMemoryAlertHtml(): String {
         val battery = batteryCap()
-        val body = centerHeader("💾", "#cf1322", "内存使用已超过 90%", "请关注设备运行情况，必要时重启释放内存") +
+        val body = centerHeader("💾", "#B5302A", "内存使用已超过 90%", "请关注设备运行情况，必要时重启释放内存") +
                 "<table cellpadding=\"0\" cellspacing=\"0\" border=\"0\" width=\"100%\" style=\"margin-top:8px;\">" +
                 "<tr><td style=\"font-size:12px;color:#888;padding:3px 0;\">设备电量</td><td style=\"font-size:12px;color:#333;text-align:right;\">$battery</td></tr>" +
                 "</table>"
@@ -1521,7 +1411,7 @@ object StatusReporter {
         val body = buildString {
             append("<div style=\"text-align:center;padding:16px 0 10px;\">")
             append("<div style=\"font-size:40px;margin-bottom:8px;\">👆</div>")
-            append("<div style=\"font-size:16px;font-weight:600;color:#4f6ef7;margin-bottom:4px;\">远程打卡指令已执行</div>")
+            append("<div style=\"font-size:16px;font-weight:600;color:#2C5F8A;margin-bottom:4px;\">远程打卡指令已执行</div>")
             append("<div style=\"font-size:13px;color:#888;line-height:1.7;\">")
             append("正在打开目标应用，请在 <b style=\"color:#333;\">$timeoutText</b> 内完成打卡操作")
             append("</div>")
@@ -1535,7 +1425,7 @@ object StatusReporter {
     fun buildTestEmailHtml(): String {
         val body = "<div style=\"text-align:center;padding:16px 0 10px;\">" +
                 "<div style=\"font-size:40px;margin-bottom:8px;\">📧</div>" +
-                "<div style=\"font-size:16px;font-weight:600;color:#4f6ef7;margin-bottom:4px;\">邮件通道测试</div>" +
+                "<div style=\"font-size:16px;font-weight:600;color:#2C5F8A;margin-bottom:4px;\">邮件通道测试</div>" +
                 "<div style=\"font-size:13px;color:#888;line-height:1.7;\">这是一封测试邮件，不必关注。<br>若你能看到此卡片样式，说明 HTML 邮件发送正常。</div>" +
                 "</div>"
         return pageShell("📧 邮箱测试", body, compact = false)
