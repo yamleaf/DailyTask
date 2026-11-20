@@ -14,6 +14,7 @@ import com.pengxh.daily.app.shizuku.ShizukuRuntime
 import com.pengxh.daily.app.utils.AppRuntimeConfig
 import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
+import com.pengxh.daily.app.work.HolidaySyncScheduler
 import com.pengxh.kt.lite.base.ForegroundIdleBridge
 import com.yample.mqttprotocol.dialog.DialogIdleBridge
 import com.pengxh.daily.app.utils.EmailManager
@@ -102,6 +103,11 @@ class DailyTaskApplication : Application() {
             }
         }
         ConfigStore.init(file.absolutePath)
+
+        // 节假日周期刷新下沉 WorkManager（方向 B feasibility probe）：
+        // 注册 24h 周期刷新，幂等（KEEP）。仅新增一条后台自动刷新路径，
+        // 与 SettingsFragment 手动刷新、控制端指令刷新并存，降低掉电率。
+        HolidaySyncScheduler.schedule(this)
 
         dataBase = databaseBuilder(this, DailyTaskDataBase::class.java, "DailyTask.db")
             // v1→v2：任务表新增 name 列（多任务命名），用正式 Migration 保留既有任务数据

@@ -228,22 +228,35 @@ android {
     }
 
     // ==== 签名：优先使用外部 Secret（CI 注入），未定义则回退仓库内置默认 jks ====
-    // 统一 Secret 命名（GitHub repository secret，与 Shizuku app.yml 一致）：
-    // KEY_STORE / KEY_STORE_PASSWORD / ALIAS / KEY_PASSWORD。
-    // 只要定义了 KEY_STORE 就启用外部签名（workflow 已把 base64 解码覆盖到 DailyTask.jks）；
-    // 未定义时使用仓库内置的 DailyTask.jks（密码 123456789 / 别名 key0）。
+    // ==== 签名优先级：本地 signing.properties（正式密钥） > 环境变量 Secret（CI） > 仓库内置临时 jks（兜底） ====
+    // 1) 本地 signing.properties 存在时，用正式发布密钥（C:\AI_Tools\signing\yamleaf.jks，别名 yamleaf）。
+    //    该文件不入库（.gitignore 已忽略），密码不提交。
+    // 2) 否则回退 CI Secret（KEY_STORE / KEY_STORE_PASSWORD / ALIAS / KEY_PASSWORD，与 Shizuku app.yml 一致）。
+    // 3) 再回退仓库内置临时 DailyTask.jks（密码 123456789 / 别名 key0，仅供无正式密钥时本地调试）。
+    def signingProps = new Properties()
+    def signingPropsFile = rootProject.file('signing.properties')
+    def ksUseLocal = signingPropsFile.exists()
+    if (ksUseLocal) {
+        signingPropsFile.withInputStream { signingProps.load(it) }
+    }
     def ksSecretBase64 = System.getenv('KEY_STORE')
     def ksUseSecret = (ksSecretBase64 != null && !ksSecretBase64.isEmpty())
     def ksSecretPass = System.getenv('KEY_STORE_PASSWORD')
     def ksSecretKeyPass = System.getenv('KEY_PASSWORD')
     def ksSecretAlias = System.getenv('ALIAS')
-    def ksStorePass = ksUseSecret ? (ksSecretPass ?: '123456789') : '123456789'
-    def ksKeyPass = ksUseSecret ? (ksSecretKeyPass ?: '123456789') : '123456789'
-    def ksKeyAlias = ksUseSecret ? (ksSecretAlias ?: 'key0') : 'key0'
+
+    def ksStoreFile = ksUseLocal ? signingProps.getProperty('storeFile', 'DailyTask.jks')
+            : 'DailyTask.jks'
+    def ksStorePass = ksUseLocal ? signingProps.getProperty('storePassword', '123456789')
+            : (ksUseSecret ? (ksSecretPass ?: '123456789') : '123456789')
+    def ksKeyPass = ksUseLocal ? signingProps.getProperty('keyPassword', '123456789')
+            : (ksUseSecret ? (ksSecretKeyPass ?: '123456789') : '123456789')
+    def ksKeyAlias = ksUseLocal ? signingProps.getProperty('keyAlias', 'key0')
+            : (ksUseSecret ? (ksSecretAlias ?: 'key0') : 'key0')
 
     signingConfigs {
         release {
-            storeFile file('DailyTask.jks')
+            storeFile file(ksStoreFile)
             storePassword ksStorePass
             keyAlias ksKeyAlias
             keyPassword ksKeyPass
@@ -354,4 +367,6 @@ dependencies {
         println "> 引入自定义 Shizuku api 库: ${customShizukuLib}"
         implementation files(customShizukuLib)
     }
+    // 节假日周期刷新下沉 WorkManager（feasibility probe）：非紧急周期任务交给系统批量调度以省电
+    implementation 'androidx.work:work-runtime-ktx:2.10.0'
 }
