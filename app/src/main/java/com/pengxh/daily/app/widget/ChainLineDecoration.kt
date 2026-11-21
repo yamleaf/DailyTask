@@ -34,7 +34,7 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
     /** 缓存 PowerManager，避免每帧 getSystemService 开销导致掉帧 */
     private val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
 
-    private val pulseColor = ContextCompat.getColor(context, R.color.md_primary)
+    private val pulseColor = Color.parseColor("#40C4FF")
 
     /**
      * 轨道列中心 x 偏移（相对 item 左边缘）
@@ -60,10 +60,20 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         color = ContextCompat.getColor(context, R.color.md_warning)
     }
 
-    // 流动脉冲：白色高光核心 + 主题蓝半透明光晕 + 渐隐彗尾
-    private val flowGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // 流动脉冲：多层光晕（模拟发光）+ 白色高光核心 + 渐隐彗尾
+    private val glowOuterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = ColorUtils.setAlphaComponent(pulseColor, 0x40)
+        color = ColorUtils.setAlphaComponent(pulseColor, 0x18)
+    }
+
+    private val glowMidPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = ColorUtils.setAlphaComponent(pulseColor, 0x38)
+    }
+
+    private val glowInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = ColorUtils.setAlphaComponent(pulseColor, 0x66)
     }
 
     private val flowCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -193,9 +203,11 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             val r = 2f * density * (1f - frac * 0.5f)
             canvas.drawCircle(x, y, r, trailPaint)
         }
-        // 光点：光晕 + 白色核心
-        canvas.drawCircle(x, pulseY, 6f * density, flowGlowPaint)
-        canvas.drawCircle(x, pulseY, 2.2f * density, flowCorePaint)
+        // 光点：多层光晕（模拟发光）+ 白色高光核心
+        canvas.drawCircle(x, pulseY, 9f * density, glowOuterPaint)
+        canvas.drawCircle(x, pulseY, 5.5f * density, glowMidPaint)
+        canvas.drawCircle(x, pulseY, 3.2f * density, glowInnerPaint)
+        canvas.drawCircle(x, pulseY, 1.8f * density, flowCorePaint)
     }
 
     companion object {
