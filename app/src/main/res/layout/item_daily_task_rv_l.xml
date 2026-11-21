@@ -10,6 +10,16 @@
         android:layout_width="@dimen/chain_track_width"
         android:layout_height="match_parent">
 
+        <!-- 扩散光圈（执行中雷达波纹）：默认透明不可见，动画时 alpha/scale 由代码驱动 -->
+        <View
+            android:id="@+id/chainRippleView"
+            android:layout_width="@dimen/chain_dot_size"
+            android:layout_height="@dimen/chain_dot_size"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="@dimen/chain_dot_top"
+            android:background="@drawable/shape_chain_dot"
+            android:alpha="0" />
+
         <View
             android:id="@+id/chainDotView"
             android:layout_width="@dimen/chain_dot_size"
@@ -20,6 +30,7 @@
     </FrameLayout>
 
     <com.google.android.material.card.MaterialCardView
+        android:id="@+id/taskCardView"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"

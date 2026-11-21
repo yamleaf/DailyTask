@@ -1,19 +1,33 @@
 package com.pengxh.daily.app.widget
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
+import android.os.PowerManager
+import android.view.animation.LinearInterpolator
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.RecyclerView
 import com.pengxh.daily.app.R
+import com.pengxh.daily.app.utils.MaskOverlayHelper
 
 /**
  * 链式任务列表的连线：从上一个节点的中心，一直画到下一个节点的中心。
  *
  * 借鉴 master 分支的 ChainLineDecoration，轨道线颜色改用主题描边色，
  * 与 alpha 现有的 md 色系保持一致。
+ *
+ * 连线状态化：相邻两节点都已过点（时间已走过的轨迹）时，线段用琥珀色；
+ * 其余用描边灰。状态由 Adapter 在 bind 时写入 itemView 的 keyed tag（[TAG_PASSED]）。
+ *
+ * 流动脉冲：当存在 2 个及以上节点时，一个亮色光点沿连线从第一个节点依次流向下一个，
+ * 循环往复，形成「能量沿时间轴流动」的视觉。动画在首次 onDraw 时惰性启动。
  * */
 class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
+
+    private val appContext = context.applicationContext
 
     private val density = context.resources.displayMetrics.density
 
@@ -27,14 +41,69 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
      * */
     private val dotCenter = context.resources.getDimension(R.dimen.chain_dot_center)
 
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val normalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeWidth = 1 * density
         color = ContextCompat.getColor(context, R.color.md_outlineVariant)
     }
 
+    private val passedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeWidth = 1 * density
+        color = ContextCompat.getColor(context, R.color.md_warning)
+    }
+
+    // 流动脉冲光点：白色高光核心 + 主题蓝半透明光晕
+    private val flowGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = ColorUtils.setAlphaComponent(
+            ContextCompat.getColor(context, R.color.md_primary), 0x40
+        )
+    }
+
+    private val flowCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
+    }
+
+    private var host: RecyclerView? = null
+
+    /** 流动进度 0→1：0 = 第一个节点，1 = 最后一个节点，循环 */
+    private var flowProgress = 0f
+
+    private val flowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 1800
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = LinearInterpolator()
+        addUpdateListener { anim ->
+            // 息屏 / 伪息屏时自停省电；亮屏后由 onDraw 重新拉起
+            if (!isScreenActuallyOn()) {
+                anim.cancel()
+                return@addUpdateListener
+            }
+            flowProgress = anim.animatedValue as Float
+            host?.invalidateItemDecorations()
+        }
+    }
+
+    /** 真正亮屏可见：物理屏幕交互中 且 无伪息屏黑蒙层覆盖 */
+    private fun isScreenActuallyOn(): Boolean {
+        val pm = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val interactive = pm?.isInteractive ?: true
+        return interactive && !MaskOverlayHelper.isShowing()
+    }
+
     override fun onDraw(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+        if (host !== parent) host = parent
+
+        // 亮屏时确保流动动画运行（息屏/伪息屏时动画已在 updateListener 里自停，此处不重拉）
+        val screenOn = isScreenActuallyOn()
+        if (screenOn && !flowAnimator.isStarted) {
+            flowAnimator.start()
+        }
+
         val count = parent.childCount
         if (count < 2) return
 
@@ -46,8 +115,66 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             if (pos == RecyclerView.NO_POSITION || nextPos == RecyclerView.NO_POSITION) continue
             if (nextPos != pos + 1) continue // 相邻两屏内 item 不连续时跳过
 
+            val childPassed = child.getTag(TAG_PASSED) as? Boolean ?: false
+            val nextPassed = next.getTag(TAG_PASSED) as? Boolean ?: false
+            val paint = if (childPassed && nextPassed) passedPaint else normalPaint
+
             val x = child.left + trackOffset
             canvas.drawLine(x, child.top + dotCenter, x, next.top + dotCenter, paint)
         }
+
+        if (screenOn) {
+            drawFlowPulse(canvas, parent)
+        }
+    }
+
+    /**
+     * 沿连线绘制流动光点：先收集可见区内的相邻线段，按总长度把 [flowProgress] 映射到
+     * 具体 y 位置，画「光晕 + 高光核心」两层，形成能量流动效果。
+     * */
+    private fun drawFlowPulse(canvas: Canvas, parent: RecyclerView) {
+        val count = parent.childCount
+        if (count < 2) return
+
+        // 收集可见线段（相邻连续 item 的节点连线）：(startY, endY)
+        val segments = ArrayList<FloatArray>(count - 1)
+        var totalLen = 0f
+        for (i in 0 until count - 1) {
+            val child = parent.getChildAt(i)
+            val next = parent.getChildAt(i + 1)
+            val pos = parent.getChildAdapterPosition(child)
+            val nextPos = parent.getChildAdapterPosition(next)
+            if (pos == RecyclerView.NO_POSITION || nextPos == RecyclerView.NO_POSITION) continue
+            if (nextPos != pos + 1) continue
+
+            val startY = child.top + dotCenter
+            val endY = next.top + dotCenter
+            if (endY <= startY) continue
+            segments.add(floatArrayOf(startY, endY))
+            totalLen += endY - startY
+        }
+        if (segments.isEmpty() || totalLen <= 0f) return
+
+        val target = flowProgress * totalLen
+        var acc = 0f
+        var pulseY = segments[0][0]
+        for (seg in segments) {
+            val segLen = seg[1] - seg[0]
+            if (target <= acc + segLen) {
+                val frac = if (segLen > 0f) (target - acc) / segLen else 0f
+                pulseY = seg[0] + frac * segLen
+                break
+            }
+            acc += segLen
+        }
+
+        val x = parent.getChildAt(0).left + trackOffset
+        canvas.drawCircle(x, pulseY, 6f * density, flowGlowPaint)
+        canvas.drawCircle(x, pulseY, 2.5f * density, flowCorePaint)
+    }
+
+    companion object {
+        /** itemView keyed tag 的 key：存「是否已过点」布尔，供连线状态化用 */
+        const val TAG_PASSED = R.id.taskCardView
     }
 }

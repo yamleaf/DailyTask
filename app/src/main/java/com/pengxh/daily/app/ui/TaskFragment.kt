@@ -65,6 +65,9 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     private var taskBeans: MutableList<DailyTaskBean> = ArrayList()
 
+    /** 上次已更新的标题日期（跨天才重算星期+节假日标题） */
+    private var lastTitleDate: String? = null
+
     private val dailyTaskAdapter by lazy {
         DailyTaskAdapter(taskBeans).apply {
             setOnItemClickListener(object : DailyTaskAdapter.OnItemClickListener {
@@ -79,9 +82,12 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         override fun run() {
             val activity = activity
             if (activity !is MainActivity || !activity.isMaskVisible()) {
-                // 日期拆分：2026年08月07日 15:30:22 星期五 → [日期, 时间, 星期]
-                val parts = Date().format("yyyy年MM月dd日 HH:mm:ss EEEE").split(" ")
-                if (parts.size >= 3) {
+            // 日期拆分：2026年08月07日 15:30:22 星期五 → [日期, 时间, 星期]
+            val parts = Date().format("yyyy年MM月dd日 HH:mm:ss EEEE").split(" ")
+            if (parts.size >= 3) {
+                // 星期+节假日标题只在日期跨天时更新（避免每秒重算节假日/重绘 title）
+                if (parts[0] != lastTitleDate) {
+                    lastTitleDate = parts[0]
                     val today = LocalDate.now()
                     val dayType = when {
                         ChinaHolidayManager.isHoliday(today) -> "节假日"
@@ -90,8 +96,9 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
                         else -> "工作日"
                     }
                     binding.toolbar.title = "${parts[2]}（$dayType）"
-                    binding.toolbar.subtitle = "${parts[0]} ${parts[1]}"
                 }
+                binding.toolbar.subtitle = "${parts[0]} ${parts[1]}"
+            }
                 // 调度中：过点后自动隐藏「实际」小字
                 if (TaskScheduler.isRunning()) {
                     dailyTaskAdapter.refreshActualHintVisibility()
@@ -463,8 +470,9 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /**
-     * 调度已启动时：用今日计划里「仍待执行」的实际时间驱动列表小字；
-     * 已过点/已执行项不放入 map，时钟滴答也会再隐藏一次。
+     * 调度已启动时：用今日计划全量驱动列表状态（待执行小字 + 已过点琥珀节点）。
+     * 传全量（含已过点），Adapter 内部按 millis 区分「待执行 / 已过点 / 非今日任务」，
+     * 小字展示仍只在未过点时显示（bindActualHint 内判 millis > now）。
      */
     private fun refreshActualHintsFromSchedule() {
         if (!TaskScheduler.isRunning()) {
@@ -475,16 +483,13 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             val plans = withContext(Dispatchers.IO) {
                 TaskScheduler.loadTodayTaskPlans(usePersisted = true)
             }
-            val now = System.currentTimeMillis()
-            val pending = plans
-                .filter { it.actualTimeMillis > now }
-                .associate { plan ->
-                    plan.task.id to DailyTaskAdapter.PendingActualHint(
-                        displayTime = plan.actualTime,
-                        millis = plan.actualTimeMillis
-                    )
-                }
-            dailyTaskAdapter.setActualHintState(true, pending)
+            val allPlans = plans.associate { plan ->
+                plan.task.id to DailyTaskAdapter.PendingActualHint(
+                    displayTime = plan.actualTime,
+                    millis = plan.actualTimeMillis
+                )
+            }
+            dailyTaskAdapter.setActualHintState(true, allPlans)
         }
     }
 

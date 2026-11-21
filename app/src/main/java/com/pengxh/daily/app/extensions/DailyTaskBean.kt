@@ -53,11 +53,8 @@ fun DailyTaskBean.resolveExecutionTime(): String {
  * 即最晚执行时刻 = start + (minuteRange-1)*60 + 59 秒（再被当天 23:59:59 截断），
  * 而非直观的 start + minuteRange*60（那会晚整一分钟）。
  * */
-fun DailyTaskBean.resolveRandomTimeRange(): String? {
-    if (!SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)) return null
-
-    val minuteRange =
-        SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
+fun DailyTaskBean.resolveRandomTimeRange(randomEnabled: Boolean, minuteRange: Int): String? {
+    if (!randomEnabled) return null
 
     val parts = time?.trim()?.split(":").orEmpty()
     val hour = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(0, 23) ?: 0
