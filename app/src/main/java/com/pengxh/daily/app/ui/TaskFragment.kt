@@ -291,6 +291,8 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         val dialog = BottomSheetDialog(requireContext())
         dialog.setContentView(view)
         view.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.titleView).text = "添加任务"
+        view.findViewById<android.widget.ImageView>(R.id.btnClose).setOnClickListener { dialog.dismiss() }
+        view.findViewById<com.google.android.material.button.MaterialButton>(R.id.cancelButton).setOnClickListener { dialog.dismiss() }
         view.findViewById<com.google.android.material.button.MaterialButton>(R.id.saveButton).setOnClickListener {
             val timePicker = view.findViewById<TimeWheelLayout>(R.id.timePicker)
             val time = String.format(
@@ -334,6 +336,8 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         val dialog = BottomSheetDialog(requireContext())
         dialog.setContentView(view)
         view.findViewById<com.google.android.material.textview.MaterialTextView>(R.id.titleView).text = "修改任务时间"
+        view.findViewById<android.widget.ImageView>(R.id.btnClose).setOnClickListener { dialog.dismiss() }
+        view.findViewById<com.google.android.material.button.MaterialButton>(R.id.cancelButton).setOnClickListener { dialog.dismiss() }
         val timePicker = view.findViewById<TimeWheelLayout>(R.id.timePicker)
         // 布局完成后再回填，避免 TimeWheel 尚未 measure 时 setDefaultValue 不生效
         val defaultEntity = item.convertToTimeEntity()
