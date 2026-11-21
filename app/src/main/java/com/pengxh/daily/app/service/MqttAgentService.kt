@@ -41,6 +41,7 @@ import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.shizuku.ShizukuActions
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore
 import com.pengxh.daily.app.shizuku.ShizukuManager
+import com.pengxh.daily.app.shizuku.ShizukuShell
 import com.pengxh.daily.app.shizuku.ShizukuVerifyCodeBus
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -1030,6 +1031,7 @@ class MqttAgentService : Service() {
             Protocol.ACTION_IDENTITY_VERIFY -> "身份验证"
             Protocol.ACTION_SIMULATE_PUNCH -> "模拟打卡"
             Protocol.ACTION_CUSTOM_1 -> "操作1"
+            Protocol.ACTION_CLEAR_BACKEND -> "清理打卡后台"
             else -> action
         }
         CommandHistoryRecorder.record("控制端", actionName)
@@ -1141,6 +1143,22 @@ class MqttAgentService : Service() {
                         // Shizuku 自定义操作1：按自定义操作1步骤执行，结果经 alert 通道反馈
                         ShizukuActions.runCustomAction1(this@MqttAgentService, scope)
                         "SUCCESS"
+                    }
+                    Protocol.ACTION_CLEAR_BACKEND -> {
+                        // 清理打卡应用后台：即时 force-stop 目标打卡应用（无视「任务前清理」开关）。
+                        // 需 Shizuku 已授权；未授权/未就绪回 NEED_MANUAL，包名为空回 ACTION_FAIL。
+                        if (!ShizukuManager.isGranted() || !ShizukuManager.isAvailable()) {
+                            "NEED_MANUAL"
+                        } else {
+                            val pkg = Constant.getTargetApp()
+                            if (pkg.isBlank()) {
+                                "ACTION_FAIL:未配置打卡应用"
+                            } else if (ShizukuShell.forceStopPackage(pkg)) {
+                                "SUCCESS"
+                            } else {
+                                "ACTION_FAIL:清理失败"
+                            }
+                        }
                     }
                     else -> "UNKNOWN_ACTION"
                 }
