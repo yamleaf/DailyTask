@@ -92,7 +92,9 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
                 return@addUpdateListener
             }
             flowProgress = anim.animatedValue as Float
-            host?.invalidateItemDecorations()
+            // 用 postInvalidateOnAnimation（仅重绘）而非 invalidateItemDecorations（内部 requestLayout），
+            // 避免每帧重新布局导致掉帧
+            host?.postInvalidateOnAnimation()
         }
     }
 
