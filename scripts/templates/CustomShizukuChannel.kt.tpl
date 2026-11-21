@@ -73,6 +73,8 @@ object CustomShizukuChannel : ShizukuChannel {
                 override fun showPermissionConfirmation(
                     requestUid: Int, requestPid: Int, requestPackageName: String?, requestCode: Int
                 ) {}
+                // Sui 专属：客户端进程内替换 server binder，DailyTask 自定义通道不用，返回 false 即可
+                override fun dispatchServerBinder(binder: IBinder?, packageName: String?, generation: Long): Boolean = false
             }
             val args = Bundle().apply {
                 putString("shizuku:attach-package-name", ctx.packageName)
