@@ -86,6 +86,12 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         color = pulseColor
     }
 
+    /** 节点点亮联动：光点靠近节点时，在节点位置画一圈增亮光晕（alpha 由距离动态控制） */
+    private val nodeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = pulseColor
+    }
+
     private var host: RecyclerView? = null
 
     /** 流动进度 0→1：0 = 第一个节点，1 = 最后一个节点，循环 */
@@ -200,14 +206,29 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             if (y < firstY - 4f * density) break
             val alpha = (1f - frac).let { it * it * 0.5f }
             trailPaint.alpha = (alpha * 255).toInt().coerceIn(0, 255)
-            val r = 2f * density * (1f - frac * 0.5f)
+            val r = 1.3f * density * (1f - frac * 0.4f)
             canvas.drawCircle(x, y, r, trailPaint)
         }
-        // 光点：多层光晕（模拟发光）+ 白色高光核心
-        canvas.drawCircle(x, pulseY, 9f * density, glowOuterPaint)
-        canvas.drawCircle(x, pulseY, 5.5f * density, glowMidPaint)
-        canvas.drawCircle(x, pulseY, 3.2f * density, glowInnerPaint)
-        canvas.drawCircle(x, pulseY, 1.8f * density, flowCorePaint)
+        // 光点：多层光晕（缩小，避免盖住连线）+ 白色高光核心
+        canvas.drawCircle(x, pulseY, 4.5f * density, glowOuterPaint)
+        canvas.drawCircle(x, pulseY, 3f * density, glowMidPaint)
+        canvas.drawCircle(x, pulseY, 2f * density, glowInnerPaint)
+        canvas.drawCircle(x, pulseY, 1.3f * density, flowCorePaint)
+
+        // 节点点亮联动：光点经过节点时，节点短暂增亮（光晕随距离衰减）
+        val nodeGlowRange = 26f * density
+        for (i in 0 until count) {
+            val child = parent.getChildAt(i)
+            val nodeY = child.top + dotCenter
+            val dist = kotlin.math.abs(nodeY - pulseY)
+            if (dist < nodeGlowRange) {
+                val intensity = 1f - dist / nodeGlowRange
+                val alpha = (intensity * intensity * 0x66).toInt()
+                nodeGlowPaint.alpha = alpha.coerceIn(0, 255)
+                val r = 2.2f * density * (1f + 0.6f * intensity)
+                canvas.drawCircle(x, nodeY, r, nodeGlowPaint)
+            }
+        }
     }
 
     companion object {
