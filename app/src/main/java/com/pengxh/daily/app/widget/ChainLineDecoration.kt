@@ -232,7 +232,14 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
     }
 
     companion object {
-        /** itemView keyed tag 的 key：存「是否已过点」布尔，供连线状态化用 */
-        const val TAG_PASSED = R.id.taskCardView
+        /**
+         * itemView keyed tag 的 key：存「是否已过点」布尔，供连线状态化用。
+         *
+         * 刻意用字面量而非 R.id.xxx：const val 引用 R.id 字段时，R8 资源收缩会重写
+         * R 类的 id 访问器，导致 release 包运行时报 `NoSuchMethodError: getTAG_PASSED()`
+         * （debug 不启用 R8 故不复现）。tag key 只需唯一 int，无需是资源 id。
+         * 0x4D414441 落在 AAPT 资源 id（0x7f..）之外，不会与真实资源冲突。
+         */
+        const val TAG_PASSED = 0x4D414441
     }
 }
