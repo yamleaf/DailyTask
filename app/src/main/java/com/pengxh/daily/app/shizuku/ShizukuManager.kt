@@ -18,8 +18,12 @@ object ShizukuManager {
 
     private const val TAG = "ShizukuManager"
 
-    /** 官方 Shizuku manager 包名（用户可能只装官方） */
-    const val OFFICIAL_MANAGER_PKG = "moe.shizuku.manager"
+    /**
+     * 官方 Shizuku manager 的**安装包名（applicationId）**：moe.shizuku.privileged.api。
+     * 注意不是源码 namespace / 库包名 moe.shizuku.manager——那里只是代码目录，设备上装的 app 叫前者。
+     * 写成 namespace 会导致 getPackageInfo 永远查不到，远程激活直接回 START_FAIL。
+     */
+    const val OFFICIAL_MANAGER_PKG = "moe.shizuku.privileged.api"
 
     /**
      * 候选 Shizuku manager 包名列表：双通道编译下用户可能只装其中一个。
@@ -72,6 +76,9 @@ object ShizukuManager {
                 sent = true
                 Log.i(TAG, "已向 $pkg 发送启动广播 $pkg.START")
             }
+        }
+        if (!sent) {
+            Log.w(TAG, "requestRemoteStart 未找到已安装的 manager，候选包: ${candidatePackages()}")
         }
         return sent
     }

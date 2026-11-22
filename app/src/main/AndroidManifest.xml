@@ -164,6 +164,9 @@
     </application>
 
     <queries>
+        <!-- Shizuku manager 安装包名（applicationId），不是源码 namespace moe.shizuku.manager -->
+        <package android:name="moe.shizuku.privileged.api" />
+
         <package android:name="com.alibaba.android.rimet" />
         <package android:name="com.tencent.mm" />
         <package android:name="com.tencent.wework" />
