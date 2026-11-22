@@ -24,6 +24,7 @@ import com.pengxh.daily.app.extensions.resolveRandomTimeRange
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.MaskOverlayHelper
+import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.widget.ChainLineDecoration
 import com.pengxh.kt.lite.adapter.ViewHolder
 import com.pengxh.kt.lite.extensions.convertColor
@@ -39,6 +40,14 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
     private var actualTime = "--:--:--"
     private var schedulerRunning = false
     private var pendingActualById: Map<Int, PendingActualHint> = emptyMap()
+
+    /**
+     * 跳过日（节假日/休息日且开启跳过）：DC 快照与状态查询统一把所有今日任务标为 skip，
+     * DT 列表这里必须同步，否则会出现「DT 已过点/待执行、DC 全是已跳过」的分歧。
+     * 只在 refresh / setActualHintState 时算一次，避免每秒 bind 重复查节假日配置。
+     */
+    private var todaySkipped = TaskScheduler.isTodaySkipped()
+
     private var nextPassTime = Long.MAX_VALUE
     private var onItemClickListener: OnItemClickListener? = null
 
@@ -58,6 +67,7 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
      *   区分「待执行（未过点）」「已过点」「非今日任务」；小字仅未过点时展示
      */
     fun setActualHintState(running: Boolean, pending: Map<Int, PendingActualHint>) {
+        todaySkipped = TaskScheduler.isTodaySkipped()
         schedulerRunning = running
         pendingActualById = if (running) pending else emptyMap()
         recomputeNextPassTime()
@@ -68,7 +78,7 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
 
     /** 时钟滴答：只在有任务「过点」的瞬间触发一次刷新（避免每秒全量 bind） */
     fun refreshActualHintVisibility() {
-        if (!schedulerRunning || pendingActualById.isEmpty() || itemCount == 0) return
+        if (todaySkipped || !schedulerRunning || pendingActualById.isEmpty() || itemCount == 0) return
         if (System.currentTimeMillis() < nextPassTime) return
         notifyItemRangeChanged(0, itemCount, PAYLOAD_ACTUAL_HINT)
         recomputeNextPassTime()
@@ -182,19 +192,23 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
      *  - 执行中：position 命中 [mPosition]
      *  - 待执行：调度运行中，该任务在今日计划里、尚未过点
      *  - 已过点：调度运行中，该任务在今日计划里、已过点（已执行/超时，统一琥珀，不细分完成 vs 超时）
+     *  - 已跳过：跳过日（节假日/休息日且开启跳过），与 DC 快照 taskStatus 一致，全部任务统一跳过
      *  - 中性：其余情况（调度未运行，或该任务不在今日计划内，即非今日任务）
      * */
-    private fun stateOf(taskBean: DailyTaskBean, position: Int): Int = when {
-        position == mPosition -> STATE_RUNNING
-        schedulerRunning -> {
-            val hint = pendingActualById[taskBean.id]
-            when {
-                hint == null -> STATE_IDLE
-                hint.millis > System.currentTimeMillis() -> STATE_PENDING
-                else -> STATE_PASSED
+    private fun stateOf(taskBean: DailyTaskBean, position: Int): Int {
+        if (todaySkipped) return STATE_SKIPPED
+        return when {
+            position == mPosition -> STATE_RUNNING
+            schedulerRunning -> {
+                val hint = pendingActualById[taskBean.id]
+                when {
+                    hint == null -> STATE_IDLE
+                    hint.millis > System.currentTimeMillis() -> STATE_PENDING
+                    else -> STATE_PASSED
+                }
             }
+            else -> STATE_IDLE
         }
-        else -> STATE_IDLE
     }
 
     /**
@@ -223,6 +237,12 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
                 stateCard.setCardBackgroundColor(R.color.md_warningContainer.convertColor(context))
             }
 
+            STATE_SKIPPED -> {
+                stateText.text = "已跳过"
+                stateText.setTextColor(R.color.md_onSurfaceVariant.convertColor(context))
+                stateCard.setCardBackgroundColor(R.color.md_surfaceVariant.convertColor(context))
+            }
+
             else -> {
                 stateText.text = "-"
                 stateText.setTextColor(R.color.md_onSurfaceVariant.convertColor(context))
@@ -242,6 +262,7 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
             STATE_RUNNING -> R.color.md_primary
             STATE_PENDING -> R.color.md_outlineVariant
             STATE_PASSED -> R.color.md_warning
+            STATE_SKIPPED -> R.color.md_outlineVariant
             else -> R.color.md_outlineVariant
         }
         val color = colorRes.convertColor(context)
@@ -264,6 +285,7 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
         val timeColorRes = when (state) {
             STATE_RUNNING -> R.color.md_onSurfaceVariant
             STATE_PASSED -> R.color.md_warning
+            STATE_SKIPPED -> R.color.md_onSurfaceVariant
             else -> R.color.md_onSurface
         }
         holder.getView<TextView>(R.id.taskTimeView)
@@ -343,6 +365,8 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
     }
 
     fun refresh(newRows: MutableList<DailyTaskBean>) {
+        // 跳过日配置可能变化，列表刷新时重算一次（不在 bind 里反复查）
+        todaySkipped = TaskScheduler.isTodaySkipped()
         // 随机窗口配置：列表数据变化时刷新一次缓存，避免每次 bind 都读 SharedPreferences
         randomTimeEnabled = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
         timeRange = SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
@@ -363,7 +387,10 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
     private fun bindActualHint(holder: ViewHolder, taskBean: DailyTaskBean) {
         val actualHintView = holder.getView<TextView>(R.id.taskActualHintView)
         val hint = pendingActualById[taskBean.id]
-        if (schedulerRunning && hint != null && hint.millis > System.currentTimeMillis()) {
+        if (todaySkipped) {
+            // 跳过日不展示「实际执行」小字，和 DC 的 skip 状态保持一致
+            actualHintView.isVisible = false
+        } else if (schedulerRunning && hint != null && hint.millis > System.currentTimeMillis()) {
             actualHintView.isVisible = true
             actualHintView.text = "实际执行  ${hint.displayTime}"
         } else {
@@ -378,6 +405,7 @@ class DailyTaskAdapter(dataBeans: MutableList<DailyTaskBean>) :
         private const val STATE_RUNNING = 1   // 执行中
         private const val STATE_PENDING = 2   // 待执行
         private const val STATE_PASSED = 3    // 已过点（已执行/超时，琥珀）
+        private const val STATE_SKIPPED = 4   // 跳过日：与 DC 快照 skip 一致（全量灰色）
 
         val DIFF_CALLBACK = object : DiffUtil.ItemCallback<DailyTaskBean>() {
             override fun areItemsTheSame(old: DailyTaskBean, new: DailyTaskBean): Boolean {
