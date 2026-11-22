@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆形图标底（inset 内缩版）：用于扩大触摸目标到 48dp 的同时，保持圆形视觉尺寸不变。
+     48dp View - 左右/上下各 inset 10dp = 28dp 圆形，与改造前的 28dp 视觉一致。 -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="10dp"
+    android:drawable="@drawable/bg_circle_56" />

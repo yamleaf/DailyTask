@@ -1,11 +1,8 @@
 package com.pengxh.daily.app.ui
 
 import com.pengxh.daily.app.UiInsets
-import android.os.Build
 import android.os.Bundle
 import android.widget.TextView
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.pengxh.daily.app.R
@@ -14,7 +11,6 @@ import com.pengxh.daily.app.model.QuestionAnAnswerModel
 import com.pengxh.kt.lite.adapter.NormalRecyclerAdapter
 import com.pengxh.kt.lite.adapter.ViewHolder
 import com.pengxh.kt.lite.base.KotlinBaseActivity
-import com.pengxh.kt.lite.extensions.getStatusBarHeight
 import com.pengxh.kt.lite.extensions.readAssetsFile
 import com.pengxh.kt.lite.utils.HtmlRenderEngine
 

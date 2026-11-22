@@ -4,7 +4,6 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.pengxh.daily.app.utils.ConfigCipher
-import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.SecurePrefs
 import com.pengxh.kt.lite.utils.SaveKeyValues
 

@@ -4,8 +4,6 @@ import com.pengxh.daily.app.UiInsets
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Bundle
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.card.MaterialCardView
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.databinding.ActivityCommandBinding

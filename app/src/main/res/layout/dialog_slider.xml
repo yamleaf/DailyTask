@@ -14,8 +14,10 @@
         android:gravity="center"
         android:text="--"
         android:textColor="@color/md_primary"
-        android:textSize="20sp"
-        android:textStyle="bold" />
+        android:textSize="36sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:includeFontPadding="false" />
 
     <com.google.android.material.slider.Slider
         android:id="@+id/slider"

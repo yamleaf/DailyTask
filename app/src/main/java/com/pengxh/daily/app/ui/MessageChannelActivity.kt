@@ -2,8 +2,6 @@ package com.pengxh.daily.app.ui
 
 import com.pengxh.daily.app.UiInsets
 import android.os.Bundle
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import com.google.gson.JsonObject
 import com.pengxh.daily.app.databinding.ActivityMessageChannelBinding
 import com.pengxh.daily.app.utils.ConfigImportSignal

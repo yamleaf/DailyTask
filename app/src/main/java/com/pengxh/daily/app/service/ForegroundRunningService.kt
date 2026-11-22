@@ -26,7 +26,6 @@ import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
-import com.pengxh.daily.app.utils.LogLevel
 import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.StatusReporter

@@ -8,13 +8,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.pengxh.daily.app.extensions.openApplication
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
-import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.NotificationBean
 import com.pengxh.daily.app.ui.MainActivity
@@ -23,7 +21,6 @@ import com.pengxh.daily.app.utils.ConfigStore
 import com.pengxh.daily.app.utils.CommandHistoryRecorder
 import com.pengxh.daily.app.utils.Constant
 import com.pengxh.daily.app.utils.EmailSecureConfig
-import com.pengxh.daily.app.utils.FloatingWindowController
 import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
@@ -31,7 +28,6 @@ import com.pengxh.daily.app.utils.MessageDispatcher
 import com.pengxh.daily.app.utils.MonitorEvent
 import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.ProjectionSession
-import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.shizuku.ShizukuManager
 import com.pengxh.daily.app.utils.StatusReporter
@@ -40,7 +36,6 @@ import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.extensions.timestampToCompleteDate
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.yample.mqttprotocol.Protocol
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,8 +45,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
 /**
  * @description: 状态栏监听服务

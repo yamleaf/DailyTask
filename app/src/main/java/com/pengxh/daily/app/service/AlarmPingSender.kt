@@ -20,6 +20,7 @@ import com.pengxh.daily.app.utils.LogLevel
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient
 import org.eclipse.paho.client.mqttv3.MqttClient
 import org.eclipse.paho.client.mqttv3.MqttClientPersistence
+import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.MqttPingSender
 import org.eclipse.paho.client.mqttv3.MqttToken
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
@@ -125,19 +126,32 @@ class AlarmPingSender(context: Context) : MqttPingSender {
                         Log.d(TAG, "PING 钩子跳过：执行器已关闭（连接销毁中）")
                     } else if (hook != null) {
                         val pending = goAsync()
+                        // 【ANR 防护 11-22】goAsync 把广播生命周期延长到 pending.finish()：钩子线程一旦
+                        // 永久阻塞（真机实证：Paho 同步 publish 等 QoS1 PUBACK 无超时，TCP 半开 /
+                        // stop() 竞态 shutdownNow 无法中断已跑任务），finish() 永不执行 → 系统按广播
+                        // 60s 超时判 ANR，且随 80s 心跳周期反复弹出「DT 没有响应」。
+                        // 硬保险：无论钩子是否返回，广播最多延长 8s 即归还 PendingResult（finish 幂等）。
+                        val forceFinish = Runnable {
+                            if (runCatching { pending.finish() }.isSuccess) {
+                                Log.w(TAG, "PING 钩子超时未完成（${PENDING_FINISH_GUARD_MS}ms），强制归还广播")
+                            }
+                        }
+                        mainHandler.postDelayed(forceFinish, PENDING_FINISH_GUARD_MS)
                         // 提交单独 try/catch 与本帧外层隔离：stop() 的 shutdownNow 若抢在 execute 前执行，
                         // 会抛 RejectedExecutionException —— 落入外层 catch 会误报「强制发送 PINGREQ 异常」
-                        // 并对已停止的实例重排闹钟；此处单独捕获，立即 finish() 归还 PendingResult（广播不超时）。
+                        // 并对已停止的实例重排闹钟；此处单独捕获，立即归还 PendingResult（广播不超时）。
                         try {
                             hookExecutor.execute {
                                 try {
                                     runCatching { hook() }
                                 } finally {
+                                    mainHandler.removeCallbacks(forceFinish)
                                     runCatching { pending.finish() }
                                 }
                             }
                         } catch (e: java.util.concurrent.RejectedExecutionException) {
                             Log.d(TAG, "PING 钩子未提交：执行器已被关闭（stop 竞态），跳过本帧")
+                            mainHandler.removeCallbacks(forceFinish)
                             runCatching { pending.finish() }
                         }
                     }
@@ -355,6 +369,9 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         /** 方案 A：PING 窗口 WifiLock 超时（ms）。够 PINGREQ 发出 + PINGRESP 返回 + 下一轮 schedule；
          * 超时自释放后息屏间隙 WiFi 可 suspend 省电；占 80s 周期极小比例 */
         private const val WIFI_LOCK_TIMEOUT_MS = 5_000L
+        /** goAsync 广播硬超时（ms）：钩子线程异常阻塞时也必须归还 PendingResult，
+         * 远低于系统前台广播 60s ANR 阈值，避免 ALARM 心跳周期反复触发「DT 没有响应」 */
+        private const val PENDING_FINISH_GUARD_MS = 8_000L
     }
 }
 
@@ -376,5 +393,19 @@ class MqttClientWithAlarmPingSender(
     init {
         // 替换父类构造器创建的默认 aClient（TimerPingSender）为带 AlarmPingSender 的异步客户端
         aClient = MqttAsyncClient(serverURI, clientId, persistence, pingSender)
+    }
+
+    /**
+     * 【ANR 防护 11-22】带超时的 QoS1 发布：绕开同步 MqttClient.publish() 内部
+     * waitForCompletion() 无超时等 PUBACK 的问题（TCP 半开 / stop() 竞态 shutdownNow
+     * 无法中断已跑任务 → 钩子线程永久阻塞 → goAsync 广播不归还 → 系统 60s 判 ANR）。
+     * 直接走底层异步 aClient.publish + 显式超时；超时即放弃本帧（presence 有 30s 循环兜底）。
+     * @return true=超时内拿到 PUBACK；false=超时/失败
+     */
+    fun publishWithTimeout(topic: String, message: MqttMessage, timeoutMs: Long): Boolean = try {
+        val token = aClient.publish(topic, message, null, null)
+        token.waitForCompletion(timeoutMs)
+    } catch (_: Exception) {
+        false
     }
 }

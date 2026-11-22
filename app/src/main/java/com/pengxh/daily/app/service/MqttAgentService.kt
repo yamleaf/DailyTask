@@ -71,6 +71,9 @@ class MqttAgentService : Service() {
 
     companion object {
         private const val TAG = "MqttAgentService"
+        /** presence QoS1 发布超时（ms）：ALARM 心跳走 MqttClientWithAlarmPingSender.publishWithTimeout，
+         * 避免 Paho 同步 publish 无超时等 PUBACK → onPingHook 线程卡死 → goAsync 广播 ANR */
+        private const val PRESENCE_PUBLISH_TIMEOUT_MS = 3_000L
         /** @Volatile：onCreate/onDestroy 在主线程写、MQTT 回调线程读，跨线程可见性必须显式保证，
          * 否则 P3 的 instance === this 校验可能读到旧值而失效 */
         @Volatile
@@ -1739,14 +1742,22 @@ class MqttAgentService : Service() {
     private fun publishPresenceMsg(json: String, retained: Boolean) {
         val client = mqttClient ?: return
         try {
-            // 注意：同步 publish 内部 waitForCompletion()，弱网/断网未 RST 时可能阻塞较久。
-            // 本方法只允许在 IO 协程上下文调用；主线程路径（PING 闹钟 onPingHook）已在
-            // AlarmPingSender.onReceive 用 goAsync()+后台线程派发，绝不要从主线程直连本方法。
-            client.publish(
-                topicPresence(),
-                MqttMessage(json.toByteArray()).apply { qos = 1; isRetained = retained }
-            )
-            MqttQuota.add(this, 1, 0)
+            // 【ANR 防护 11-22】ALARM 心跳钩子路径：Paho 同步 publish 内部 waitForCompletion()
+            // 无超时，弱网/TCP 半开时会永久等 PUBACK，导致钩子线程卡死 + goAsync 广播不归还 → ANR。
+            // 故 ALARM 客户端改走带超时的异步 publish；CPU 模式普通客户端不经 goAsync，保留原同步语义。
+            val topic = topicPresence()
+            val message = MqttMessage(json.toByteArray()).apply { qos = 1; isRetained = retained }
+            val ok = if (client is MqttClientWithAlarmPingSender) {
+                client.publishWithTimeout(topic, message, PRESENCE_PUBLISH_TIMEOUT_MS)
+            } else {
+                client.publish(topic, message)
+                true
+            }
+            if (ok) {
+                MqttQuota.add(this, 1, 0)
+            } else {
+                Log.w(TAG, "presence 发布超时（${PRESENCE_PUBLISH_TIMEOUT_MS}ms），本帧跳过（30s 循环兜底）")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "presence 发布失败: ${e.message}")
         }

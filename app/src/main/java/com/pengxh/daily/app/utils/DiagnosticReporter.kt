@@ -3,7 +3,6 @@ package com.pengxh.daily.app.utils
 import android.util.Log
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment

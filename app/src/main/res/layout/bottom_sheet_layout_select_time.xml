@@ -12,7 +12,7 @@
         android:layout_width="@dimen/dp_32"
         android:layout_height="4dp"
         android:layout_marginTop="@dimen/dp_12"
-        android:layout_marginBottom="@dimen/dp_16"
+        android:layout_marginBottom="@dimen/dp_6"
         app:cardBackgroundColor="@color/md_outline"
         app:cardCornerRadius="2dp"
         app:layout_constraintEnd_toEndOf="parent"
@@ -44,10 +44,11 @@
 
         <ImageView
             android:id="@+id/btnClose"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:padding="6dp"
-            android:background="@drawable/bg_circle_56"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:padding="16dp"
+            android:background="@drawable/bg_circle_56_inset"
+            android:foreground="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_close"
             android:contentDescription="关闭" />
     </LinearLayout>

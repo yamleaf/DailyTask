@@ -62,11 +62,11 @@
             android:id="@+id/cancelButton"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="@dimen/dp_44"
+            android:layout_height="@dimen/dp_48"
             android:layout_weight="1"
             android:text="取消"
             android:textColor="@color/md_onSurfaceVariant"
-            app:cornerRadius="@dimen/radius_button"
+            app:cornerRadius="12dp"
             app:strokeColor="@color/md_outline" />
 
         <Space
@@ -76,9 +76,9 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/confirmButton"
             android:layout_width="0dp"
-            android:layout_height="@dimen/dp_44"
+            android:layout_height="@dimen/dp_48"
             android:layout_weight="1"
-            android:text="确定"
-            app:cornerRadius="@dimen/radius_button" />
+            android:text="保存"
+            app:cornerRadius="12dp" />
     </LinearLayout>
 </LinearLayout>

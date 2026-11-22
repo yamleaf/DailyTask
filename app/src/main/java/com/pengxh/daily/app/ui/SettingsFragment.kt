@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.graphics.drawable.Drawable
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
@@ -44,8 +43,6 @@ import androidx.appcompat.view.ContextThemeWrapper
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import com.pengxh.daily.app.BuildConfig
@@ -59,7 +56,6 @@ import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.AutoProjectionAccessibilityService
 import com.pengxh.daily.app.service.CaptureImageService
 import com.pengxh.daily.app.service.FloatingWindowService
-import com.pengxh.daily.app.service.MqttAgentService
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.service.NotificationMonitorService
 import com.pengxh.daily.app.shizuku.ShizukuConfigStore

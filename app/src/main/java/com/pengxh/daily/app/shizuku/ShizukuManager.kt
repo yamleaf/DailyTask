@@ -3,7 +3,6 @@ package com.pengxh.daily.app.shizuku
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast

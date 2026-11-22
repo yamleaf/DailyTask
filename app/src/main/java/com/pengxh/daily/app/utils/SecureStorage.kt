@@ -8,7 +8,6 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.kt.lite.utils.SaveKeyValues
-import com.google.gson.JsonObject
 
 /**
  * 敏感信息加密存储：基于 Android Keystore 的 EncryptedSharedPreferences。

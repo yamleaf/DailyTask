@@ -82,7 +82,8 @@
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="@dimen/dp_12">
+                    android:paddingHorizontal="@dimen/dp_12"
+                    android:paddingVertical="@dimen/dp_8">
 
                     <ImageView
                         android:layout_width="@dimen/size_28"
@@ -105,8 +106,8 @@
                         android:layout_height="wrap_content"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:gravity="center"
-                        android:minWidth="40dp"
-                        android:minHeight="40dp"
+                        android:minWidth="@dimen/dp_48"
+                        android:minHeight="@dimen/dp_48"
                         android:padding="8dp"
                         android:text="✕"
                         android:textColor="@color/md_onWarningContainer"

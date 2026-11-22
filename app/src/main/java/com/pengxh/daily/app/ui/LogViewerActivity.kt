@@ -5,7 +5,6 @@ import android.util.Log
 import android.view.View
 import android.widget.TextView
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.chip.Chip
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.UiInsets
 import com.pengxh.daily.app.databinding.ActivityLogViewerBinding

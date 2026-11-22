@@ -17,10 +17,7 @@ import com.pengxh.daily.app.DailyTaskApplication
 import com.pengxh.daily.app.extensions.formatTime
 import com.pengxh.daily.app.extensions.notificationEnable
 import com.pengxh.daily.app.service.ForegroundRunningService
-import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.kt.lite.utils.SaveKeyValues
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 
 import com.pengxh.daily.app.extensions.format

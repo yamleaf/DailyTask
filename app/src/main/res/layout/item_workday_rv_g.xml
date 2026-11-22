@@ -13,6 +13,7 @@
         android:clickable="true"
         android:focusable="true"
         android:gravity="center"
+        android:minHeight="@dimen/dp_48"
         android:paddingVertical="@dimen/dp_12"
         android:paddingHorizontal="@dimen/dp_8"
         android:textColor="@color/md_onSurfaceVariant"
