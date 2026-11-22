@@ -86,10 +86,16 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         color = pulseColor
     }
 
-    /** 节点点亮联动：光点靠近节点时，在节点位置画一圈增亮光晕（alpha 由距离动态控制） */
-    private val nodeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
+    /** 节点点亮联动：画在 onDrawOver（item 之上），光点靠近节点时套一圈亮环 + 中心高光 */
+    private val nodeRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.4f * density
         color = pulseColor
+    }
+
+    private val nodeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
     }
 
     private var host: RecyclerView? = null
@@ -97,8 +103,11 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
     /** 流动进度 0→1：0 = 第一个节点，1 = 最后一个节点，循环 */
     private var flowProgress = 0f
 
+    /** 当前光点 y 坐标，供 onDrawOver 判断哪些节点被「经过」（画在 item 之上才看得见） */
+    private var pulseY = Float.MIN_VALUE
+
     private val flowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-        duration = 1800
+        duration = 3600
         repeatCount = ValueAnimator.INFINITE
         interpolator = LinearInterpolator()
         addUpdateListener { anim ->
@@ -182,7 +191,7 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
 
         val target = flowProgress * totalLen
         var acc = 0f
-        var pulseY = segments[0][0]
+        pulseY = segments[0][0]
         for (seg in segments) {
             val segLen = seg[1] - seg[0]
             if (target <= acc + segLen) {
@@ -214,20 +223,29 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         canvas.drawCircle(x, pulseY, 3f * density, glowMidPaint)
         canvas.drawCircle(x, pulseY, 2f * density, glowInnerPaint)
         canvas.drawCircle(x, pulseY, 1.3f * density, flowCorePaint)
+    }
 
-        // 节点点亮联动：光点经过节点时，节点短暂增亮（光晕随距离衰减）
-        val nodeGlowRange = 26f * density
-        for (i in 0 until count) {
+    /**
+     * 节点点亮必须画在 item 之上：onDraw 在 RecyclerView.dispatchDraw 之前执行，
+     * 画在 onDraw 里的光晕会被 item 中不透明的节点 drawable 完全盖住。
+     * */
+    override fun onDrawOver(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+        if (!isScreenActuallyOn() || pulseY == Float.MIN_VALUE || parent.childCount == 0) return
+
+        val x = parent.getChildAt(0).left + trackOffset
+        val glowRange = 40f * density
+        for (i in 0 until parent.childCount) {
             val child = parent.getChildAt(i)
             val nodeY = child.top + dotCenter
             val dist = kotlin.math.abs(nodeY - pulseY)
-            if (dist < nodeGlowRange) {
-                val intensity = 1f - dist / nodeGlowRange
-                val alpha = (intensity * intensity * 0x66).toInt()
-                nodeGlowPaint.alpha = alpha.coerceIn(0, 255)
-                val r = 2.2f * density * (1f + 0.6f * intensity)
-                canvas.drawCircle(x, nodeY, r, nodeGlowPaint)
-            }
+            if (dist >= glowRange) continue
+
+            val intensity = 1f - dist / glowRange
+            // 亮环套在 14dp 节点（半径 7dp）外侧，中心补一点白高光，肉眼能明显看到「点亮」
+            nodeRingPaint.alpha = (intensity * 0xB0).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, (8f + 3f * intensity) * density, nodeRingPaint)
+            nodeCorePaint.alpha = (intensity * 0xD0).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, (1.6f + 1.2f * intensity) * density, nodeCorePaint)
         }
     }
 
