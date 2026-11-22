@@ -89,16 +89,15 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         color = pulseColor
     }
 
-    /** 节点点亮联动：画在 onDrawOver（item 之上），光点靠近节点时套一圈亮环 + 中心高光 */
-    private val nodeRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.4f * density
+    /** 节点点亮联动：节点本体填亮色 + 外面两层柔光，无硬边圆环 */
+    private val nodeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
         color = pulseColor
     }
 
-    private val nodeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val nodeHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.WHITE
+        color = pulseColor
     }
 
     private var host: RecyclerView? = null
@@ -244,11 +243,13 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             if (dist >= glowRange) continue
 
             val intensity = 1f - dist / glowRange
-            // 亮环套在 14dp 节点（半径 7dp）外侧，中心补一点白高光，肉眼能明显看到「点亮」
-            nodeRingPaint.alpha = (intensity * 0xB0).toInt().coerceIn(0, 255)
-            canvas.drawCircle(x, nodeY, (8f + 3f * intensity) * density, nodeRingPaint)
-            nodeCorePaint.alpha = (intensity * 0xD0).toInt().coerceIn(0, 255)
-            canvas.drawCircle(x, nodeY, (1.6f + 1.2f * intensity) * density, nodeCorePaint)
+            // 14dp 节点本体填亮色（半径 7dp），外面两层淡青柔光，去掉硬边圆环
+            nodeHaloPaint.alpha = (intensity * 0x24).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, 11f * density, nodeHaloPaint)
+            nodeHaloPaint.alpha = (intensity * 0x40).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, 8.5f * density, nodeHaloPaint)
+            nodeFillPaint.alpha = (intensity * 0x90).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, 7f * density, nodeFillPaint)
         }
     }
 
