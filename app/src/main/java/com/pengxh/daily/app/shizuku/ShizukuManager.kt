@@ -8,6 +8,12 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import com.pengxh.daily.app.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Shizuku 运行时状态与授权管理（feat_shiziku，独立包）。
@@ -17,6 +23,18 @@ object ShizukuManager {
     const val REQUEST_PERMISSION_CODE = 0x5A1E
 
     private const val TAG = "ShizukuManager"
+
+    /**
+     * 远程激活标记：DT 发广播时带上后，Shizuku fork 会走「无人值守」启动分支，
+     * 跳过锁屏等待并立即尝试重新打开无线调试 / mDNS 发现。字面值须与 Shizuku fork
+     * 的 WirelessBootStartWorker.KEY_REMOTE_ACTIVATION 保持一致。
+     */
+    private const val EXTRA_REMOTE_ACTIVATION = "remote_activation"
+
+    private const val DEFAULT_REMOTE_START_TIMEOUT_MS = 30_000L
+
+    /** 串行化远程激活，避免 DC 连续下发时多条广播/多个 WorkManager 任务互相打断 */
+    private val activationMutex = Mutex()
 
     /**
      * 官方 Shizuku manager 的**安装包名（applicationId）**：moe.shizuku.privileged.api。
@@ -46,20 +64,25 @@ object ShizukuManager {
     /** 授权来源：由谁授权 */
     fun grantSource(): String = ShizukuRuntime.grantSource()
 
+    /** 远程激活的最终回执码；冒号前给 DC 做分支，冒号后给失败原因/成功来源 */
+    enum class RemoteStartAck(val wire: String) {
+        ALREADY_AVAILABLE("START_OK:ALREADY"),
+        STARTED("START_OK:BINDER"),
+        NO_MANAGER("START_FAIL:NO_MANAGER"),
+        BROADCAST_FAILED("START_FAIL:BROADCAST"),
+        TIMEOUT("START_FAIL:TIMEOUT")
+    }
+
     /**
-     * 远程激活 Shizuku：向前台 Shizuku manager 发显式启动广播，让它在无用户手动点击的情况下
-     * 自行拉起 shizuku_server（无线调试 / root 通道，取决于其最后一次启动方式）。
+     * 远程激活 Shizuku：向已安装的 Shizuku manager 发显式启动广播。
      *
-     * 由控制端下发 FIELD_SHIZUKU_START 触发；用于被控端重启后 Shizuku 服务掉线、控制端远程补救的场景。
-     * 广播 action 采用 ${package}.START（Shizuku fork 的 ManualStartReceiver 声明并 exported=true），
-     * 显式 setPackage 保证只投递给目标 manager，不被其他应用截胡。
+     * 这是「只投递一次」的底层函数；无人值守路径请用 [requestRemoteStartAndWait]。
      *
-     * 双通道：同时尝试自定义 + 官方两个包名（用户可能只装其中一个），谁装了谁收到。
-     *
-     * @return true 表示至少向一个已安装的 manager 成功投递了广播（不代表 server 必然启动成功，
-     *         无线调试配对缺失/未解锁时可能失败）；false 表示两个候选 manager 都未安装。
+     * @param remoteActivation true 时附加快照标记，Shizuku fork 会跳过锁屏等待并立即尝试无线调试发现；
+     *                         false 保持旧行为，兼容普通手动/历史调用。
+     * @return true 表示至少向一个已安装的 manager 成功投递了广播（不代表 server 必然启动成功）。
      */
-    fun requestRemoteStart(context: Context): Boolean {
+    private fun sendStartBroadcastOnce(context: Context, remoteActivation: Boolean): Boolean {
         var sent = false
         for (pkg in candidatePackages()) {
             val installed = runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess
@@ -69,18 +92,67 @@ object ShizukuManager {
             }
             val ok = runCatching {
                 val intent = Intent("$pkg.START").setPackage(pkg)
+                    .putExtra(EXTRA_REMOTE_ACTIVATION, remoteActivation)
+                    // 被控端重启/进程被停掉后仍能唤醒 receiver；MIUI 侧仍依赖 10008 自启动权限
+                    .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES or Intent.FLAG_RECEIVER_FOREGROUND)
                 context.sendBroadcast(intent)
                 true
             }.getOrDefault(false)
             if (ok) {
                 sent = true
-                Log.i(TAG, "已向 $pkg 发送启动广播 $pkg.START")
+                Log.i(TAG, "已向 $pkg 发送启动广播 $pkg.START（remote=$remoteActivation）")
             }
         }
         if (!sent) {
             Log.w(TAG, "requestRemoteStart 未找到已安装的 manager，候选包: ${candidatePackages()}")
         }
         return sent
+    }
+
+    /** 兼容旧调用：只投递广播，不等待服务启动 */
+    fun requestRemoteStart(context: Context): Boolean = sendStartBroadcastOnce(context, false)
+
+    /**
+     * 无人值守远程激活：发广播后等待 Shizuku binder 真正出现再返回 ACK。
+     *
+     * DC 下发 FIELD_SHIZUKU_START 后调用；成功条件从「广播发出」升级为「binder 可用」，
+     * 避免 DT 回 START_SENT、DC 显示成功但实际服务没起的误报。
+     *
+     * 串行化 + withTimeout 保证：
+     *  - 连续下发不会并发启动多个 WorkManager 任务；
+     *  - 不阻塞 MQTT 回调线程（调用方在 service scope 内 launch）；
+     *  - 超时后仍回明确失败，由 DC 提示检查自启动/无线调试。
+     */
+    suspend fun requestRemoteStartAndWait(
+        context: Context,
+        timeoutMs: Long = DEFAULT_REMOTE_START_TIMEOUT_MS
+    ): RemoteStartAck = withContext(Dispatchers.IO) {
+        activationMutex.withLock {
+            if (isAvailable()) {
+                Log.i(TAG, "远程激活跳过：Shizuku binder 已可用")
+                return@withLock RemoteStartAck.ALREADY_AVAILABLE
+            }
+
+            val sent = sendStartBroadcastOnce(context.applicationContext, remoteActivation = true)
+            if (!sent) {
+                return@withLock RemoteStartAck.NO_MANAGER
+            }
+
+            val started = withTimeoutOrNull(timeoutMs) {
+                while (!isAvailable()) {
+                    delay(300L)
+                }
+                true
+            } == true
+
+            if (started) {
+                Log.i(TAG, "远程激活成功：已观测到 Shizuku binder")
+                RemoteStartAck.STARTED
+            } else {
+                Log.w(TAG, "远程激活超时：$timeoutMs ms 内未观测到 Shizuku binder")
+                RemoteStartAck.TIMEOUT
+            }
+        }
     }
 
     /**

@@ -861,15 +861,19 @@ class MqttAgentService : Service() {
         if (!acceptRid(packet.rid, packet.ts)) { doPublishAck(packet.rid, "DUP_OR_STALE"); return }
         val want = (packet.v as? PacketValue.BooleanValue)?.b ?: false
         if (!want) { doPublishAck(packet.rid, "BAD_PAYLOAD"); return }
-        // 发广播须在主线程之外避免阻塞服务；Shizuku 启动本身是异步的，这里只负责投递广播
-        val ok = ShizukuManager.requestRemoteStart(this)
-        CommandHistoryRecorder.record("控制端", "激活 Shizuku（广播拉起）")
-        if (ok) {
-            doPublishAck(packet.rid, "START_SENT")
-            Log.d(TAG, "已响应控制端「激活 Shizuku」，启动广播已投递")
-        } else {
-            doPublishAck(packet.rid, "START_FAIL")
-            Log.w(TAG, "激活 Shizuku 失败：官方/自定义 manager 均未安装")
+        // 不在 MQTT 回调线程里等待 binder：无人值守场景需要等 WorkManager/mDNS 完成，
+        // 放到 service scope 中异步执行；ACK 以「binder 是否真的起来」为准，避免 START_SENT 误报。
+        scope.launch {
+            val ack = runCatching {
+                ShizukuManager.requestRemoteStartAndWait(this@MqttAgentService.applicationContext)
+            }.getOrElse { t ->
+                Log.w(TAG, "激活 Shizuku 异常", t)
+                ShizukuManager.RemoteStartAck.BROADCAST_FAILED
+            }
+            CommandHistoryRecorder.record("控制端", "激活 Shizuku：${ack.name}")
+            LogFileManager.action("远程激活 Shizuku 结果: ${ack.wire}")
+            doPublishAck(packet.rid, ack.wire)
+            Log.d(TAG, "已响应控制端「激活 Shizuku」，结果=${ack.wire}")
         }
     }
 
