@@ -22,6 +22,8 @@
     <dimen name="dp_80">80dp</dimen>
     <dimen name="dp_22">22dp</dimen>
     <dimen name="nav_content_inset">104dp</dimen>
+    <!-- 任务列表底部留白：要同时避开悬浮导航(104dp)和悬浮添加按钮(底部 88dp + 高 56dp)，取 152dp -->
+    <dimen name="task_list_bottom_inset">152dp</dimen>
     <dimen name="dialog_max_height">320dp</dimen>
     <dimen name="dialog_min_height">120dp</dimen>
 
@@ -49,10 +51,4 @@
 
     <!--普通列表Item Layout高度-->
     <dimen name="itemLayoutHeight">60dp</dimen>
-
-    <!--链式任务列表轨道（借鉴 master，节点列宽 / 节点尺寸 / 节点中心偏移）-->
-    <dimen name="chain_track_width">24dp</dimen>
-    <dimen name="chain_dot_size">14dp</dimen>
-    <dimen name="chain_dot_center">34dp</dimen>
-    <dimen name="chain_dot_top">12dp</dimen>
 </resources>

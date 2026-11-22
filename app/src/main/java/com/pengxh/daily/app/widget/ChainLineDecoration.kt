@@ -12,18 +12,26 @@ import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.RecyclerView
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.utils.MaskOverlayHelper
+import kotlin.math.abs
+import kotlin.math.sin
 
 /**
- * 链式任务列表的连线：从上一个节点的中心，一直画到下一个节点的中心。
+ * 任务列表的链式时间轴：节点 + 节点间连线 + 流动脉冲光点。
  *
- * 借鉴 master 分支的 ChainLineDecoration，轨道线颜色改用主题描边色，
- * 与 alpha 现有的 md 色系保持一致。
+ * 连线状态化：相邻两节点都已过点（时间已走过的轨迹）时线段用琥珀色，其余用描边灰。
+ * 状态由 Adapter 在 bind 时写入 itemView 的 keyed tag（[TAG_PASSED] / [TAG_RUNNING]）。
  *
- * 连线状态化：相邻两节点都已过点（时间已走过的轨迹）时，线段用琥珀色；
- * 其余用描边灰。状态由 Adapter 在 bind 时写入 itemView 的 keyed tag（[TAG_PASSED]）。
+ * 卡片化适配（2026-11-22，对齐 DC 控制端）：
+ * 任务行已改成「一任务一卡片」，原先布局里左侧 24dp 链轨列 + 14dp 节点 View 已移除。
+ * 现在：
+ * - 轨道 x = 卡片左内侧 12dp（卡片内容从 16dp 起，不压文字），本类自己画节点圆点；
+ * - 节点 y = 每张卡片的垂直中心（不再是旧版的固定顶部偏移）；
+ * - 灰线仍画在子 View 下层 → 只在卡片间 12dp 间隙可见；
+ * - 节点 / 光点 / 彗尾画在子 View 上层（onDrawOver）→ 卡片是不透明白底，
+ *   画在下层会被完全遮住、只在间隙闪一下，凑不成「流水」。
  *
- * 流动脉冲：当存在 2 个及以上节点时，一个亮色光点沿连线从第一个节点依次流向下一个，
- * 循环往复，形成「能量沿时间轴流动」的视觉。动画在首次 onDraw 时惰性启动。
+ * 省电：每帧只是重绘，不起线程/不轮询。息屏或伪息屏时不跑动画；
+ * 切走 Tab 由 [pause] 暂停、[resume] 恢复；视图销毁由 [release] 取消动画并断开 Host。
  * */
 class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
 
@@ -36,18 +44,8 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
 
     private val pulseColor = Color.parseColor("#40C4FF")
 
-    /**
-     * 轨道列中心 x 偏移（相对 item 左边缘）
-     * */
-    private val trackOffset = context.resources.getDimension(R.dimen.chain_track_width) / 2
-
-    /**
-     * 节点中心 y 偏移（相对 item 顶部）：必须与 item_daily_task_rv_l.xml 中
-     * chainDotView 的 layout_marginTop(chain_dot_top) + 高度(chain_dot_size)/2 一致，
-     * 否则连线、流动光点和点亮光圈都会整体下移，和真实节点错位。
-     * */
-    private val dotCenter = context.resources.getDimension(R.dimen.chain_dot_top) +
-            context.resources.getDimension(R.dimen.chain_dot_size) / 2f
+    /** 轨道中心 x（相对 item 左边缘）：落在卡片左内侧 padding 区 */
+    private val trackCenterX = 12f * density
 
     private val normalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -61,6 +59,19 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         strokeCap = Paint.Cap.ROUND
         strokeWidth = 1 * density
         color = ContextCompat.getColor(context, R.color.md_warning)
+    }
+
+    /** 节点圆点（静态）：颜色按状态每帧设置 */
+    private val nodeDotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = ContextCompat.getColor(context, R.color.md_outlineVariant)
+    }
+
+    /** 执行中节点的扩散光圈（雷达波纹）：描边圆，随相位外扩渐隐 */
+    private val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.2f * density
+        color = pulseColor
     }
 
     // 流动脉冲：多层光晕（模拟发光）+ 白色高光核心 + 渐隐彗尾
@@ -89,12 +100,7 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         color = pulseColor
     }
 
-    /** 节点点亮联动：节点本体填亮色 + 外面两层柔光，无硬边圆环 */
-    private val nodeFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        color = pulseColor
-    }
-
+    /** 节点被光点经过时的柔光 */
     private val nodeHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = pulseColor
@@ -105,8 +111,18 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
     /** 流动进度 0→1：0 = 第一个节点，1 = 最后一个节点，循环 */
     private var flowProgress = 0f
 
-    /** 当前光点 y 坐标，供 onDrawOver 判断哪些节点被「经过」（画在 item 之上才看得见） */
+    /** 当前光点 y 坐标，供 onDrawOver 判断哪些节点被「经过」 */
     private var pulseY = Float.MIN_VALUE
+
+    /** 当前是否处于「可见且应动画」状态；切走 Tab 置 false，阻止 onDraw 重新拉起动画 */
+    private var active = true
+
+    /** 是否已释放；视图销毁后为 true，此后任何绘制都直接返回 */
+    private var released = false
+
+    private val warningColor = ContextCompat.getColor(context, R.color.md_warning)
+    private val primaryColor = ContextCompat.getColor(context, R.color.md_primary)
+    private val idleNodeColor = ContextCompat.getColor(context, R.color.md_outlineVariant)
 
     private val flowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
         duration = 3600
@@ -115,7 +131,7 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         addUpdateListener { anim ->
             // 息屏 / 伪息屏时自停省电；亮屏后由 onDraw 重新拉起
             if (!isScreenActuallyOn()) {
-                anim.cancel()
+                anim.pause()
                 return@addUpdateListener
             }
             flowProgress = anim.animatedValue as Float
@@ -131,18 +147,44 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         return interactive && !MaskOverlayHelper.isShowing()
     }
 
+    /** Tab 切走时暂停循环动画，避免不可见仍每帧 invalidate */
+    fun pause() {
+        active = false
+        if (flowAnimator.isStarted && !flowAnimator.isPaused) flowAnimator.pause()
+    }
+
+    /** Tab 切回时恢复循环动画 */
+    fun resume() {
+        if (released) return
+        active = true
+        if (flowAnimator.isStarted && flowAnimator.isPaused) flowAnimator.resume()
+    }
+
+    /** 视图销毁时调用：停掉无限动画并断开对 RecyclerView 的引用 */
+    fun release() {
+        released = true
+        active = false
+        if (flowAnimator.isStarted) flowAnimator.cancel()
+        flowAnimator.removeAllUpdateListeners()
+        host = null
+    }
+
     override fun onDraw(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+        if (released) return
         if (host !== parent) host = parent
 
-        // 亮屏时确保流动动画运行（息屏/伪息屏时动画已在 updateListener 里自停，此处不重拉）
-        val screenOn = isScreenActuallyOn()
-        if (screenOn && !flowAnimator.isStarted) {
+        // 亮屏时确保流动动画运行（息屏时不重拉，由 updateListener 自行暂停）
+        if (active && isScreenActuallyOn() && flowAnimator.isPaused) {
+            flowAnimator.resume()
+        }
+        if (active && !flowAnimator.isStarted) {
             flowAnimator.start()
         }
 
         val count = parent.childCount
         if (count < 2) return
 
+        // 只画连线：画在子 View 下层，卡片不透明 → 只在卡片间隙可见（像卡片之间的连接线）
         for (i in 0 until count - 1) {
             val child = parent.getChildAt(i)
             val next = parent.getChildAt(i + 1)
@@ -155,24 +197,73 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             val nextPassed = next.getTag(TAG_PASSED) as? Boolean ?: false
             val paint = if (childPassed && nextPassed) passedPaint else normalPaint
 
-            val x = child.left + trackOffset
-            canvas.drawLine(x, child.top + dotCenter, x, next.top + dotCenter, paint)
-        }
-
-        if (screenOn) {
-            drawFlowPulse(canvas, parent)
+            val x = child.left + trackCenterX
+            canvas.drawLine(x, nodeCenterY(child), x, nodeCenterY(next), paint)
         }
     }
 
+    private fun nodeCenterY(child: android.view.View): Float = child.top + child.height / 2f
+
     /**
-     * 沿连线绘制流动光点：先收集可见区内的相邻线段，按总长度把 [flowProgress] 映射到
-     * 具体 y 位置，画「光晕 + 高光核心」两层，形成能量流动效果。
+     * 节点与脉冲都画在子 View 之上（onDrawOver）。
+     *
+     * 顺序：静态节点圆点 → 执行中波纹 → 流动光点与彗尾 → 节点被经过时的柔光。
      * */
+    override fun onDrawOver(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+        if (released || parent.childCount == 0) return
+
+        drawNodes(canvas, parent)
+
+        // 息屏 / 伪息屏：不再画流动脉冲与呼吸，省电
+        if (!isScreenActuallyOn()) return
+
+        drawFlowPulse(canvas, parent)
+        drawNodeGlow(canvas, parent)
+    }
+
+    /** 静态节点圆点 + 执行中节点的呼吸与雷达波纹 */
+    private fun drawNodes(canvas: Canvas, parent: RecyclerView) {
+        val x = parent.getChildAt(0).left + trackCenterX
+        // 呼吸 / 波纹相位：复用流动动画的进度（3600ms 内走 2 个周期 → 1800ms 一轮），
+        // 不新增第二个动画，生命周期与流动脉冲完全一致
+        val rippleT = (flowProgress * 2f) % 1f
+        val breathScale = if (isScreenActuallyOn()) 1f + 0.3f * sin(rippleT * 2f * Math.PI).toFloat() else 1f
+
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            val nodeY = nodeCenterY(child)
+            val passed = child.getTag(TAG_PASSED) as? Boolean ?: false
+            val running = child.getTag(TAG_RUNNING) as? Boolean ?: false
+
+            val color = when {
+                running -> primaryColor
+                passed -> warningColor
+                else -> idleNodeColor
+            }
+            nodeDotPaint.color = color
+            nodeDotPaint.alpha = if (passed || running) 0xFF else 0x99
+
+            val baseRadius = 3f * density
+            if (running) {
+                // 雷达波纹：从 1 倍外扩到 2.6 倍并渐隐，与旧版 item 内 ripple View 一致
+                val progress = 1f + 1.6f * rippleT
+                ripplePaint.color = color
+                ripplePaint.alpha = ((1f - (progress - 1f) / 1.6f) * 0.45f * 255).toInt().coerceIn(0, 255)
+                canvas.drawCircle(x, nodeY, baseRadius * progress, ripplePaint)
+                canvas.drawCircle(x, nodeY, baseRadius * breathScale, nodeDotPaint)
+            } else {
+                canvas.drawCircle(x, nodeY, baseRadius, nodeDotPaint)
+            }
+        }
+    }
+
+    /** 流动光点 + 渐隐彗尾：沿节点连线从首个节点依次流向下一个 */
     private fun drawFlowPulse(canvas: Canvas, parent: RecyclerView) {
         val count = parent.childCount
+        // 先复位：本次算不出光点时，节点柔光不应沿用上一帧的旧位置
+        pulseY = Float.MIN_VALUE
         if (count < 2) return
 
-        // 收集可见线段（相邻连续 item 的节点连线）：(startY, endY)
         val segments = ArrayList<FloatArray>(count - 1)
         var totalLen = 0f
         for (i in 0 until count - 1) {
@@ -183,8 +274,8 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             if (pos == RecyclerView.NO_POSITION || nextPos == RecyclerView.NO_POSITION) continue
             if (nextPos != pos + 1) continue
 
-            val startY = child.top + dotCenter
-            val endY = next.top + dotCenter
+            val startY = nodeCenterY(child)
+            val endY = nodeCenterY(next)
             if (endY <= startY) continue
             segments.add(floatArrayOf(startY, endY))
             totalLen += endY - startY
@@ -204,7 +295,7 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
             acc += segLen
         }
 
-        val x = parent.getChildAt(0).left + trackOffset
+        val x = parent.getChildAt(0).left + trackCenterX
 
         // 渐隐彗尾：光点运动反方向（上方）画一串透明度/半径递减的圆点，形成「流水」拖尾
         val trailSteps = 14
@@ -227,29 +318,23 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
         canvas.drawCircle(x, pulseY, 1.3f * density, flowCorePaint)
     }
 
-    /**
-     * 节点点亮必须画在 item 之上：onDraw 在 RecyclerView.dispatchDraw 之前执行，
-     * 画在 onDraw 里的光晕会被 item 中不透明的节点 drawable 完全盖住。
-     * */
-    override fun onDrawOver(canvas: Canvas, parent: RecyclerView, state: RecyclerView.State) {
-        if (!isScreenActuallyOn() || pulseY == Float.MIN_VALUE || parent.childCount == 0) return
+    /** 节点被光点「经过」时泛青光：小尺寸柔光，不压卡片内容 */
+    private fun drawNodeGlow(canvas: Canvas, parent: RecyclerView) {
+        if (pulseY == Float.MIN_VALUE) return
 
-        val x = parent.getChildAt(0).left + trackOffset
-        val glowRange = 40f * density
+        val x = parent.getChildAt(0).left + trackCenterX
+        val glowRange = 32f * density
         for (i in 0 until parent.childCount) {
             val child = parent.getChildAt(i)
-            val nodeY = child.top + dotCenter
-            val dist = kotlin.math.abs(nodeY - pulseY)
+            val nodeY = nodeCenterY(child)
+            val dist = abs(nodeY - pulseY)
             if (dist >= glowRange) continue
 
             val intensity = 1f - dist / glowRange
-            // 14dp 节点本体填亮色（半径 7dp），外面两层淡青柔光，去掉硬边圆环
-            nodeHaloPaint.alpha = (intensity * 0x24).toInt().coerceIn(0, 255)
-            canvas.drawCircle(x, nodeY, 11f * density, nodeHaloPaint)
-            nodeHaloPaint.alpha = (intensity * 0x40).toInt().coerceIn(0, 255)
-            canvas.drawCircle(x, nodeY, 8.5f * density, nodeHaloPaint)
-            nodeFillPaint.alpha = (intensity * 0x90).toInt().coerceIn(0, 255)
-            canvas.drawCircle(x, nodeY, 7f * density, nodeFillPaint)
+            nodeHaloPaint.alpha = (intensity * 0x18).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, 9f * density, nodeHaloPaint)
+            nodeHaloPaint.alpha = (intensity * 0x30).toInt().coerceIn(0, 255)
+            canvas.drawCircle(x, nodeY, 6f * density, nodeHaloPaint)
         }
     }
 
@@ -263,5 +348,8 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
          * 0x4D414441 落在 AAPT 资源 id（0x7f..）之外，不会与真实资源冲突。
          */
         const val TAG_PASSED = 0x4D414441
+
+        /** itemView keyed tag：存「是否执行中」布尔，供节点着色与呼吸/波纹用。同样用字面量避开 R8 */
+        const val TAG_RUNNING = 0x4D414442
     }
 }

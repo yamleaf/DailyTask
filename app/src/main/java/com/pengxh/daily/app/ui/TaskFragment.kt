@@ -1,8 +1,12 @@
 package com.pengxh.daily.app.ui
 
 import com.pengxh.daily.app.UiInsets
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -21,8 +25,10 @@ import com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout
 import com.pengxh.daily.app.R
 import com.pengxh.daily.app.adapter.DailyTaskAdapter
 import com.pengxh.daily.app.databinding.FragmentTaskBinding
+import com.pengxh.daily.app.databinding.SheetTaskActionsBinding
 import com.pengxh.daily.app.extensions.convertToTimeEntity
 import com.pengxh.daily.app.extensions.format
+import com.pengxh.daily.app.extensions.resolveRandomTimeRange
 import com.pengxh.daily.app.service.KeepAliveReceiver
 import com.pengxh.daily.app.sqlite.DatabaseWrapper
 import com.pengxh.daily.app.sqlite.bean.DailyTaskBean
@@ -33,10 +39,9 @@ import com.pengxh.daily.app.utils.DailyTask
 import com.pengxh.daily.app.utils.TaskScheduler
 import com.pengxh.daily.app.utils.WatermarkDrawable
 import com.pengxh.daily.app.widget.ChainLineDecoration
+import com.pengxh.daily.app.widget.SwipeRevealLayout
 import com.pengxh.kt.lite.base.KotlinBaseFragment
-import com.pengxh.kt.lite.divider.RecyclerViewItemBorder
 import com.pengxh.kt.lite.extensions.convertColor
-import com.pengxh.kt.lite.extensions.dp2px
 import com.pengxh.kt.lite.extensions.show
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import com.pengxh.kt.lite.widget.dialog.BottomActionSheet
@@ -57,7 +62,6 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     private val kTag = "TaskFragment"
     private val ctx by lazy { requireContext() }
-    private val marginOffset by lazy { 16.dp2px(ctx) }
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val taskDataManager by lazy { com.pengxh.daily.app.utils.TaskDataManager() }
 
@@ -68,12 +72,27 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     private val dailyTaskAdapter by lazy {
         DailyTaskAdapter(taskBeans).apply {
+            // 左滑展开互斥需要按位置反查 SwipeRevealLayout，避免 Adapter 直接持有 View
+            openLayoutForPosition = { pos ->
+                binding.recyclerView.findViewHolderForAdapterPosition(pos)?.itemView
+                    as? SwipeRevealLayout
+            }
             setOnItemClickListener(object : DailyTaskAdapter.OnItemClickListener {
+                // 点击卡片仍是「修改任务」（DT 的使用习惯），左滑提供同一入口的快捷方式
                 override fun onItemClick(item: DailyTaskBean) = itemClick(item)
-                override fun onItemLongClick(item: DailyTaskBean) = itemLongClick(item)
+
+                // 长按改为「任务详情」弹层：展示全量信息 + 复制时间 + 编辑/删除
+                override fun onItemLongClick(item: DailyTaskBean) = showTaskActions(item)
+
+                override fun onActionEdit(item: DailyTaskBean) = itemClick(item)
+
+                override fun onActionDelete(item: DailyTaskBean) = confirmDeleteTask(item)
             })
         }
     }
+
+    /** 链式时间轴装饰器；需在视图销毁时 release，否则无限动画会一直跑并持有 RecyclerView */
+    private var chainDecoration: ChainLineDecoration? = null
 
     /** 顶部时钟 + 节日/工作日标签（整秒刷新）；伪息屏蒙层展示期间仅跳过更新，不中断调度 */
     private val timeUpdateRunnable = object : Runnable {
@@ -132,11 +151,12 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         binding.contentView.background = WatermarkDrawable(requireActivity(), DailyTask.getWatermarkText())
 
         binding.recyclerView.adapter = dailyTaskAdapter
-        binding.recyclerView.addItemDecoration(
-            RecyclerViewItemBorder(marginOffset, marginOffset / 4, marginOffset, marginOffset / 4)
-        )
-        // 链式任务轨道：节点连线（借鉴 master，节点着色由 Adapter 按执行进度驱动）
-        binding.recyclerView.addItemDecoration(ChainLineDecoration(requireContext()))
+        // 链式任务轨道：节点连线 + 流动光点。
+        // 卡片化后 item 自带 6dp 上下外边距提供间距，不再需要 RecyclerViewItemBorder
+        // （否则间距叠加成 20dp，且会和卡片描边视觉冲突）。
+        chainDecoration = ChainLineDecoration(requireContext()).also {
+            binding.recyclerView.addItemDecoration(it)
+        }
 
         binding.fabAddTask.setOnClickListener { showAddTaskSheet() }
 
@@ -377,8 +397,59 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         dialog.show()
     }
 
-    /** 长按任务：删除确认 */
-    private fun itemLongClick(item: DailyTaskBean) {
+    /**
+     * 长按任务：任务详情弹层（与左滑的「快捷操作」分工）。
+     *
+     * 上半部分是只读详情——完整打卡时间（卡片上已完整，可一键复制）、随机窗口、
+     * 实际执行、完整备注（卡片上单行省略）；下半部分才是编辑、删除。
+     * 弹层内部一律用 Fragment 的 [ctx] 懒加载属性，避免显示期间 detach 后 requireContext() 抛异常。
+     */
+    private fun showTaskActions(item: DailyTaskBean) {
+        val sheetBinding = SheetTaskActionsBinding.inflate(layoutInflater)
+
+        // 标题右侧状态胶囊：与列表同一套配色
+        val (label, textColorRes, bgColorRes) = dailyTaskAdapter.stateBadge(item)
+        sheetBinding.tvActionStatus.text = label
+        sheetBinding.tvActionStatus.setTextColor(ContextCompat.getColor(ctx, textColorRes))
+        sheetBinding.tvActionStatus.background?.mutate()
+            ?.setTint(ContextCompat.getColor(ctx, bgColorRes))
+
+        // 详情只读区
+        sheetBinding.tvDetailTime.text = item.time
+        val randomEnabled = SaveKeyValues.loadBoolean(Constant.RANDOM_TIME_KEY, true)
+        val minuteRange = SaveKeyValues.loadInt(Constant.TIME_RANGE_KEY, Constant.DEFAULT_TIME_RANGE)
+        sheetBinding.tvDetailRandomWindow.text =
+            item.resolveRandomTimeRange(randomEnabled, minuteRange) ?: "未启用"
+        sheetBinding.tvDetailActual.text = dailyTaskAdapter.actualTimeText(item)
+        sheetBinding.tvDetailName.text = item.name.orEmpty().ifBlank { "无备注" }
+
+        val sheet = BottomSheetDialog(ctx)
+        sheet.setContentView(sheetBinding.root)
+
+        // 复制打卡时间：左滑面板没有的能力，让长按有独立价值
+        sheetBinding.btnCopyTime.setOnClickListener {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            cm?.setPrimaryClip(ClipData.newPlainText("打卡时间", item.time))
+            // Android 13+ 系统自带剪贴板浮层提示，不再重复弹 Toast
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                "已复制打卡时间 ${item.time}".show(ctx)
+            }
+        }
+
+        sheetBinding.cardActionEdit.setOnClickListener {
+            sheet.dismiss()
+            itemClick(item)
+        }
+        sheetBinding.cardActionDelete.setOnClickListener {
+            sheet.dismiss()
+            confirmDeleteTask(item)
+        }
+        sheetBinding.btnActionCancel.setOnClickListener { sheet.dismiss() }
+        sheet.show()
+    }
+
+    /** 左滑「删除」/ 详情弹层「删除任务」共用的二次确认 */
+    private fun confirmDeleteTask(item: DailyTaskBean) {
         if (TaskScheduler.isRunning()) {
             "任务进行中，无法删除".show(ctx)
             return
@@ -497,15 +568,21 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
             // 重新可见：恢复每秒时钟刷新（隐藏期间已停，避免后台 Tab 空转浪费 CPU）
             mainHandler.removeCallbacks(timeUpdateRunnable)
             mainHandler.post(timeUpdateRunnable)
+            chainDecoration?.resume()
             refreshTaskListFromDb()
         } else {
             // 隐藏：停止时钟 Runnable，避免隐藏 Tab 每秒空转执行日期格式化/节假日查询/adapter 刷新
             mainHandler.removeCallbacks(timeUpdateRunnable)
+            // 同时暂停链式脉冲：列表已是 GONE、不再重绘，但无限 ValueAnimator 仍会每帧 invalidate
+            chainDecoration?.pause()
         }
     }
 
     override fun onDestroyView() {
         mainHandler.removeCallbacksAndMessages(null)
+        // 必须 release：装饰器里的循环动画否则会一直跑，并通过 host 持有 RecyclerView / 整套视图
+        chainDecoration?.release()
+        chainDecoration = null
         super.onDestroyView()
     }
 }

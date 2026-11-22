@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 任务卡左滑：删除卡（错误红，全圆角） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/md_error" />
+    <corners android:radius="@dimen/radius_card" />
+</shape>

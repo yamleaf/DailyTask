@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 任务卡内嵌淡灰信息块（随机窗口 / 实际执行） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/md_surfaceContainerLow" />
+    <corners android:radius="@dimen/radius_card" />
+</shape>
