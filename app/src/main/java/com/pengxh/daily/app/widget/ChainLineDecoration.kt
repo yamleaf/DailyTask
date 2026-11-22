@@ -42,9 +42,12 @@ class ChainLineDecoration(context: Context) : RecyclerView.ItemDecoration() {
     private val trackOffset = context.resources.getDimension(R.dimen.chain_track_width) / 2
 
     /**
-     * 节点中心 y 偏移（相对 item 顶部）
+     * 节点中心 y 偏移（相对 item 顶部）：必须与 item_daily_task_rv_l.xml 中
+     * chainDotView 的 layout_marginTop(chain_dot_top) + 高度(chain_dot_size)/2 一致，
+     * 否则连线、流动光点和点亮光圈都会整体下移，和真实节点错位。
      * */
-    private val dotCenter = context.resources.getDimension(R.dimen.chain_dot_center)
+    private val dotCenter = context.resources.getDimension(R.dimen.chain_dot_top) +
+            context.resources.getDimension(R.dimen.chain_dot_size) / 2f
 
     private val normalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
