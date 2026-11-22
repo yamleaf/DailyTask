@@ -400,11 +400,15 @@ class MqttClientWithAlarmPingSender(
      * waitForCompletion() 无超时等 PUBACK 的问题（TCP 半开 / stop() 竞态 shutdownNow
      * 无法中断已跑任务 → 钩子线程永久阻塞 → goAsync 广播不归还 → 系统 60s 判 ANR）。
      * 直接走底层异步 aClient.publish + 显式超时；超时即放弃本帧（presence 有 30s 循环兜底）。
-     * @return true=超时内拿到 PUBACK；false=超时/失败
+     * 注意：IMqttToken.waitForCompletion(long) 返回 void（Paho 1.2.5 官方签名），正常返回即代表
+     * 动作已完成；超时或动作失败会抛 MqttException，统一由 catch 返回 false。官方明确「超时后
+     * 动作仍可能在稍后完成」，故本方法只表示「本帧是否等到回执」，不代表消息一定没发出。
+     * @return true=超时内等到完成；false=超时/失败
      */
     fun publishWithTimeout(topic: String, message: MqttMessage, timeoutMs: Long): Boolean = try {
         val token = aClient.publish(topic, message, null, null)
         token.waitForCompletion(timeoutMs)
+        true
     } catch (_: Exception) {
         false
     }
