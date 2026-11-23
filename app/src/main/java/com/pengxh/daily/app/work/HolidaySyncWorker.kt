@@ -10,6 +10,8 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.pengxh.daily.app.utils.ChinaHolidayManager
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.LogLevel
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -56,6 +58,12 @@ class HolidaySyncWorker(
                 else "HolidaySyncWorker：同步超时（30s），下次周期再试"
             )
             Result.success()
+        } catch (e: CancellationException) {
+            // 协程取消（WorkManager 停止本次 worker / 进程被回收 / 应用被 force-stop）：
+            // 必须原样抛出交给框架处理，绝不能当业务失败吞掉——
+            // 否则会误记一条 [E] "Job was cancelled" 污染诊断日志，还会把 work 标成 success 掩盖真实状态。
+            LogFileManager.writeLog(LogLevel.I, "HolidaySyncWorker 被取消（系统停止/进程回收），由 WorkManager 重新排期")
+            throw e
         } catch (e: Exception) {
             LogFileManager.error("HolidaySyncWorker 执行异常：${e.message}")
             // 网络类失败交下次周期；不 retry 以免紧循环反复唤醒耗电

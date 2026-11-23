@@ -275,7 +275,9 @@ object TaskScheduler {
                 val lateBy = now - task.actualTimeMillis
                 if (lateBy > PUNCH_LATE_GRACE_MS) {
                     skippedCount++
-                    LogFileManager.writeLog(
+                    // 用 action 级别记录：release 包不落 I 级日志，而「任务被跳过」正是排查
+                    // 「今天为什么没打卡」的关键证据，必须能在诊断报告里看到。
+                    LogFileManager.action(
                         "第 ${task.displayIndex} 个任务已过期（计划=${task.plannedTime}，" +
                                 "实际=${task.actualTime}），跳过"
                     )
@@ -346,7 +348,8 @@ object TaskScheduler {
             val wokeAt = System.currentTimeMillis()
             if (wokeAt - task.actualTimeMillis > PUNCH_LATE_GRACE_MS) {
                 skippedCount++
-                LogFileManager.writeLog(
+                // 同「已过期」分支：跳过原因必须在 release 诊断里可见
+                LogFileManager.action(
                     "第 ${task.displayIndex} 个任务唤醒时已超过宽限（计划=${task.plannedTime}，" +
                             "实际=${task.actualTime}，晚到=${(wokeAt - task.actualTimeMillis) / 1000}s），跳过"
                 )

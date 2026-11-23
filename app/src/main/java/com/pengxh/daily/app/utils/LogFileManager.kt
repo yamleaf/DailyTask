@@ -228,7 +228,10 @@ object LogFileManager {
                         'A' -> LogLevel.A
                         else -> LogLevel.I
                     }
-                    lvl.ordinal >= minLevel.ordinal
+                    // A（业务动作）只是「值得记录的动作」，级别不等于异常：A 的 ordinal 最大，
+                    // 若按 ordinal 比较会被当成 ≥W 混进「最近警告/错误」区域，把真正的 W/E 挤出窗口
+                    // （实测诊断报告该区域 100 行有 97 行是 [A]，W/E 名存实亡）。故 A 仅在不过滤时展示。
+                    lvl != LogLevel.A && lvl.ordinal >= minLevel.ordinal
                 }
             }
             val start = (filtered.size - maxLines).coerceAtLeast(0)
