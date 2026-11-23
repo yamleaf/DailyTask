@@ -337,11 +337,20 @@ class ForegroundRunningService : Service() {
     private fun updateResetTimeView() {
         val resetHour = SaveKeyValues.loadInt(Constant.RESET_TIME_KEY, Constant.DEFAULT_RESET_HOUR)
         val seconds = resetTaskSeconds(resetHour)
+        if (seconds < 60) {
+            emitResetTickTime("任务即将重置")
+            return
+        }
 
         val hours = seconds / 3600
         val minutes = (seconds % 3600) / 60
-        val time = String.format(Locale.getDefault(), "%02d小时%02d分钟", hours, minutes)
-        emitResetTickTime("${time}后刷新每日任务")
+        // 不足 1 小时不显示 00小时xx分钟，直接“xx分钟后重置任务”
+        val time = if (hours > 0) {
+            String.format(Locale.getDefault(), "%d小时%02d分钟", hours, minutes)
+        } else {
+            "${minutes}分钟"
+        }
+        emitResetTickTime("${time}后重置任务")
     }
 
     private fun resetTaskSeconds(hour: Int): Int {

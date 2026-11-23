@@ -77,7 +77,7 @@
                             android:ellipsize="end"
                             android:maxWidth="132dp"
                             android:singleLine="true"
-                            android:text="--分钟后刷新"
+                            android:text="--后重置任务"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>

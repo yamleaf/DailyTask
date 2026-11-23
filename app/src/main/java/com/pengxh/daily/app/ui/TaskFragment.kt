@@ -170,7 +170,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         // 每日重置后的重复周期提示（repeatTimeView）
         viewLifecycleOwner.lifecycleScope.launch {
             com.pengxh.daily.app.service.ForegroundRunningService.Companion.resetTickTime.collect {
-                binding.repeatTimeView.text = it.replace("后刷新每日任务", "后刷新")
+                binding.repeatTimeView.text = it
             }
         }
         // 任务运行状态 → 启动/停止按钮与提示；实际时间小字仅调度中展示
