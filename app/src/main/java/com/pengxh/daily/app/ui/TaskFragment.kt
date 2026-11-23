@@ -176,6 +176,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         // 任务运行状态 → 启动/停止按钮与提示；实际时间小字仅调度中展示
         viewLifecycleOwner.lifecycleScope.launch {
             TaskScheduler.isRunning.collectLatest { running ->
+                bindSchedulerState(running)
                 if (!running) {
                     dailyTaskAdapter.updateCurrentTaskState(-1)
                     dailyTaskAdapter.setActualHintState(false, emptyMap())
@@ -274,6 +275,18 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /** 添加任务：底部时间选择弹层 */
+    /** 顶部状态胶囊：运行中=绿色，已停止=中性灰；只表达调度状态，不参与执行逻辑 */
+    private fun bindSchedulerState(running: Boolean) {
+        val ctx = requireContext()
+        binding.schedulerStateView.text = if (running) "运行中" else "已停止"
+        binding.schedulerStateView.setTextColor(
+            ContextCompat.getColor(ctx, if (running) R.color.md_success else R.color.md_onSurfaceVariant)
+        )
+        binding.schedulerStateView.background?.mutate()?.setTint(
+            ContextCompat.getColor(ctx, if (running) R.color.md_successContainer else R.color.md_surfaceVariant)
+        )
+    }
+
     /** 状态卡附加信息：只展示偏离默认的异常态（循环关闭/跳过节假日/自定义工作日），默认配置不噪音展示 */
     private fun updateStatusExtraInfo() {
         val parts = mutableListOf<String>()
