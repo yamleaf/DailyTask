@@ -44,12 +44,21 @@
                     android:orientation="vertical"
                     android:padding="@dimen/dp_16">
 
-                    <!-- 标题 + 调度状态胶囊：把「运行中/已停止」从正文里提出来，先看清状态 -->
+                    <!-- 标题 + 状态点 + 刷新周期：状态用点表达，不再额外占一个胶囊 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/schedulerStatusDotView"
+                            android:layout_width="7dp"
+                            android:layout_height="7dp"
+                            android:layout_marginEnd="@dimen/dp_8"
+                            android:background="@drawable/bg_circle_primary"
+                            android:backgroundTint="@color/md_onSurfaceVariant"
+                            android:importantForAccessibility="no" />
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="0dp"
@@ -59,60 +68,39 @@
                             android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                             android:textColor="@color/md_onSurface" />
 
+                        <!-- 刷新周期：右上角次级信息，避免再占一整行 -->
                         <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/schedulerStateView"
+                            android:id="@+id/repeatTimeView"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:background="@drawable/bg_status_pill"
-                            android:paddingHorizontal="@dimen/dp_10"
-                            android:paddingVertical="3dp"
-                            android:text="已停止"
-                            android:textColor="@color/md_onSurfaceVariant"
-                            android:textSize="@dimen/sp_12"
-                            android:textStyle="bold" />
+                            android:layout_marginStart="@dimen/dp_8"
+                            android:ellipsize="end"
+                            android:maxWidth="132dp"
+                            android:singleLine="true"
+                            android:text="--分钟后刷新"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                            android:textColor="@color/md_onSurfaceVariant" />
                     </LinearLayout>
 
-                    <!-- 刷新周期：降为次级信息，不再抢占标题层级 -->
-                    <com.google.android.material.textview.MaterialTextView
-                        android:id="@+id/repeatTimeView"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/dp_4"
-                        android:drawablePadding="@dimen/dp_6"
-                        android:gravity="center_vertical"
-                        android:singleLine="true"
-                        android:text="--分钟后刷新每日任务"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="@color/md_onSurfaceVariant"
-                        app:drawableStartCompat="@drawable/ic_sand"
-                        app:drawableTint="@color/md_onSurfaceVariant" />
-
-                    <!-- 状态区：左侧文案两行 + 右侧启动/停止按钮 -->
+                    <!-- 状态正文：只放信息，不再和按钮挤在一行 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/dp_10"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:layout_marginTop="@dimen/dp_8"
+                        android:orientation="vertical">
 
-                        <LinearLayout
-                            android:layout_width="0dp"
+                        <!-- 第一行：状态主文案 -->
+                        <com.google.android.material.textview.MaterialTextView
+                            android:id="@+id/tipsView"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:gravity="center_vertical"
+                            android:hint="点击按钮后开始执行任务"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                            android:textColor="@color/md_onSurface"
+                            android:textColorHint="@color/md_onSurfaceVariant" />
 
-                            <!-- 第一行：状态主文案 -->
-                            <com.google.android.material.textview.MaterialTextView
-                                android:id="@+id/tipsView"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:gravity="center_vertical"
-                                android:hint="点击按钮后开始执行任务"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-                                android:textColor="@color/md_onSurface"
-                                android:textColorHint="@color/md_onSurfaceVariant" />
-
-<!-- 第二行：执行时间 + 备注（仅调度中展示） -->
+                        <!-- 第二行：执行时间 + 备注（仅调度中展示） -->
                         <com.google.android.material.textview.MaterialTextView
                             android:id="@+id/execDetailView"
                             android:layout_width="match_parent"
@@ -133,14 +121,41 @@
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                             android:textColor="@color/md_onSurfaceVariant"
                             android:visibility="gone" />
-                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- 操作行：打卡记录与启停并排，去掉独立记录行和分隔线 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/dp_12"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPunchRecord"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="@dimen/dp_40"
+                            android:minWidth="0dp"
+                            android:minHeight="@dimen/dp_40"
+                            android:paddingHorizontal="@dimen/dp_10"
+                            android:text="打卡记录"
+                            android:textColor="@color/md_primary"
+                            android:textSize="@dimen/sp_12"
+                            app:cornerRadius="@dimen/radius_button"
+                            app:strokeColor="@color/md_outlineVariant"
+                            app:strokeWidth="1dp" />
+
+                        <Space
+                            android:layout_width="0dp"
+                            android:layout_height="1dp"
+                            android:layout_weight="1" />
 
                         <!-- 启动 / 停止按钮（图标与文字由 Fragment 动态切换） -->
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/executeTaskButton"
                             android:layout_width="wrap_content"
                             android:layout_height="@dimen/dp_44"
-                            android:layout_marginStart="@dimen/dp_12"
                             android:contentDescription="启动执行任务"
                             android:text="启动"
                             android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
@@ -149,42 +164,6 @@
                             app:iconGravity="textStart"
                             app:iconTint="@color/md_success"
                             app:iconPadding="@dimen/dp_8" />
-                    </LinearLayout>
-
-                    <!-- 分隔线：把状态区与打卡记录入口分成两个层级 -->
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginTop="@dimen/dp_12"
-                        android:background="@color/md_outlineVariant" />
-
-                    <!-- 打卡记录入口 -->
-                    <LinearLayout
-                        android:id="@+id/punchRecordRow"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingTop="@dimen/dp_10"
-                        android:paddingBottom="2dp"
-                        android:background="?attr/selectableItemBackground">
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="查看打卡记录"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:textColor="@color/md_primary" />
-
-                        <ImageView
-                            android:layout_width="16dp"
-                            android:layout_height="16dp"
-                            android:src="@drawable/ic_chevron_right"
-                            android:contentDescription="@null"
-                            app:tint="@color/md_onSurfaceVariant" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

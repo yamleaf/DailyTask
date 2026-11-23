@@ -160,7 +160,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
         binding.fabAddTask.setOnClickListener { showAddTaskSheet() }
 
-        binding.punchRecordRow.setOnClickListener {
+        binding.btnPunchRecord.setOnClickListener {
             val intent = Intent(requireActivity(), PunchRecordActivity::class.java)
             startActivity(intent)
         }
@@ -170,7 +170,7 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
         // 每日重置后的重复周期提示（repeatTimeView）
         viewLifecycleOwner.lifecycleScope.launch {
             com.pengxh.daily.app.service.ForegroundRunningService.Companion.resetTickTime.collect {
-                binding.repeatTimeView.text = it
+                binding.repeatTimeView.text = it.replace("后刷新每日任务", "后刷新")
             }
         }
         // 任务运行状态 → 启动/停止按钮与提示；实际时间小字仅调度中展示
@@ -275,15 +275,13 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
     }
 
     /** 添加任务：底部时间选择弹层 */
-    /** 顶部状态胶囊：运行中=绿色，已停止=中性灰；只表达调度状态，不参与执行逻辑 */
+    /** 顶部状态点：运行中=绿色，已停止=中性灰；只表达调度状态，不参与执行逻辑 */
     private fun bindSchedulerState(running: Boolean) {
-        val ctx = requireContext()
-        binding.schedulerStateView.text = if (running) "运行中" else "已停止"
-        binding.schedulerStateView.setTextColor(
-            ContextCompat.getColor(ctx, if (running) R.color.md_success else R.color.md_onSurfaceVariant)
-        )
-        binding.schedulerStateView.background?.mutate()?.setTint(
-            ContextCompat.getColor(ctx, if (running) R.color.md_successContainer else R.color.md_surfaceVariant)
+        binding.schedulerStatusDotView.background?.mutate()?.setTint(
+            ContextCompat.getColor(
+                requireContext(),
+                if (running) R.color.md_success else R.color.md_onSurfaceVariant
+            )
         )
     }
 
