@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
@@ -25,7 +26,13 @@ object ChinaHolidayManager {
     private const val kTag = "ChinaHolidayManager"
     private const val CACHE_KEY = "holidayConfig"
 
-    private val _syncResult = MutableSharedFlow<SyncResult>(extraBufferCapacity = 1)
+    // 后台 WorkManager 刷新时通常没有 UI 订阅者；默认 SUSPEND 会在缓冲满后挂起 emit，
+    // 进而卡住 updateChinaHolidayData 的 finally（isSyncing 永远为 true）。
+    // 用 DROP_OLDEST 保证后台同步永不被 UI 订阅状态阻塞。
+    private val _syncResult = MutableSharedFlow<SyncResult>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     val syncResult = _syncResult.asSharedFlow()
 
     /**

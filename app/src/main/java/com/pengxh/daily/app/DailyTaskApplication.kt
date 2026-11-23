@@ -107,7 +107,10 @@ class DailyTaskApplication : Application() {
         // 节假日周期刷新下沉 WorkManager（方向 B feasibility probe）：
         // 注册 24h 周期刷新，幂等（KEEP）。仅新增一条后台自动刷新路径，
         // 与 SettingsFragment 手动刷新、控制端指令刷新并存，降低掉电率。
-        HolidaySyncScheduler.schedule(this)
+        // 防御：任何 WorkManager 初始化/注册异常都不能阻断 Application.onCreate，
+        // 否则整个进程（含调度/FGS）起不来，反而导致任务不执行。
+        runCatching { HolidaySyncScheduler.schedule(this) }
+            .onFailure { Log.w(javaClass.simpleName, "节假日周期刷新注册失败（忽略，不影响任务调度）", it) }
 
         dataBase = databaseBuilder(this, DailyTaskDataBase::class.java, "DailyTask.db")
             // v1→v2：任务表新增 name 列（多任务命名），用正式 Migration 保留既有任务数据
