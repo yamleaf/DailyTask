@@ -19,7 +19,6 @@
             android:background="@drawable/bg_header_gradient"
             android:elevation="@dimen/elev_appbar"
             app:menu="@menu/main_top_bar_menu"
-            app:overflowIcon="@drawable/ic_more_vert"
             app:subtitleTextAppearance="@style/TextAppearance.Material3.TitleSmall"
             app:subtitleTextColor="@color/on_header"
             app:titleTextColor="@color/on_header" />

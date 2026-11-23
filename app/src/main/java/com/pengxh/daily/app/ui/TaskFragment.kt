@@ -130,6 +130,10 @@ class TaskFragment : KotlinBaseFragment<FragmentTaskBinding>() {
 
     override fun setupTopBarLayout() {
         UiInsets.applyStatusBarPadding(requireActivity(), binding.toolbar)
+        // Toolbar 没有 overflowIcon 的 XML 属性，只能在代码里设置；
+        // 用 on_header 白色三点，避免默认深色图标融进深色渐变头。
+        binding.toolbar.overflowIcon =
+            ContextCompat.getDrawable(requireContext(), R.drawable.ic_more_vert)
         mainHandler.post(timeUpdateRunnable)
         binding.toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
