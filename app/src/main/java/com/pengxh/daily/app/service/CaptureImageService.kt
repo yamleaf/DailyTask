@@ -351,8 +351,9 @@ class CaptureImageService : Service(), CoroutineScope by MainScope() {
                 val rowPadding = rowStride - pixelStride * width
 
                 val bitmap = createBitmap(width + rowPadding / pixelStride, height)
-                bitmap.copyPixelsFromBuffer(buffer)
-                image.close()
+                // use 保证 copyPixelsFromBuffer 抛异常时也会关闭 Image，避免相机 buffer 泄漏；
+                // 原写法 close() 无 finally 保护，异常时会漏掉 close（对齐 master a2523e8c）
+                image.use { bitmap.copyPixelsFromBuffer(buffer) }
 
                 val cropped = if (rowPadding != 0) {
                     Bitmap.createBitmap(bitmap, 0, 0, width, height)
