@@ -357,10 +357,21 @@ object TaskScheduler {
                 KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
                 continue
             }
-            // 进入打卡阶段前取消本场闹钟，避免与执行中的流程叠触发
+            // 唤醒时刻 vs 计划时刻的偏差：判断「执行为什么会晚」的核心依据。
+            // 协程 delay 在 Doze/进程冻结下不准，实际可能晚数秒到一分多钟；
+            // 原先只有超宽限才记录，正常执行看不出偏差，问题只能靠猜。
+            // 与上方「调度第 N 个任务」（排程时）是两个不同事件，故用「到点唤醒」区分。
+            val wakeDelayMs = wokeAt - task.actualTimeMillis
+            LogFileManager.action(
+                "第 ${task.displayIndex} 个任务到点唤醒：计划=${task.actualTime}，" +
+                        "唤醒延迟=${wakeDelayMs / 1000}s"
+            )
             KeepAliveReceiver.cancelPunchAlarms(DailyTaskApplication.get())
 
             // ====== 阶段 2：打开目标 App，等待打卡或超时 ======
+            // 每场开始清零成功锚点：否则本场超时走 returnAfterPunch 时会读到上一场的
+            // 成功时间戳，算出「打卡成功→回跳」跨场次的假耗时。
+            clockInReceivedAt = 0L
             // 下界钳制：远程/导入可把该值写成 0（UI 之外无校验），0 会让任务瞬间判超时并强发告警邮件
             val timeoutSeconds = SaveKeyValues.loadInt(
                 Constant.STAY_OVERTIME_KEY, Constant.DEFAULT_OVER_TIME
@@ -771,6 +782,13 @@ object TaskScheduler {
         // 贴边悬浮窗需可见，才有安卓 15+「可见 overlay」后台启动 Activity 豁免
         FloatingWindowController.show()
         delay(400)
+        // 成功 → 回跳的耗时：用户看到的「打完卡」其实是这里落地，与打卡成功瞬间要能区分。
+        // 失败（超时路径）没有成功锚点，单独标注，避免算出跨场次的假耗时。
+        val punchToReturnMs = if (clockInReceivedAt > 0L) System.currentTimeMillis() - clockInReceivedAt else -1L
+        LogFileManager.action(
+            if (punchToReturnMs >= 0) "打卡结束：回跳耗时=${punchToReturnMs}ms"
+            else "打卡结束：超时路径回跳"
+        )
 
         withContext(Dispatchers.Main) {
             val home = Intent(Intent.ACTION_MAIN).apply {
@@ -835,6 +853,10 @@ object TaskScheduler {
         _returnToApp.tryEmit(Unit)
     }
 
+    /** 打卡成功回调到达时刻（0=本轮尚未成功），用于日志归因 */
+    @Volatile
+    private var clockInReceivedAt = 0L
+
     /**
      * 打卡成功通知
      * 调用链：NotificationMonitorService.emitMonitorEvent(ClockInSuccess)
@@ -845,6 +867,15 @@ object TaskScheduler {
         // 成功瞬间结束「等待打卡」窗口，避免伪息屏门禁 / 其它逻辑仍把本段当作活跃打卡
         if (runningDetail.contains("等待打卡")) {
             runningDetail = runningDetail.replace("等待打卡", "打卡完成")
+        }
+        // 打卡成功时刻是「计划→完成」链路的关键锚点：原先这里无任何日志，
+        // 卡片显示的又是计划执行时刻，导致「实际完成比显示晚一分多钟」无法归因。
+        // 行首日志时间即此刻，正文不再重复打印绝对时间。
+        // 幂等：NotifyService 与 MainActivity 各会调一次（complete 幂等），
+        // 只认第一次到达的时刻并只记一条，否则同一场打卡会打出两条重复日志。
+        if (clockInReceivedAt == 0L) {
+            clockInReceivedAt = System.currentTimeMillis()
+            LogFileManager.action("打卡成功确认")
         }
         clockInDeferred?.complete(Unit)
     }
