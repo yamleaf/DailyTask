@@ -76,6 +76,10 @@ class KeepAliveReceiver : BroadcastReceiver() {
         @Volatile
         private var lastEnsureServicesAtMs = 0L
 
+        /** 精确闹钟降级日志最后落盘时刻：与引导通知共用 24h 去重窗口，避免高频路径刷屏诊断文件 */
+        @Volatile
+        private var lastExactAlarmDegradeLogMs = 0L
+
         /** 调度推进短时锁：PUNCH_DUE/RESET 持有，TaskScheduler 推进后释放；超时自动兜底 */
         @Volatile
         private var schedulerAdvanceWakeLock: PowerManager.WakeLock? = null
@@ -176,6 +180,19 @@ class KeepAliveReceiver : BroadcastReceiver() {
             )
 
         /**
+         * 精确闹钟降级日志（A 级）：与引导通知共用 24h 去重窗口。
+         * setExactAlarm 被心跳复活/每日重置/电量预警/预热/救援等多条高频路径复用，
+         * 一旦在 Android 12 上权限被撤销，同一文案会被逐次重复落盘，把诊断文件里真正的 W/E 挤出窗口。
+         * 因此只在 24h 内首次降级时记一条。
+         */
+        private fun logExactAlarmDegraded(message: String) {
+            val now = System.currentTimeMillis()
+            if (now - lastExactAlarmDegradeLogMs < ALARM_GUIDE_INTERVAL_MS) return
+            lastExactAlarmDegradeLogMs = now
+            LogFileManager.action(message)
+        }
+
+        /**
          * 跨版本精确闹钟调度：
          * - Android 13+（API 33 起，含 14/15/16/17）：USE_EXACT_ALARM 不可被用户/系统撤销、无需弹窗授权，直接精确触发；
          * - Android 12/12L（API 31-32）：SCHEDULE_EXACT_ALARM 可能被撤销，有权限精确、无权限降级非精确并触发一次性引导；
@@ -191,7 +208,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
                         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
                     } catch (e: SecurityException) {
                         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                        LogFileManager.action("精确闹钟被系统拒绝，已降级为不精确（Doze 下可能延迟数十秒）")
+                        logExactAlarmDegraded("精确闹钟被系统拒绝，已降级为不精确（Doze 下可能延迟数十秒）")
                     }
                 }
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
@@ -203,7 +220,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
                         // 降级为「不精确闹钟」：Doze 下系统可以把这次唤醒推迟数十秒到数分钟。
                         // 这是「任务到点却晚一分多钟才执行」的头号嫌疑，原先只弹通知不留日志，
                         // 事后无法判断是否走了降级路径，必须落盘。
-                        LogFileManager.action("精确闹钟权限缺失，已降级为不精确（Doze 下可能延迟数十秒）")
+                        logExactAlarmDegraded("精确闹钟权限缺失，已降级为不精确（Doze 下可能延迟数十秒）")
                         notifyExactAlarmMissing(context)
                     }
                 }
