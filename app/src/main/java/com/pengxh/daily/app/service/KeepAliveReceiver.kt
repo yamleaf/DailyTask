@@ -22,6 +22,7 @@ import com.pengxh.daily.app.utils.IdlePseudoMaskController
 import com.pengxh.daily.app.utils.LogFileManager
 import com.pengxh.daily.app.utils.MaskOverlayHelper
 import com.pengxh.daily.app.utils.TaskScheduler
+import com.pengxh.kt.lite.extensions.timestampToTime
 import com.pengxh.kt.lite.utils.SaveKeyValues
 import java.util.Calendar
 
@@ -50,11 +51,19 @@ class KeepAliveReceiver : BroadcastReceiver() {
         private const val BATTERY_ALARM_REQUEST_CODE = 1005
         private const val PUNCH_PREWARM_REQUEST_CODE = 1006
         private const val PUNCH_DUE_REQUEST_CODE = 1007
+        /** setAlarmClock 的 showIntent（点状态栏闹钟图标跳转）请求码，与操作 PendingIntent 区分 */
+        private const val PUNCH_ALARM_CLOCK_SHOW_REQUEST_CODE = 1009
         /** MQTT/FGS 配额失败等紧急救援，与 15 分钟心跳 PendingIntent 分离 */
         private const val RESCUE_ALARM_REQUEST_CODE = 1008
         private const val INTERVAL_MS = 15 * 60 * 1000L
         /** 到点前预热提前量：兼顾 MQTT 重连与安卓 15+ 服务拉起，又不过早耗电 */
         private const val PUNCH_PREWARM_BEFORE_MS = 90_000L
+        /**
+         * 打卡闹钟迟到多久才记 A 级日志。
+         * setAlarmClock 正常误差在 1s 内；留 5s 容差避免系统时钟微调造成假告警，
+         * 超过则说明闹钟被 Doze/ROM 策略推迟，必须留痕。
+         */
+        private const val PUNCH_ALARM_LATE_WARN_SEC = 5L
         private const val ENSURE_SERVICES_DEBOUNCE_MS = 8_000L
         /** FGS 配额耗尽后救援间隔：避免 30s 连撞 Android 15 后台 FGS 限额 */
         private const val FGS_QUOTA_BACKOFF_MS = 10 * 60 * 1000L
@@ -182,6 +191,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
                         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
                     } catch (e: SecurityException) {
                         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                        LogFileManager.action("精确闹钟被系统拒绝，已降级为不精确（Doze 下可能延迟数十秒）")
                     }
                 }
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
@@ -190,6 +200,10 @@ class KeepAliveReceiver : BroadcastReceiver() {
                         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
                     } else {
                         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                        // 降级为「不精确闹钟」：Doze 下系统可以把这次唤醒推迟数十秒到数分钟。
+                        // 这是「任务到点却晚一分多钟才执行」的头号嫌疑，原先只弹通知不留日志，
+                        // 事后无法判断是否走了降级路径，必须落盘。
+                        LogFileManager.action("精确闹钟权限缺失，已降级为不精确（Doze 下可能延迟数十秒）")
                         notifyExactAlarmMissing(context)
                     }
                 }
@@ -197,6 +211,40 @@ class KeepAliveReceiver : BroadcastReceiver() {
                     // 8..11：无需权限，直接精确
                     alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
                 }
+            }
+        }
+
+        /**
+         * 打卡到点闹钟专用：setAlarmClock。
+         *
+         * 与 setExactAndAllowWhileIdle 的区别：后者在 Doze 下仍会被批量推迟（且 Android 12 上
+         * SCHEDULE_EXACT_ALARM 撤销后会静默降级为不精确），真机实测晚 72 秒才唤醒；
+         * setAlarmClock 是「用户可见闹钟」，系统必须准点唤醒，是打卡类应用的唯一可靠选择。
+         *
+         * 代价：状态栏会显示闹钟图标，直到 [cancelPunchAlarms] 取消（进入打卡阶段前会取消）。
+         */
+        private fun setPunchAlarmClock(context: Context, triggerAt: Long) {
+            val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+            val operation = punchDuePendingIntent(context)
+            // showIntent：用户点状态栏闹钟图标时的跳转目标，必须是 Activity PendingIntent。
+            // getLaunchIntentForPackage 理论可为 null（包异常/被禁用），必须兜底，
+            // 否则 PendingIntent.getActivity(null, ...) 直接 NPE，整场打卡都不会被唤醒。
+            val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                ?: Intent(context, com.pengxh.daily.app.ui.MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            val showIntent = PendingIntent.getActivity(
+                context,
+                PUNCH_ALARM_CLOCK_SHOW_REQUEST_CODE,
+                launch.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP) },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            try {
+                alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, showIntent), operation)
+            } catch (e: Exception) {
+                // 个别 ROM 自定义 setAlarmClock 实现可能抛异常：退回 exact，至少不退化为「不设闹钟」
+                LogFileManager.error("setAlarmClock 设置失败，已回退精确闹钟：${e.message}")
+                setExactAlarm(context, triggerAt, operation)
             }
         }
 
@@ -405,21 +453,40 @@ class KeepAliveReceiver : BroadcastReceiver() {
          */
         fun scheduleNextPunchAlarms(context: Context, punchAtMs: Long) {
             val appCtx = context.applicationContext
+            // 先取上一次计划值用于日志去重：保活续调度一天可能多次 startTask，
+            // 每次都会为同一场任务重排同一时刻的闹钟，逐次打印会刷屏。
+            val previousPlan = SaveKeyValues.loadLong(Constant.PUNCH_ALARM_PLAN_KEY, 0L)
             cancelPunchAlarms(appCtx)
             if (!isKeepAliveEnabled() || isPaused()) return
             val now = System.currentTimeMillis()
             if (punchAtMs <= now) return
-            setExactAlarm(appCtx, punchAtMs, punchDuePendingIntent(appCtx))
+            // 到点闹钟用 setAlarmClock：这是唯一不受 Doze 推迟的闹钟类型。
+            // 根因背景（真机实证）：Android 12 上 SCHEDULE_EXACT_ALARM 可能被撤销，
+            // setExactAndAllowWhileIdle 会静默降级为「不精确」，Doze 下实测晚约 72 秒才唤醒
+            // （计划 07:22:11，实际 07:23:23 才亮屏，导致超时整体后移）。
+            // setAlarmClock 属于「用户可见闹钟」，系统必须准点唤醒、不参与 Doze 批量延迟。
+            setPunchAlarmClock(appCtx, punchAtMs)
             val prewarmAt = punchAtMs - PUNCH_PREWARM_BEFORE_MS
-            if (prewarmAt > now + 5_000L) {
+            val prewarmPlanned = prewarmAt > now + 5_000L
+            if (prewarmPlanned) {
+                // 预热只需「大致提前」，晚几十秒无影响，继续用低开销的 exact 闹钟，
+                // 避免再多一个闹钟图标。
                 setExactAlarm(appCtx, prewarmAt, punchPrewarmPendingIntent(appCtx))
             }
-            LogFileManager.writeLog(
-                "已排打卡闹钟 due=${punchAtMs} prewarm=${if (prewarmAt > now + 5_000L) prewarmAt else 0}"
-            )
+            // 计划时刻落库，供 PUNCH_DUE 触发时算「闹钟实际晚了多久」（进程被杀后变量会丢，故用 SP）
+            SaveKeyValues.saveLong(Constant.PUNCH_ALARM_PLAN_KEY, punchAtMs)
+            if (punchAtMs != previousPlan) {
+                LogFileManager.action(
+                    "已排打卡闹钟：到点=${punchAtMs.timestampToTime()}" +
+                            (if (prewarmPlanned) "，预热=${prewarmAt.timestampToTime()}" else "")
+                )
+            }
         }
 
         fun cancelPunchAlarms(context: Context) {
+            // 计划时刻同步清空：避免下次触发读到上一场的旧值算出假延迟。
+            // 放在 getSystemService 之前，确保即使取不到 AlarmManager 也不会残留脏值。
+            SaveKeyValues.saveLong(Constant.PUNCH_ALARM_PLAN_KEY, 0L)
             val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
             alarmManager.cancel(punchPrewarmPendingIntent(context))
             alarmManager.cancel(punchDuePendingIntent(context))
@@ -614,10 +681,28 @@ class KeepAliveReceiver : BroadcastReceiver() {
                 tryResumeSchedulerIfWanted(context)
             }
             ACTION_PUNCH_PREWARM -> {
-                // 到点前只预热服务，不亮屏，降低自然息屏下的耗电
+                // 到点前只预热服务，不亮屏，降低自然息屏下的耗电。
+                // 纯诊断信息（预热晚几秒不影响打卡结果），用 I 级只在 Debug 落盘，
+                // 避免每天多一条无行动价值的 A 级日志。
+                LogFileManager.writeLog("打卡预热：开始拉活服务（不亮屏）")
                 ensureServicesAlive(context, "punch_prewarm")
             }
             ACTION_PUNCH_DUE -> {
+                // 到点唤醒时刻是判断「执行为什么晚」的核心锚点：闹钟准时触发但打卡慢，
+                // 与闹钟本身被 Doze 推迟，是两种完全不同的根因和修复方向。
+                //
+                // 注意与 TaskScheduler「第 N 个任务到点唤醒」的分工：后者记录的是调度协程真正
+                // 推进的时刻（业务锚点，必记）；本条只在闹钟明显迟到时记录，用于区分
+                // 「闹钟被推迟」与「闹钟准时但协程/拉起慢」，准点时不产生冗余日志。
+                val planned = SaveKeyValues.loadLong(Constant.PUNCH_ALARM_PLAN_KEY, 0L)
+                val alarmDelaySec = if (planned > 0L) (System.currentTimeMillis() - planned) / 1000 else 0L
+                if (planned > 0L && alarmDelaySec >= PUNCH_ALARM_LATE_WARN_SEC) {
+                    LogFileManager.action(
+                        "打卡闹钟延迟触发：计划=${planned.timestampToTime()}，延迟=${alarmDelaySec}s"
+                    )
+                } else {
+                    LogFileManager.writeLog("打卡闹钟到点触发")
+                }
                 // 先持锁再投递 Main：广播返回后系统临时唤醒可能立刻结束，
                 // 否则 select 续体来不及跑又睡回冻结（08-15/16 类场景残留风险）
                 acquireSchedulerAdvanceWakeLock(context)
