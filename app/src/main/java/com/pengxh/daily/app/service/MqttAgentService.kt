@@ -33,6 +33,7 @@ import com.pengxh.daily.app.utils.MqttSecureConfig
 import com.pengxh.daily.app.utils.CommandHistoryRecorder
 import com.pengxh.daily.app.utils.ConfigImportSignal
 import com.pengxh.daily.app.utils.LogFileManager
+import com.pengxh.daily.app.utils.LogLevel
 import com.yample.mqttprotocol.MqttQuota
 import com.pengxh.daily.app.utils.RemoteSnapshot
 import com.pengxh.daily.app.utils.RuntimeStateApplier
@@ -400,6 +401,8 @@ class MqttAgentService : Service() {
     }
 
     @Volatile private var _connected = false
+    /** 最近一次连接丢失时刻（ms）；重连成功结算后清零。用于诊断报告量化「离线持续时长」 */
+    @Volatile private var disconnectedAtMs = 0L
     @Volatile private var _bound = SaveKeyValues.loadBoolean(Constant.IS_BOUND_KEY, false)
     private var mqttClient: MqttClient? = null
     /** 闹钟驱动的心跳发送器（仅 ALARM 级别使用）。Paho close() 会调其 stop()，onDestroy 显式 stop() 幂等兜底 */
@@ -670,6 +673,12 @@ class MqttAgentService : Service() {
                 // P3：服务已销毁（onDestroy 已将 instance 置空）后到达的迟到断线回调，
                 // 不再更新状态/排闹钟/触发重连，避免残留通知与无效复活闹钟
                 if (instance !== this@MqttAgentService) return
+                // 诊断：记录掉线时刻，重连成功时结算「离线持续时长」。
+                // 只记「从已连接态首次转掉线」，避免重连失败期间重复刷新起点。
+                if (disconnectedAtMs == 0L) {
+                    disconnectedAtMs = System.currentTimeMillis()
+                    LogFileManager.writeLog(LogLevel.W, "MQTT 连接丢失")
+                }
                 Log.w(TAG, "MQTT 连接丢失：${cause?.message}", cause)
                 // 掉线瞬间网络状态诊断（降级 Log.d，logcat 保留；区分网络断 vs 保活失效）
                 Log.d(TAG, "连接丢失诊断 网络=${networkStateDesc()} cause=${cause?.message}")
@@ -1588,6 +1597,15 @@ class MqttAgentService : Service() {
     }
 
     private fun onConnected() {
+        // 结算上一次掉线：所有连接成功路径（Paho 自动重连 / 保活级别重建后首连 / 首连兜底）
+        // 都经过 onConnected，在此统一结算可避免 rebuild 走 reconnect=false 时残留起点。
+        // 时间戳由 LogFileManager 自动追加，文案不再重复绝对时间；用「时长」反推掉线时刻。
+        val lostAt = disconnectedAtMs
+        if (lostAt > 0L) {
+            disconnectedAtMs = 0L
+            val seconds = (System.currentTimeMillis() - lostAt) / 1000
+            LogFileManager.action("MQTT 重连成功，离线持续 ${seconds}s")
+        }
         _connected = true
         MqttQuota.onConnect(this)
         stateListener?.invoke(true)
