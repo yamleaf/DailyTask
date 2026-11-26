@@ -1603,8 +1603,11 @@ class MqttAgentService : Service() {
         val lostAt = disconnectedAtMs
         if (lostAt > 0L) {
             disconnectedAtMs = 0L
-            val seconds = (System.currentTimeMillis() - lostAt) / 1000
+            // 同一份结算结果同时落诊断日志与 SP（快照上报给控制端），避免两处时长不一致
+            val seconds = MqttKeepAliveStrategy.recordReconnect(lostAt)
             LogFileManager.action("MQTT 重连成功，离线持续 ${seconds}s")
+            // 全量快照有 30s TTL 缓存，恢复后立即失效，保证控制端这次拉到的就是含新离线区间的快照
+            RemoteSnapshot.invalidateCache()
         }
         _connected = true
         MqttQuota.onConnect(this)

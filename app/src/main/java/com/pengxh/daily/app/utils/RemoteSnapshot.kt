@@ -134,6 +134,21 @@ object RemoteSnapshot {
             if (lastDiscAt > 0L) dtf.format(java.time.Instant.ofEpochMilli(lastDiscAt).atZone(ZoneId.systemDefault()).toLocalDateTime())
             else "—"
         )
+        // 最近一次「已恢复」的离线区间：DT 离线时 MQTT 断连无法推送，只能在重连后随快照补报。
+        // 控制端据此展示「01:02 → 01:08 · 持续 6分」；旧版本 DT 无此字段时控制端自动隐藏该行。
+        val lastSince = MqttKeepAliveStrategy.lastOfflineSince()
+        o.addProperty(
+            "mqttLastOfflineSince",
+            if (lastSince > 0L) dtf.format(java.time.Instant.ofEpochMilli(lastSince).atZone(ZoneId.systemDefault()).toLocalDateTime())
+            else "—"
+        )
+        val lastRecAt = MqttKeepAliveStrategy.lastReconnectAt()
+        o.addProperty(
+            "mqttLastReconnectAt",
+            if (lastRecAt > 0L) dtf.format(java.time.Instant.ofEpochMilli(lastRecAt).atZone(ZoneId.systemDefault()).toLocalDateTime())
+            else "—"
+        )
+        o.addProperty("mqttLastOfflineSeconds", MqttKeepAliveStrategy.lastOfflineSeconds())
         o.addProperty("powerSaveMode", AppRuntimeConfig.isPowerSaveMode())
         o.addProperty("forcePseudoMask", AppRuntimeConfig.isForcePseudoMask())
         o.addProperty("wifi", wifiStatus(context))

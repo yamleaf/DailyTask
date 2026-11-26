@@ -133,6 +133,37 @@ object MqttKeepAliveStrategy {
     fun lastDisconnectAt(): Long =
         SaveKeyValues.loadLong(Constant.MQTT_KEEPALIVE_LAST_DISC_KEY, 0L)
 
+    /**
+     * 结算一次「已恢复」的掉线：持久化恢复时刻与持续时长，返回时长（秒）。
+     * 由 MqttAgentService.onConnected() 在重连成功且存在掉线起点时调用，天然幂等；
+     * 落 SP 而非进程内变量，保证服务被回收/重启后快照仍能带上最近一次离线区间。
+     *
+     * 注意：DT 离线期间 MQTT 断连、无法推送，所以该区间只能在恢复后随快照补报给控制端，
+     * 它描述的是「最近一次已结束的离线」，不包含当前正在进行的断连。
+     */
+    fun recordReconnect(lostAtMs: Long): Long {
+        val now = System.currentTimeMillis()
+        val seconds = ((now - lostAtMs) / 1000).coerceAtLeast(0L)
+        // 三个字段成对写入：保活级别重建等路径下 recordDisconnect() 可能被短路，
+        // 直接用「今日掉线统计」的最近时间会和本次区间对不上，故单独保存本区间起点。
+        SaveKeyValues.saveLong(Constant.MQTT_LAST_OFFLINE_SINCE_KEY, lostAtMs)
+        SaveKeyValues.saveLong(Constant.MQTT_LAST_RECONNECT_AT_KEY, now)
+        SaveKeyValues.saveLong(Constant.MQTT_LAST_OFFLINE_DURATION_KEY, seconds)
+        return seconds
+    }
+
+    /** 最近一次离线区间的起点（ms，0 表示从未记录） */
+    fun lastOfflineSince(): Long =
+        SaveKeyValues.loadLong(Constant.MQTT_LAST_OFFLINE_SINCE_KEY, 0L)
+
+    /** 最近一次离线区间的恢复时刻（ms，0 表示从未记录） */
+    fun lastReconnectAt(): Long =
+        SaveKeyValues.loadLong(Constant.MQTT_LAST_RECONNECT_AT_KEY, 0L)
+
+    /** 最近一次离线区间的持续时长（秒，-1 表示从未记录；旧版本升级上来即为此值） */
+    fun lastOfflineSeconds(): Long =
+        SaveKeyValues.loadLong(Constant.MQTT_LAST_OFFLINE_DURATION_KEY, -1L)
+
     private fun save(next: Level) {
         level = next
         SaveKeyValues.saveInt(Constant.MQTT_KEEPALIVE_LEVEL_KEY, next.ordinal)

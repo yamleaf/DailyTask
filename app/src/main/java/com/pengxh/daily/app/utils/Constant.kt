@@ -97,6 +97,12 @@ object Constant {
     const val MQTT_KEEPALIVE_LEVEL_KEY = "MQTT_KEEPALIVE_LEVEL_KEY"
     /** 保活最近一次掉线时间戳（ms） */
     const val MQTT_KEEPALIVE_LAST_DISC_KEY = "MQTT_KEEPALIVE_LAST_DISC_KEY"
+    /** 最近一次「已完成」离线区间的起点（ms）；与恢复时刻/时长成对写入，保证三者严格自洽 */
+    const val MQTT_LAST_OFFLINE_SINCE_KEY = "MQTT_LAST_OFFLINE_SINCE_KEY"
+    /** 最近一次「已完成」离线区间的恢复时刻（ms）；仅在重连成功时写入，随快照上报控制端 */
+    const val MQTT_LAST_RECONNECT_AT_KEY = "MQTT_LAST_RECONNECT_AT_KEY"
+    /** 最近一次「已完成」离线区间的持续时长（秒） = 恢复时刻 - 本区间起点 */
+    const val MQTT_LAST_OFFLINE_DURATION_KEY = "MQTT_LAST_OFFLINE_DURATION_KEY"
     /** 当日掉线计数（所有保活模式统一统计；配合 MQTT_DISCONNECT_DATE_KEY 跨天自动重置） */
     const val MQTT_DISCONNECT_COUNT_KEY = "MQTT_DISCONNECT_COUNT_KEY"
     /** 掉线计数所属日期（yyyy-MM-dd），跨天时计数清零重计 */
