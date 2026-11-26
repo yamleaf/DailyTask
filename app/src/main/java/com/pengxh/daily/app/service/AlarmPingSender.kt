@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -236,6 +237,15 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         runCatching { hookExecutor.shutdownNow() }
     }
 
+    /** 精确闹钟降级日志（A 级）：与 KeepAliveReceiver.logExactAlarmDegraded 同构，24h 内只记首条。
+     * schedule() 每 ~80s 被 Paho 调一次，权限缺失时若不去重会把诊断文件的 W/E 挤出窗口。 */
+    private fun logExactAlarmDegraded(message: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastExactAlarmDegradeLogMs < DEGRADE_LOG_INTERVAL_MS) return
+        lastExactAlarmDegradeLogMs = now
+        LogFileManager.action(message)
+    }
+
     /** Paho 每次 checkForActivity 后按剩余 keepalive 时间调用；同 PendingIntent 多次 set 自动覆盖旧闹钟 */
     override fun schedule(delayInMilliseconds: Long) {
         if (delayInMilliseconds <= 0) return
@@ -244,19 +254,37 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         // 本方法被 start() 与 checkForActivity 驱动的下一轮排程共用，入口统一压缩即覆盖全部节律。
         val actualDelay = delayInMilliseconds / ALARM_PING_COMPRESS_DIVISOR
         val triggerAt = SystemClock.elapsedRealtime() + actualDelay
+        val type = AlarmManager.ELAPSED_REALTIME_WAKEUP
+        val pi = pingPendingIntent()
+        // 与 KeepAliveReceiver.setExactAlarm() 同构的三分支判定：
+        // - 13+：USE_EXACT_ALARM 不可撤销（manifest 已声明），直接精确；
+        // - 12/12L：SCHEDULE_EXACT_ALARM 可被撤销，必须【前置判定】；
+        // - 8..11：精确闹钟无需权限。
+        // 根因（真机实证）：Android 12 权限被撤销时 setExactAndAllowWhileIdle 会「静默降级」为普通
+        // 闹钟且不抛异常 —— 原实现只在 catch 里兜底，结果既不降级也不留日志，PING 被压到 Doze
+        // 维护窗口，超过 broker 360s 死线后发 LWT offline（夜间偶发离线）。故不能等异常再判定。
         try {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pingPendingIntent()
-            )
-            Log.d(TAG, "已排 PING 闹钟 ${actualDelay}ms（原始 ${delayInMilliseconds}ms /${ALARM_PING_COMPRESS_DIVISOR}）")
+            val exactAllowed = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> true
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> alarmManager.canScheduleExactAlarms()
+                else -> true
+            }
+            if (exactAllowed) {
+                alarmManager.setExactAndAllowWhileIdle(type, triggerAt, pi)
+            } else {
+                alarmManager.setAndAllowWhileIdle(type, triggerAt, pi)
+                logExactAlarmDegraded("PING 精确闹钟权限缺失，已降级为不精确（深睡可能掉线）")
+            }
         } catch (e: Exception) {
-            // 精确闹钟权限缺失等异常：降级非精确（Doze 下可能延迟，由 Paho 自动重连兜底）
-            Log.w(TAG, "精确闹钟失败，降级 set（Doze 下可能延迟，由 Paho 重连兜底）: ${e.message}")
+            // 权限被系统拒绝 / OEM 差异 / Binder 异常：统一降级，绝不让心跳排程因闹钟 API 抛异常而中断
+            Log.w(TAG, "PING 精确闹钟失败，降级不精确: ${e.message}")
             try {
-                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pingPendingIntent())
+                alarmManager.setAndAllowWhileIdle(type, triggerAt, pi)
             } catch (_: Exception) {
             }
+            logExactAlarmDegraded("PING 精确闹钟失败，已降级为不精确（深睡可能掉线）")
         }
+        Log.d(TAG, "已排 PING 闹钟 ${actualDelay}ms（原始 ${delayInMilliseconds}ms /${ALARM_PING_COMPRESS_DIVISOR}）")
     }
 
     private fun pingPendingIntent(): PendingIntent =
@@ -372,6 +400,12 @@ class AlarmPingSender(context: Context) : MqttPingSender {
         /** goAsync 广播硬超时（ms）：钩子线程异常阻塞时也必须归还 PendingResult，
          * 远低于系统前台广播 60s ANR 阈值，避免 ALARM 心跳周期反复触发「DT 没有响应」 */
         private const val PENDING_FINISH_GUARD_MS = 8_000L
+        /** 精确闹钟降级日志去重窗口：与 KeepAliveReceiver.ALARM_GUIDE_INTERVAL_MS 对齐（24h） */
+        private const val DEGRADE_LOG_INTERVAL_MS = 24L * 3600 * 1000L
+
+        /** 进程级去重：保活级别切换会重建本实例，放 companion 可避免重建后重复落盘 */
+        @Volatile
+        private var lastExactAlarmDegradeLogMs = 0L
     }
 }
 
