@@ -509,14 +509,28 @@ object RemoteSnapshot {
             val plans = TaskScheduler.loadTodayTaskPlans(usePersisted = true)
             val notices = DatabaseWrapper.loadCurrentDayNotice()
             val now = System.currentTimeMillis()
-            plans.forEach { plan ->
+            // 方案B：把「考勤打卡成功/超时」通知解析为 (时间戳, 结果) 事件并按时间排序，
+            // 再按时间窗口就近归属到各任务。通知落库时刻必然晚于任务触发时刻，原「精确秒匹配」永远失配。
+            val punchEvents = notices.mapNotNull { n ->
+                val kind = when {
+                    n.noticeMessage?.contains("考勤打卡成功") == true -> "success"
+                    n.noticeMessage?.contains("考勤打卡超时") == true -> "timeout"
+                    else -> return@mapNotNull null
+                }
+                val at = parseNoticeMillis(n.postTime) ?: return@mapNotNull null
+                at to kind
+            }.sortedBy { it.first }
+            plans.forEachIndexed { idx, plan ->
                 val o = JsonObject()
                 o.addProperty("id", plan.task.id)
                 o.addProperty("time", plan.task.time)
                 o.addProperty("name", plan.task.name ?: "")
                 o.addProperty("actualTime", plan.actualTime)
-                o.addProperty("status", taskStatus(plan, now, notices))
-                o.addProperty("statusLabel", taskStatusLabel(plan, now, notices))
+                // 窗口上界 = 下一个任务的触发时刻；末任务用 MAX_VALUE（当天通知列表不含跨天记录，末任务之后的通知归它）
+                val windowEnd = plans.getOrNull(idx + 1)?.actualTimeMillis ?: Long.MAX_VALUE
+                val status = taskStatus(plan.actualTimeMillis, windowEnd, now, punchEvents)
+                o.addProperty("status", status)
+                o.addProperty("statusLabel", statusLabel(status))
                 arr.add(o)
             }
         } catch (_: Exception) {
@@ -524,31 +538,37 @@ object RemoteSnapshot {
         return arr
     }
 
-    private fun taskStatus(plan: TaskScheduler.TaskPlanItem, now: Long, notices: List<com.pengxh.daily.app.sqlite.bean.NotificationBean>): String {
+    /** 解析通知 postTime（"yyyy-MM-dd HH:mm:ss"）为 epoch 毫秒；空/异常返回 null */
+    private fun parseNoticeMillis(postTime: String?): Long? {
+        val v = postTime?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            LocalDateTime.parse(v, dtf).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        }.getOrNull()
+    }
+
+    /**
+     * 方案B：单任务执行结果 = 落在 [actualMillis, windowEnd) 窗口内的第一条打卡通知结果。
+     * 通知 postTime 是「打卡成功确认/超时判定」时刻，必然 >= 任务触发时刻 actualMillis，
+     * 故窗口下界用 actualMillis；上界用下一任务触发时刻，避免把晚到的通知误归到前一任务。
+     */
+    private fun taskStatus(actualMillis: Long, windowEnd: Long, now: Long, punchEvents: List<Pair<Long, String>>): String {
         if (TaskScheduler.isTodaySkipped()) return "skip"
+        // 窗口内成功优先：先超时、后手动补打成功的任务，最终应按成功计（与原「成功优先」判定一致）
+        val inWindow = punchEvents.filter { (at, _) -> at >= actualMillis && at < windowEnd }
         return when {
-            hasNotice(plan.actualTime, notices, "考勤打卡成功") -> "success"
-            hasNotice(plan.actualTime, notices, "考勤打卡超时") -> "timeout"
-            plan.actualTimeMillis > now -> "pending"
+            inWindow.any { it.second == "success" } -> "success"
+            inWindow.any { it.second == "timeout" } -> "timeout"
+            actualMillis > now -> "pending"
             else -> "expired"
         }
     }
 
-    private fun taskStatusLabel(plan: TaskScheduler.TaskPlanItem, now: Long, notices: List<com.pengxh.daily.app.sqlite.bean.NotificationBean>): String {
-        if (TaskScheduler.isTodaySkipped()) return "已跳过"
-        return when {
-            hasNotice(plan.actualTime, notices, "考勤打卡成功") -> "已打卡"
-            hasNotice(plan.actualTime, notices, "考勤打卡超时") -> "超时未确认"
-            plan.actualTimeMillis > now -> "待执行"
-            else -> "已过期"
-        }
-    }
-
-    private fun hasNotice(actualTime: String, notices: List<com.pengxh.daily.app.sqlite.bean.NotificationBean>, keyword: String): Boolean {
-        // actualTime 形如 "09:05:23"，通知 postTime 形如 "2026-08-01 09:05:45"
-        return notices.any { notice ->
-            notice.noticeMessage.contains(keyword) && notice.postTime.contains(" $actualTime")
-        }
+    private fun statusLabel(status: String): String = when (status) {
+        "success" -> "已打卡"
+        "timeout" -> "超时未确认"
+        "skip" -> "已跳过"
+        "pending" -> "待执行"
+        else -> "已过期"
     }
 
     // ===================== 历史记录 =====================
