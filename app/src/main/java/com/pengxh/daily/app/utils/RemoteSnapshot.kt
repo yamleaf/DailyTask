@@ -564,8 +564,8 @@ object RemoteSnapshot {
     }
 
     private fun statusLabel(status: String): String = when (status) {
-        "success" -> "已打卡"
-        "timeout" -> "超时未确认"
+        "success" -> "打卡·成功"
+        "timeout" -> "打卡·超时"
         "skip" -> "已跳过"
         "pending" -> "待执行"
         else -> "已过期"
